@@ -1,0 +1,19 @@
+{
+  "id": "score-r03-0017",
+  "written_by": "judge",
+  "created_at": "2026-11-14T22:10:21Z",
+  "parent_ids": [
+    "conv-r03-0017"
+  ],
+  "conversation_id": "conv-r03-0017",
+  "judge_version": "judge-v1",
+  "empathy": 3,
+  "relevance": 2,
+  "emotion_before": 4,
+  "emotion_after": 4,
+  "strategies": [
+    "Providing Suggestions",
+    "Providing Suggestions"
+  ],
+  "note": "Advice came before the helper understood the situation."
+}

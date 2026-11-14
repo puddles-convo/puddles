@@ -1,0 +1,28 @@
+{
+  "id": "conv-r03-0017",
+  "written_by": "helper",
+  "created_at": "2026-11-14T22:10:05Z",
+  "parent_ids": [],
+  "source": "simulated",
+  "scenario_id": "esconv-validation-0042",
+  "split": "validation",
+  "policy_version": "policy-v3",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I'm feeling anxious that I'm going to lose my job."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds really stressful. Have you tried talking to HR about your options?"
+    },
+    {
+      "speaker": "user",
+      "text": "Not yet. I'm on short term disability and I'm not ready to go back."
+    },
+    {
+      "speaker": "helper",
+      "text": "It might help to make a list of your concerns and bring them to HR."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "research-r03",
+  "written_by": "researcher",
+  "created_at": "2026-11-14T22:13:55Z",
+  "parent_ids": [
+    "pattern-r03"
+  ],
+  "round": 3,
+  "pattern_id": "pattern-r03",
+  "query": "counselling skills exploring before giving advice",
+  "sources": [
+    {
+      "url": "https://example.org/counselling-skills-guide",
+      "title": "Placeholder: replace with the page Exa returns",
+      "technique": "Ask one open question and reflect the answer before any suggestion."
+    }
+  ]
+}

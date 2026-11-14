@@ -4,7 +4,7 @@ A support-conversation helper that improves its own behaviour, built at the SF A
 
 The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.
 
-**Status:** this README is the agreed design. No pipeline code is in this repo yet. The field names in the handoff formats are a proposal for the team to fix before building.
+**Status:** this README is the agreed design. No pipeline code is in this repo yet. The handoff formats are in `schemas.py`, with one example per handoff in `examples/`; the field names are a proposal for the team to fix before building.
 
 This repo holds the training loop and the evaluation. The device and its cloud brain live in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
 
@@ -16,6 +16,7 @@ This repo holds the training loop and the evaluation. The device and its cloud b
 4. [Inference handoffs](#4-inference-handoffs)
 5. [How training and inference connect](#5-how-training-and-inference-connect)
 6. [Data](#6-data)
+7. [Robot side](#7-robot-side)
 
 ## 1. Training
 
@@ -154,7 +155,7 @@ The listener and the speaker are speech components and make no decisions. They a
 - **Training to inference:** exactly one thing, the policy file that last passed the gatekeeper. A policy that fails the safety check never reaches a user.
 - **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training (H2), so the judge can score real sessions without changes.
 - **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
-- **What the brain needs from this repo:** the current policy file. How it is delivered (copied at deploy time or fetched at start-up) is still to be decided.
+- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#7-robot-side).
 
 ## 6. Data
 
@@ -165,6 +166,71 @@ Datasets are loaded at run time and are not committed to this repo.
 | [ESConv](https://huggingface.co/datasets/thu-coai/esconv) | Scenarios for training, and the held-out test | CC BY-NC 4.0 |
 | [CounselBench-Adv](https://huggingface.co/datasets/izi-ano/CounselBench-Adv) | External validation, never seen by the loop | CC BY-NC-ND 4.0 |
 | [VERA-MH](https://github.com/SpringCare/VERA-MH) | Crisis-handling check | Not yet checked |
+
+## 7. Robot side
+
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the five inference blocks from section 3 run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+
+```
++----------------------------+                          +------------------------------------+
+| ROBOT (StackChan)          |                          | CLOUD BRAIN (Modal, one GPU)       |
+|                            |                          |                                    |
+| microphone                 |  --- speech audio --->   | 1. listener: speech to text        |
+|                            |                          | 2. crisis checker                  |
+|                            |    one open WebSocket    | 3. helper + policy file            |
+|                            |                          | 4. speaker: text to speech         |
+| speaker, face, servos      |   <--- reply audio ---   |                                    |
+|                            |                          | 5. note-taker (after session)      |
+| stored crisis audio        |                          |                                    |
++----------------------------+                          +------------------------------------+
+```
+
+### Build it now with a stock model
+
+The robot pair does not wait for training. They build the whole conversation path with a stock model and a placeholder policy, and tune it for delay. When training finishes, the merge is a change of three config values.
+
+| Config value | Now | After the merge |
+|---|---|---|
+| `HELPER_URL` | Stock model endpoint | Same endpoint |
+| `HELPER_MODEL` | Stock Qwen3.5-9B | Same, or the fine-tuned adapter if one exists |
+| `POLICY_PATH` | Five-line placeholder policy | The policy file that passed the gatekeeper |
+
+The policy file is the main thing training produces. A fine-tuned model is optional.
+
+### What the robot pair receives and provides
+
+| Direction | What | Format | When |
+|---|---|---|---|
+| Receives from all | Handoff formats | `schemas.py` | Saturday afternoon |
+| Provides to Team 2 | Helper endpoint URL and model name, so training uses the model the robot runs | URL and model name | Saturday 20:00 |
+| Receives from Team 1 | Crisis checker prompt and fixed hand-off response | Text | Saturday 20:00 |
+| Receives from Team 2 | Final policy file, and the adapter if there is one | Text file, adapter ID | Sunday 09:00 |
+| Provides to Team 1 and 2 | Session records with stage timings | `ConversationRecord` JSON | From the first working conversation |
+| Provides to all | Latency log: median and p95 per stage | `docs/latency.md` in puddles-stack | Updated as they tune |
+
+### Merge points
+
+| When | What has to be true |
+|---|---|
+| Saturday 20:00 | The robot holds a 10-turn conversation with the stock model. Team 2 has the helper endpoint. The robot pair has the crisis text. |
+| Sunday 09:00 | The final policy is set on the robot and the acceptance tests are re-run. |
+| Sunday 11:00 | Dress rehearsal on the robot; demo video recorded. |
+| Sunday 12:30 | Freeze. Submissions close at 14:00. |
+
+### Acceptance tests
+
+These run with the stock model first, so that the merge changes nothing but config.
+
+- Swap: a different model and policy load with no code change.
+- Policy: a new policy file is picked up and its version is reported in the reply.
+- Loopback: recorded audio through the cloud path, without the robot.
+- On device: 10 spoken turns.
+- Long utterance: 15 seconds of speech is not cut off.
+- Crisis: the fixed response plays with the helper off, and with wifi off.
+- Soak: a 15-minute conversation with no crash and no answering itself.
+- Latency: median and p95 from end of speech to first sound, recorded.
+
+Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
 
 ## Limits
 

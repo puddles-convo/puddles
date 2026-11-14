@@ -1,0 +1,20 @@
+{
+  "id": "pattern-r03",
+  "written_by": "critic",
+  "created_at": "2026-11-14T22:12:40Z",
+  "parent_ids": [
+    "score-r03-0017",
+    "score-r03-0021",
+    "score-r03-0033"
+  ],
+  "round": 3,
+  "name": "advice-before-understanding",
+  "description": "Jumps to suggestions in the first reply without asking about the user's circumstances.",
+  "seen_in": 14,
+  "out_of": 40,
+  "example_conversation_ids": [
+    "conv-r03-0017",
+    "conv-r03-0021",
+    "conv-r03-0033"
+  ]
+}

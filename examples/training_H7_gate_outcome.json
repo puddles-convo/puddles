@@ -1,0 +1,23 @@
+{
+  "id": "gate-r03",
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-14T22:21:02Z",
+  "parent_ids": [
+    "edit-r03"
+  ],
+  "round": 3,
+  "edit_id": "edit-r03",
+  "decision": "kept",
+  "before": {
+    "empathy": 3.4,
+    "relevance": 3.1,
+    "emotion_change": 0.6
+  },
+  "after": {
+    "empathy": 3.8,
+    "relevance": 3.7,
+    "emotion_change": 0.9
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v4"
+}
