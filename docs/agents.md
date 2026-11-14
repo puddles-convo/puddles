@@ -2,7 +2,7 @@
 
 What each agent does, with an example prompt, input and output; where the shared memory sits; and how memory turns into policy.
 
-This is a first draft to build from. Scores, counts and sources in the examples are illustrative. Formats named in `code` are in `schemas.py`; section 8 lists what `schemas.py` still needs. The summary tables and step diagrams are in the [README](../README.md); this document has the detail behind them.
+This is a first draft to build from. Scores, counts and sources in the examples are illustrative. Formats named in `code` are in `schemas.py`; section 8 lists what version 2 added. The summary tables and step diagrams are in the [README](../README.md); this document has the detail behind them.
 
 ## 1. Where the memory sits
 
@@ -441,7 +441,7 @@ Reply with only what the person says next.
 
 **Input**
 ```json
-{"scenario": {"scenario_id": "esconv-validation-0042", "emotion_type": "anxiety", "problem_type": "job crisis",
+{"scenario": {"scenario_id": "esconv-validation-0042", "split": "validation", "emotion_type": "anxiety", "problem_type": "job crisis",
               "situation": "I am on short term disability and I am afraid I will lose my job if I don't go back soon.",
               "initial_intensity": 4, "openness": "guarded"},
  "turns": [{"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
@@ -747,7 +747,7 @@ Format: <level> | <category> | <reason in under 12 words>
 ```
 crisis | self | says things would be better if they weren't around
 ```
-Code turns it into a `CheckedMessage`, with the category as a new field. A reply it cannot parse counts as a failed check (section 5).
+Code turns it into a `CheckedMessage`. A reply it cannot parse counts as a failed check (section 5).
 ```json
 {"session_id": "sess-0007", "turn": 4, "text": "Sometimes I wonder if things would be better if I wasn't around any longer.",
  "risk": "crisis", "category": "self", "reason": "says things would be better if they weren't around"}
@@ -812,21 +812,23 @@ Return a JSON list of actions, each with: action, note_id (for replace and delet
 ```
 Code adds the date, `user_id`, `session_id` and new note IDs to make each `UserNote`. It takes `note-user01-002` off the index of live notes, writes the three notes, adds their IDs to the index, and deletes the old data point from past.dev.
 
-## 8. What `schemas.py` still needs
+## 8. What was added to `schemas.py`
 
-None of these are in `schemas.py` yet. They are listed so the formats can be agreed in one place (issue #1).
+`schemas.py` is at version 2 and now holds every format used in this document. Each has an example file in `examples/`, and all of them validate. They are still a proposal to settle under issue #1.
 
-| Addition | Why |
-|---|---|
-| Action, rule ID and rule text on `PolicyEdit` | So the log can be replayed into the expected policy |
-| The `round` and `memory_copy` log events, and the `records/` file layout | For the checks in section 3 |
-| Round outcomes `no_pattern` and `no_evidence` | Rounds that end without an edit |
-| `found` and `same_as_pattern_id` on the critic's output | The "nothing clear" branch and recurrence |
-| `queries` (a list) on `ResearchNote` | It has a single `query` today |
-| `openness` on the scenario | Used by the simulated user |
-| `category` on `CheckedMessage` | Chooses the fixed response |
-| `remember_me` and `consent_for_training` on the session record | The consent table in section 3 |
-| `action` and `note_id` for note changes, and the index of live notes | Replace, delete and forget |
-| A judge input that carries turns only | Keeps the judge blind |
-| The policy `.meta.json` format and the safety case file format | Rule provenance and the gate's safety checks |
-
+| Addition | Model | Why |
+|---|---|---|
+| Action, rule ID and rule text on an edit | `PolicyEdit`, `ProposerOutput` | So the log can be replayed into the expected policy |
+| The two log events and the pointer to a record file | `RoundEvent`, `MemoryCopyEvent`, `RecordRef` | For the checks in section 3 |
+| Round outcomes `no_pattern` and `no_evidence` | `RoundEvent` | Rounds that end without an edit |
+| "Nothing found" and recurrence from the critic | `CriticOutput`, `FailurePattern` | The early-ending branch, and reusing a pattern's ID |
+| A list of queries | `ResearchNote`, `ResearcherOutput` | Version 1 had a single `query` |
+| The scenario, with `openness` | `Scenario` | Used by the simulated user |
+| A crisis `category` | `CheckedMessage` | Chooses the fixed response |
+| `remember_me` and `consent_for_training` | `ConversationRecord` | The consent table in section 3 |
+| Note changes and the index of live notes | `NoteAction`, `LiveNoteIndex` | Replace, delete and forget |
+| A judge input that carries turns only | `JudgeInput`, `JudgeOutput` | Keeps the judge blind |
+| Rule provenance | `PolicyMeta` | The `.meta.json` file |
+| Safety cases and their results | `SafetyCase`, `SafetyResult` | The gate's safety checks |
+| The gatekeeper's input | `GateInput` | Scores, noise and the cap in one place |
+| One past.dev entry | `MemoryEntry` | The shape in the README, section 5 |

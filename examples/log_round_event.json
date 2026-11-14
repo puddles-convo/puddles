@@ -1,0 +1,67 @@
+{
+  "event": "round",
+  "round": 3,
+  "outcome": "kept",
+  "records": {
+    "pattern": {
+      "id": "pattern-r03",
+      "path": "records/round-03/pattern-r03.json",
+      "sha256": "(hash)"
+    },
+    "research": {
+      "id": "research-r03",
+      "path": "records/round-03/research-r03.json",
+      "sha256": "(hash)"
+    },
+    "edit": {
+      "id": "edit-r03",
+      "path": "records/round-03/edit-r03.json",
+      "sha256": "(hash)"
+    },
+    "outcome": {
+      "id": "gate-r03",
+      "path": "records/round-03/gate-r03.json",
+      "sha256": "(hash)"
+    }
+  },
+  "pattern": {
+    "id": "pattern-r03",
+    "name": "advice-before-understanding",
+    "seen_in": 2,
+    "out_of": 3,
+    "status_before": "open"
+  },
+  "edit": {
+    "id": "edit-r03",
+    "action": "add",
+    "rule_id": "C2",
+    "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."
+  },
+  "policy": {
+    "base": "policy-v3",
+    "base_sha256": "(hash)",
+    "new": "policy-v4",
+    "new_sha256": "(hash)",
+    "in_force": "policy-v4"
+  },
+  "scores": {
+    "before": {
+      "empathy": 3.4,
+      "relevance": 3.1,
+      "quality": 3.25
+    },
+    "after": {
+      "empathy": 3.8,
+      "relevance": 3.7,
+      "quality": 3.75
+    },
+    "noise": 0.15
+  },
+  "safety": {
+    "case_file": "safety-v1.json",
+    "passed": true,
+    "cases": 18,
+    "failed_case_ids": []
+  },
+  "reason": "Quality rose by 0.50, above the noise of 0.15; no dimension fell; all safety cases passed."
+}

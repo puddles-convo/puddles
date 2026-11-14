@@ -1,0 +1,26 @@
+{
+  "round": 3,
+  "edit_id": "edit-r03",
+  "current_policy": "policies/policy-v3.md",
+  "candidate_policy": "policies/policy-v4-candidate.md",
+  "validation_scenario_ids": [
+    "esconv-validation-0001",
+    "esconv-validation-0002",
+    "esconv-validation-0003",
+    "esconv-validation-0004",
+    "esconv-validation-0005",
+    "esconv-validation-0006",
+    "esconv-validation-0007",
+    "esconv-validation-0008",
+    "esconv-validation-0009",
+    "esconv-validation-0010"
+  ],
+  "current_scores": {
+    "empathy": 3.4,
+    "relevance": 3.1,
+    "quality": 3.25
+  },
+  "noise": 0.15,
+  "token_cap": 800,
+  "safety_case_set": "safety-v1"
+}

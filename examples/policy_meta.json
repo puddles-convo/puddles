@@ -1,0 +1,36 @@
+{
+  "policy_version": "policy-v4",
+  "parent": "policy-v3",
+  "policy_sha256": "(hash of the policy file)",
+  "safety_sha256": "(hash of the Safety section; the same in every version)",
+  "base_rules": [
+    "C1",
+    "C3",
+    "C6",
+    "C7",
+    "C8"
+  ],
+  "learned_rules": {
+    "C4": {
+      "edit": "edit-r01",
+      "action": "reword",
+      "pattern": "pattern-r01",
+      "round": 1,
+      "text_sha256": "(hash of the rule text)"
+    },
+    "C5": {
+      "edit": "edit-r02",
+      "action": "add",
+      "pattern": "pattern-r02",
+      "round": 2,
+      "text_sha256": "(hash of the rule text)"
+    },
+    "C2": {
+      "edit": "edit-r03",
+      "action": "add",
+      "pattern": "pattern-r03",
+      "round": 3,
+      "text_sha256": "(hash of the rule text)"
+    }
+  }
+}

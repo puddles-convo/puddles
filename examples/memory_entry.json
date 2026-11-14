@@ -1,0 +1,14 @@
+{
+  "id": "pattern-r03",
+  "content": "Failure pattern pattern-r03, advice-before-understanding, round 3: the helper gives suggestions in its first reply without asking about the person's circumstances. Seen in 2 of the 3 lowest-scoring conversations reviewed.",
+  "label": "critic: failure pattern, round 3",
+  "timestamp": "2026-11-14T22:12:40Z",
+  "identity": "critic",
+  "audience": "training-agents",
+  "metadata": {
+    "type": "failure_pattern",
+    "round": 3,
+    "record_path": "records/round-03/pattern-r03.json",
+    "sha256": "(hash of the record file)"
+  }
+}

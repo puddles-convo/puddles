@@ -1,0 +1,11 @@
+{
+  "empathy": 3,
+  "relevance": 2,
+  "emotion_before": 4,
+  "emotion_after": 4,
+  "strategies": [
+    "Providing Suggestions",
+    "Providing Suggestions"
+  ],
+  "note": "In the first helper turn the helper suggested HR before asking anything about the person's situation."
+}

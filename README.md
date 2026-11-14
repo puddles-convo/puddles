@@ -7,7 +7,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 **Status:** this README is the agreed design. No pipeline code is in this repo yet. Scores, counts and sources in the examples are illustrative.
 
 - The prompt for every agent, with full example inputs and outputs: [docs/agents.md](docs/agents.md)
-- Record formats: `schemas.py`, with one example per handoff in `examples/`. It does not yet have the additions listed in [docs/agents.md, section 8](docs/agents.md#8-what-schemaspy-still-needs).
+- Record formats: `schemas.py` (version 2), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
 ## Contents

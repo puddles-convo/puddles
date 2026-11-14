@@ -1,0 +1,9 @@
+{
+  "scenario_id": "esconv-validation-0042",
+  "split": "validation",
+  "emotion_type": "anxiety",
+  "problem_type": "job crisis",
+  "situation": "I am on short term disability and I am afraid I will lose my job if I don't go back soon.",
+  "initial_intensity": 4,
+  "openness": "guarded"
+}

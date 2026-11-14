@@ -1,0 +1,13 @@
+{
+  "found": true,
+  "name": "advice-before-understanding",
+  "description": "Gives a suggestion in its first reply without asking about the person's circumstances.",
+  "seen_in": 2,
+  "out_of": 3,
+  "example_conversation_ids": [
+    "conv-r03-0017",
+    "conv-r03-0021"
+  ],
+  "same_as_pattern_id": null,
+  "reason": ""
+}

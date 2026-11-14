@@ -1,0 +1,6 @@
+{
+  "action": "add",
+  "rule_id": null,
+  "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits.",
+  "summary": "Add a rule to ask one open question and hold suggestions for the first two replies."
+}
