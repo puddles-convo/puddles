@@ -1,0 +1,15 @@
+{
+  "session_id": "sess-0007",
+  "turn": 4,
+  "recent_turns": [
+    {
+      "speaker": "user",
+      "text": "Nothing I do ever seems to go right."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds exhausting. What happened most recently?"
+    }
+  ],
+  "text": "Sometimes I wonder if things would be better if I wasn't around any longer."
+}

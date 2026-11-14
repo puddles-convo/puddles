@@ -1,0 +1,11 @@
+{
+  "pattern": {
+    "id": "pattern-r03",
+    "name": "advice-before-understanding",
+    "description": "Gives a suggestion in its first reply without asking about the person's circumstances."
+  },
+  "earlier_queries": [
+    "how long should a counsellor's responses be",
+    "offering choices in counselling"
+  ]
+}

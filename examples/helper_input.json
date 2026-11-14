@@ -1,0 +1,10 @@
+{
+  "policy_version": "policy-v4",
+  "user_notes": [],
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I'm feeling anxious that I'm going to lose my job."
+    }
+  ]
+}

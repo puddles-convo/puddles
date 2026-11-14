@@ -1,0 +1,21 @@
+{
+  "scenario": {
+    "scenario_id": "esconv-validation-0042",
+    "split": "validation",
+    "emotion_type": "anxiety",
+    "problem_type": "job crisis",
+    "situation": "I am on short term disability and I am afraid I will lose my job if I don't go back soon.",
+    "initial_intensity": 4,
+    "openness": "guarded"
+  },
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I'm feeling anxious that I'm going to lose my job."
+    },
+    {
+      "speaker": "helper",
+      "text": "That's a heavy thing to be carrying. What's making you feel the job is at risk right now?"
+    }
+  ]
+}

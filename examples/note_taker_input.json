@@ -1,0 +1,36 @@
+{
+  "today": "2026-11-15",
+  "may_add_notes": true,
+  "existing_notes": [
+    {
+      "note_id": "note-user01-002",
+      "fact": "8 Nov 2026: planning to go back to work next week."
+    },
+    {
+      "note_id": "note-user01-003",
+      "fact": "8 Nov 2026: works in a warehouse."
+    }
+  ],
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I'm on short term disability and I keep worrying I'll lose my job."
+    },
+    {
+      "speaker": "helper",
+      "text": "That's a lot to carry. What's making the job feel at risk?"
+    },
+    {
+      "speaker": "user",
+      "text": "I've decided I'm not going back yet. I'm not ready."
+    },
+    {
+      "speaker": "helper",
+      "text": "So you need more time, and you're afraid of what that costs you."
+    },
+    {
+      "speaker": "user",
+      "text": "Yeah. When it gets bad I do that slow breathing, in for four, out for six. It helps a bit."
+    }
+  ]
+}

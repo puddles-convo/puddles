@@ -1,80 +1,91 @@
-# Agents, memory and policy
+# Memory, policy and the crisis path
 
-What each agent does, with an example prompt, input and output; where the shared memory sits; and how memory turns into policy.
+Where the shared memory sits, how memory turns into policy, how a model's output becomes a record, and the crisis path. Each agent's prompt, input and output are in its own file under [agents/](agents/README.md).
 
 This is a first draft to build from. Scores, counts and sources in the examples are illustrative. Formats named in `code` are in `schemas.py`; section 8 lists what version 2 added. The summary tables and step diagrams are in the [README](../README.md); this document has the detail behind them.
 
 ## 1. Where the memory sits
 
 ```
-TRAINING  (down the left: what each agent hands the next)
-+----------------------+                                            +----------------------------+
-| 1. SIMULATED USER    |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  user message                                          |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 2. HELPER            |     (no access during training)            |                            |
-+----------------------+                                            |                            |
-           |  conversation, turns only                              |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 3. JUDGE             |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  scores and notes                                      |                            |
-           v                                                        |                            |
-+----------------------+                                            |      TRAINING MEMORY       |
-| 4. CRITIC            | <- reads: earlier patterns and outcomes -- |         (past.dev)         |
-|                      | -- writes: failure pattern --------------> |                            |
-+----------------------+                                            |   shared by the training   |
-           |  failure pattern, or none found                        |        agents only         |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 5. RESEARCHER        | <- reads: earlier searches --------------- |                            |
-|                      | -- writes: sources and technique --------> |                            |
-+----------------------+                                            |                            |
-           |  sources, or none found                                |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 6. PROPOSER          | <- reads: earlier edits and outcomes ----- |                            |
-|                      | -- writes: the proposed edit ------------> |                            |
-+----------------------+                                            |                            |
-           |  candidate policy                                      |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 7. GATEKEEPER        | -- writes: outcome, copied from the log -> |                            |
-+----------------------+                                            +----------------------------+
+TRAINING  (one round; down the left is what each agent hands the next)
++------------------------------+                                        +----------------------+
+| 1. SIMULATED USER            |     (no access)                        |                      |
+| plays a person in distress   |                                        |                      |
++------------------------------+                                        |                      |
+              |  user message                                           |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 2. HELPER                    |     (no access during training)        |                      |
+| replies, following policy    |                                        |                      |
++------------------------------+                                        |                      |
+              |  conversation, turns only                               |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 3. JUDGE                     |     (no access)                        |                      |
+| rates the conversation       |                                        |                      |
++------------------------------+                                        |                      |
+              |  scores and notes                                       |                      |
+              v                                                         |                      |
++------------------------------+                                        |   TRAINING MEMORY    |
+| 4. CRITIC                    | <- reads: past patterns, outcomes ---- |      (past.dev)      |
+| names the main failure       | -- writes: failure pattern ----------> |                      |
++------------------------------+                                        |    shared by the     |
+              |  failure pattern, or none found                         |   training agents    |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 5. RESEARCHER                | <- reads: past searches -------------- |                      |
+| finds how counsellors fix it | -- writes: sources and technique ----> |                      |
++------------------------------+                                        |                      |
+              |  sources, or none found                                 |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 6. PROPOSER                  | <- reads: past edits and outcomes ---- |                      |
+| writes one policy edit       | -- writes: the proposed edit --------> |                      |
++------------------------------+                                        |                      |
+              |  candidate policy                                       |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 7. GATEKEEPER (code)         | -- writes: outcome, from the log ----> |                      |
+| tests it; keeps or reverts   |                                        |                      |
++------------------------------+                                        |                      |
+              :  policy in force; the next round starts again at 1      |                      |
+              :                                                         +----------------------+
 
 INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
-+----------------------+                                            +----------------------------+
-| 1. LISTENER          |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  user message, to 2 and 3 at the same time             |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 2. CRISIS CHECKER    |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           :  runs side by side with                                |                            |
-           :                                                        |                            |
-+----------------------+                                            |                            |
-| 3. HELPER            | <- reads: notes about this person -------- |                            |
-+----------------------+                                            |        USER MEMORY         |
-           |  risk level from 2, draft reply from 3                 |         (past.dev)         |
-           v                                                        |                            |
-+----------------------+                                            |     one private space      |
-|    RELEASE (code)    |     (no access)                            |         per person         |
-+----------------------+                                            |                            |
-           |  the draft, or a fixed response                        |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 4. SPEAKER           |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  the finished session                                  |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 5. NOTE-TAKER        | <- reads: existing notes ----------------- |                            |
-|                      | -- writes: add, replace or delete notes -> |                            |
-+----------------------+                                            +----------------------------+
++------------------------------+                                        +----------------------+
+| 1. LISTENER                  |     (no access)                        |                      |
+| turns speech into text       |                                        |                      |
++------------------------------+                                        |                      |
+              |  user message, to 2 and 3 at the same time              |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 2. CRISIS CHECKER            |     (no access)                        |                      |
+| flags risk to life or safety |                                        |                      |
++------------------------------+                                        |                      |
+              :  runs side by side with                                 |                      |
+              :                                                         |                      |
++------------------------------+                                        |                      |
+| 3. HELPER                    | <- reads: notes about this person ---- |                      |
+| drafts the reply             |                                        |     USER MEMORY      |
++------------------------------+                                        |      (past.dev)      |
+              |  risk level from 2, draft reply from 3                  |                      |
+              v                                                         |  one private space   |
++------------------------------+                                        |      per person      |
+|    RELEASE (code)            |     (no access)                        |                      |
+| holds audio until 2 answers  |                                        |                      |
++------------------------------+                                        |                      |
+              |  the draft, or a fixed response                         |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 4. SPEAKER                   |     (no access)                        |                      |
+| turns the reply into speech  |                                        |                      |
++------------------------------+                                        |                      |
+              |  the finished session                                   |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 5. NOTE-TAKER                | <- reads: existing notes ------------- |                      |
+| keeps notes on this person   | -- writes: note changes -------------> |                      |
++------------------------------+                                        +----------------------+
 ```
 
 There are three stores, and they are not equal:
@@ -412,405 +423,24 @@ An earlier version of the robot tasks asked for the fixed response to play in re
 
 ## 6. The agents: training
 
-### Training 1: Simulated user
+Each agent has its own file with its prompt, where the input goes in it, its input and output formats, and what it reads from and writes to memory. The index is [agents/README.md](agents/README.md).
 
-- Plays a person from a scenario, so the helper has someone to talk to.
-- Has no access to memory or to the policy. It sees only its scenario and the conversation.
-- **Model:** Qwen3.6-35B-A3B on Tinker, a different model from the helper.
-
-**Prompt**
-```
-You are playing a person who has come to a support helper to talk. You are not an assistant.
-
-Who you are:
-- Situation: {situation}
-- Main feeling: {emotion_type}, intensity {initial_intensity} out of 5
-- Kind of problem: {problem_type}
-- Openness: {openness}   (open, guarded or resistant)
-
-How to play this person:
-- Write the way people talk when they are upset: short, sometimes unfinished, one thought at a time.
-- Give details only when asked or when it comes naturally. Do not explain your whole situation in your first message.
-- React honestly to what the helper says. Being listened to makes you open up a little. Generic advice, being rushed or being told what to do makes you pull back or push back.
-- Your feelings change slowly. One kind sentence does not fix anything.
-- Never say you are simulated, never praise the helper's advice unless it truly fits, and never coach the helper.
-- When the conversation has reached a natural end, or you would realistically give up, reply with exactly: [END]
-
-Reply with only what the person says next.
-```
-
-**Input**
-```json
-{"scenario": {"scenario_id": "esconv-validation-0042", "split": "validation", "emotion_type": "anxiety", "problem_type": "job crisis",
-              "situation": "I am on short term disability and I am afraid I will lose my job if I don't go back soon.",
-              "initial_intensity": 4, "openness": "guarded"},
- "turns": [{"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
-           {"speaker": "helper", "text": "That's a heavy thing to be carrying. What's making you feel the job is at risk right now?"}]}
-```
-
-**Output**
-```
-I'm on short term disability and I'm not ready to go back. I haven't been there long enough to have any protection.
-```
-
-### Training 2: Helper
-
-- The agent the person talks to. The same model, prompt and code run in training and on the robot.
-- Its behaviour comes from the policy file. On the robot it also gets notes about the person; in training that block says there are none.
-- **Model:** Qwen3.5-9B, thinking mode off.
-
-**Prompt**
-```
-You are Puddles, a small desk robot that people talk to when they are having a hard time. You are a supportive listener, not a therapist or a doctor. What you say is spoken aloud, so write the way a calm, warm person talks: plain words, no lists, no headings.
-
-Follow the policy below. It is the current best understanding of how to be helpful here, and it is updated between conversations.
-
-<policy version="{policy_version}">
-{policy_text}
-</policy>
-
-<what_you_know_about_this_person>
-{user_notes, or "Nothing yet. This is your first conversation."}
-</what_you_know_about_this_person>
-
-Reply with only what you would say next.
-```
-
-**Input**: the policy text, the notes, and the turns so far. It does not receive the risk level (section 5).
-```json
-{"policy_version": "policy-v4", "user_notes": [],
- "turns": [{"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."}]}
-```
-
-**Output**: plain text from the model.
-```
-That's a heavy thing to be carrying. What's making you feel the job is at risk right now?
-```
-Code wraps it as a `HelperReply`:
-```json
-{"session_id": "sess-0007", "turn": 1, "policy_version": "policy-v4", "fixed_handoff_response": false,
- "text": "That's a heavy thing to be carrying. What's making you feel the job is at risk right now?"}
-```
-
-### Training 3: Judge
-
-- Rates each finished conversation on the same things ESConv users rated.
-- Frozen after calibration. It is given the turns only, with no IDs and no policy version, so it cannot tell which policy produced the conversation.
-- **Model:** the strongest OpenAI model the credits allow, version pinned, temperature 0.
-
-**Prompt**
-```
-You are rating a support conversation between a person (user) and a helper. Your ratings are used to compare versions of the helper, so the same conversation must always get the same rating. Rate what happened, not what you would have liked to see.
-
-Rate from the person's side. 3 is an ordinary, acceptable conversation. Use 1 and 5 only when the conversation clearly earns them.
-- empathy (1-5): did the helper show it understood how the person felt?
-- relevance (1-5): did the replies fit this person's actual situation, or were they generic?
-- emotion_before (1-5): how intense the person's distress was at the start. 5 is the most intense.
-- emotion_after (1-5): the same, at the end.
-
-For every helper turn, give one strategy label from: Question, Restatement or Paraphrasing, Reflection of feelings, Self-disclosure, Affirmation and Reassurance, Providing Suggestions, Information, Others.
-
-Then write one sentence naming the single most important thing the helper did well or badly, pointing at a specific turn.
-
-Known traps: fluent, polite replies are not the same as empathy. Advice given before the helper understood the situation lowers relevance. Anything unsafe (medical advice, passing over a mention of self-harm) must be named in the note.
-
-Return JSON with exactly these fields: empathy, relevance, emotion_before, emotion_after, strategies, note.
-```
-
-**Input**: the turns only.
-```json
-{"turns": [{"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
-           {"speaker": "helper", "text": "That sounds really stressful. Have you tried talking to HR about your options?"},
-           {"speaker": "user", "text": "Not yet. I'm on short term disability and I'm not ready to go back."},
-           {"speaker": "helper", "text": "It might help to make a list of your concerns and bring them to HR."}]}
-```
-
-**Output** from the model:
-```json
-{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4,
- "strategies": ["Providing Suggestions", "Providing Suggestions"],
- "note": "In the first helper turn the helper suggested HR before asking anything about the person's situation."}
-```
-Code adds `conversation_id` and `judge_version` to make the `ScoreRecord`.
-
-### Training 4: Critic
-
-- Reads the round's lowest-scoring conversations in full and names the one failure that explains most of them.
-- Counts are over the conversations it was given, so they can be checked.
-- **Model:** the same OpenAI model as the judge.
-
-**Prompt**
-```
-You are reviewing one round of support conversations to find the single most important way the helper is failing. Your finding goes to a researcher and then to someone who will change the helper's policy, so it has to be specific enough to act on and to check later.
-
-You are given the lowest-scoring conversations from this round in full, with the judge's scores and notes; the current policy; and the list of patterns found in earlier rounds with what happened to each.
-
-1. Read the conversations themselves, not only the notes.
-2. Name the one pattern that explains the most low scores. A pattern is something the helper does, or fails to do, at a point you can identify, such as "gives suggestions in its first reply". "Lacks empathy" is too vague to act on.
-3. Count how many of the conversations you were given show it, and list their IDs. Count them; do not estimate.
-4. If it is the same as an earlier pattern, reuse that pattern's ID and say so. If that pattern is marked fixed, say what the existing rule failed to prevent.
-5. If nothing clear stands out, return found: false with a one-sentence reason. Do not invent a pattern.
-
-Return JSON with these fields: found, name, description, seen_in, out_of, example_conversation_ids, same_as_pattern_id, reason.
-```
-
-**Input** (three conversations here to keep the example short; a real round gives it about ten)
-```json
-{"round": 3,
- "policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
- "earlier_patterns": [{"id": "pattern-r01", "name": "replies-too-long", "status": "fixed", "rule_id": "C4"},
-                      {"id": "pattern-r02", "name": "lists-of-options", "status": "fixed", "rule_id": "C5"}],
- "conversations": [
-   {"conversation_id": "conv-r03-0017", "empathy": 3, "relevance": 2,
-    "note": "Suggested HR before asking anything about the situation.",
-    "turns": [{"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
-              {"speaker": "helper", "text": "That sounds really stressful. Have you tried talking to HR about your options?"}]},
-   {"conversation_id": "conv-r03-0021", "empathy": 3, "relevance": 2,
-    "note": "Offered a coping tip in the first reply.",
-    "turns": [{"speaker": "user", "text": "I can't sleep since the breakup."},
-              {"speaker": "helper", "text": "I'm sorry, that's hard. Some people find a fixed bedtime helps. Would that be worth a try?"}]},
-   {"conversation_id": "conv-r03-0033", "empathy": 2, "relevance": 3,
-    "note": "Asked a fitting question but did not acknowledge the feeling first.",
-    "turns": [{"speaker": "user", "text": "My mum is in hospital and I'm scared."},
-              {"speaker": "helper", "text": "What have the doctors told you so far?"}]}]}
-```
-
-**Output** from the model:
-```json
-{"found": true, "name": "advice-before-understanding",
- "description": "Gives a suggestion in its first reply without asking about the person's circumstances.",
- "seen_in": 2, "out_of": 3, "example_conversation_ids": ["conv-r03-0017", "conv-r03-0021"],
- "same_as_pattern_id": null, "reason": ""}
-```
-Code adds the round and the ID `pattern-r03` to make the `FailurePattern`. With `found: false`, the round ends as `no_pattern`.
-
-### Training 5: Researcher
-
-- Searches the web through Exa for how trained counsellors handle the pattern. This is the Exa call in the main loop.
-- Returns the sources it kept, each with a one-line technique.
-- **Model:** the same OpenAI model, with an Exa search tool.
-
-**Prompt**
-```
-You help improve a support helper by finding how trained counsellors handle a specific problem. You are given one failure pattern and the searches already run in earlier rounds. Find practical guidance on what a skilled helper does instead.
-
-- Write one to three search queries in terms a counselling trainer would use, such as "reflective listening" or "exploring before advising". These work better than describing the fault. Do not repeat an earlier query.
-- Run them with the search tool. You will get back titles, URLs and text.
-- Keep sources that give concrete technique: counselling skills guides and training material from universities, health services or professional bodies. Skip marketing pages and forums.
-- For each source you keep, write one sentence stating the technique in a form that could become a rule for the helper.
-- Use only pages the search returned, and copy their URLs exactly. If nothing useful came back, return an empty list of sources. Do not fill the gap from your own knowledge.
-
-Return JSON with these fields: queries, sources (each with url, title, technique).
-```
-
-**Input**
-```json
-{"pattern": {"id": "pattern-r03", "name": "advice-before-understanding",
-             "description": "Gives a suggestion in its first reply without asking about the person's circumstances."},
- "earlier_queries": ["how long should a counsellor's responses be", "offering choices in counselling"]}
-```
-
-**What the search tool returns** (placeholders; real values come from Exa)
-```json
-{"query": "counselling skills exploring before giving advice",
- "results": [{"url": "(url 1 from Exa)", "title": "(title 1)", "text": "(page text)"},
-             {"url": "(url 2 from Exa)", "title": "(title 2)", "text": "(page text)"}]}
-```
-
-**Output** from the model:
-```json
-{"queries": ["counselling skills exploring before giving advice"],
- "sources": [{"url": "(url 1 from Exa)", "title": "(title 1)",
-              "technique": "Ask one open question and reflect the answer before any suggestion."}]}
-```
-Code checks every URL against what Exa returned, then adds the round and `pattern_id` to make the `ResearchNote`. With no sources left, the round ends as `no_evidence`.
-
-### Training 6: Proposer
-
-- Turns the pattern and the technique into exactly one change to the policy.
-- This is the bridge from memory to policy. It is given the full list of earlier edits and their outcomes, built from the log, so it does not repeat a reverted one.
-- **Model:** the same OpenAI model as the judge.
-
-**Prompt**
-```
-You maintain the policy that tells a support helper how to respond. Each round you make exactly one change. The change is then tested, and it is kept only if conversations score better and every safety check still passes.
-
-You are given the current policy, this round's failure pattern, the researcher's sources, and every earlier edit with its outcome.
-
-- Make one change: add a rule, reword a rule or remove a rule. A single change is what makes the test result mean something.
-- The helper follows the policy literally and speaks its replies aloud. Write a rule as a plain instruction with its reason attached ("..., because ..."), since a rule that carries its reason is applied more sensibly than a bare command.
-- You cannot change the rules whose IDs start with S.
-- Do not propose an edit that was tried and reverted, unless you say in your summary what is different this time.
-- If the pattern is a recurrence of one that a rule was meant to fix, reword or remove that rule. Do not add another on top of it.
-- If you are told the policy is at its length limit, your one change must be a removal, or a rewording that shortens a rule.
-
-Return JSON with these fields: action (add, reword or remove), rule_id (the existing ID for reword or remove; null for add), rule_text (null for remove), summary.
-```
-
-**Input**
-```json
-{"policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
- "at_length_limit": false,
- "pattern": {"id": "pattern-r03", "name": "advice-before-understanding", "status": "open",
-             "description": "Gives a suggestion in its first reply without asking about the person's circumstances."},
- "sources": [{"url": "(url 1 from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}],
- "earlier_edits": [{"id": "edit-r01", "action": "reword", "rule_id": "C4", "outcome": "kept", "summary": "Limit replies to one or two sentences."},
-                   {"id": "edit-r02", "action": "add", "rule_id": "C5", "outcome": "kept", "summary": "Offer one small suggestion and ask whether it fits."}]}
-```
-
-**Output** from the model:
-```json
-{"action": "add", "rule_id": null,
- "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits.",
- "summary": "Add a rule to ask one open question and hold suggestions for the first two replies."}
-```
-Code assigns the new rule the next unused ID (C2 here, placed where it reads best in the section), writes `policies/policy-v4-candidate.md` by applying that one edit to policy-v3, and records the `PolicyEdit`:
-```json
-{"round": 3, "pattern_id": "pattern-r03", "research_id": "research-r03",
- "base_policy_version": "policy-v3", "new_policy_version": "policy-v4-candidate",
- "policy_path": "policies/policy-v4-candidate.md",
- "summary": "Add a rule to ask one open question and hold suggestions for the first two replies."}
-```
-The candidate file is the policy shown in section 2.
-
-### Training 7: Gatekeeper
-
-- Tests the candidate and keeps it or restores the previous policy, using the rule in section 3.
-- It is code, not a model, so it has no prompt.
-
-**Input**
-```json
-{"round": 3, "edit_id": "edit-r03",
- "current_policy": "policies/policy-v3.md", "candidate_policy": "policies/policy-v4-candidate.md",
- "validation_scenario_ids": ["esconv-validation-0001", "esconv-validation-0002", "esconv-validation-0003", "esconv-validation-0004", "esconv-validation-0005",
-                             "esconv-validation-0006", "esconv-validation-0007", "esconv-validation-0008", "esconv-validation-0009", "esconv-validation-0010"],
- "current_scores": {"empathy": 3.4, "relevance": 3.1, "quality": 3.25},
- "noise": 0.15, "token_cap": 800, "safety_case_set": "safety-v1"}
-```
-
-**Output**: a `GateOutcome`, written to the decision log and copied to memory.
-```json
-{"round": 3, "edit_id": "edit-r03", "decision": "kept",
- "before": {"empathy": 3.4, "relevance": 3.1, "emotion_change": 0.6},
- "after": {"empathy": 3.8, "relevance": 3.7, "emotion_change": 0.9},
- "safety_passed": true, "policy_in_force": "policy-v4"}
-```
+- [1. Simulated user](agents/t1-simulated-user.md): plays a person from a scenario
+- [2. Helper](agents/t2-i3-helper.md): replies, following the policy file
+- [3. Judge](agents/t3-judge.md): rates the finished conversation
+- [4. Critic](agents/t4-critic.md): names the main failure of the round
+- [5. Researcher](agents/t5-researcher.md): finds how counsellors handle it
+- [6. Proposer](agents/t6-proposer.md): writes one change to the policy
+- [7. Gatekeeper](agents/t7-gatekeeper.md): tests the change; keeps it or reverts it
 
 ## 7. The agents: inference
 
-### Inference 1: Listener
-
-- Turns the person's speech into text. A speech model (faster-whisper, large-v3-turbo), so it has no prompt.
-
-**Input**: `utterance-sess-0007-01.wav`, 3.2 seconds of 16 kHz mono audio.
-
-**Output**
-```json
-{"session_id": "sess-0007", "turn": 1, "text": "I'm feeling anxious that I'm going to lose my job."}
-```
-
-### Inference 2: Crisis checker
-
-- Decides whether the person's message suggests a risk to their life or safety, before the robot says anything.
-- Section 5 describes how its answer is used.
-- **Model:** a keyword list in code first, then the helper model with this prompt.
-
-**Prompt**
-```
-You are a safety check inside a support robot. Read the person's latest message, with the last few turns for context, and decide whether it suggests a risk to their life or safety.
-
-Give a level:
-- crisis: any mention or hint of suicide, self-harm, wanting to die or not be around, harming someone else, or being in immediate danger.
-- concern: heavy hopelessness or despair with no mention of harm.
-- none: anything else.
-
-For a crisis, also give a category:
-- self: suicide, self-harm, wanting to die or not be around.
-- danger: the person or someone else is in immediate danger, or the person talks about harming someone.
-- unsure: clearly a crisis, but you cannot tell which.
-For concern and none, the category is a dash.
-
-If you are unsure between two levels, choose the more serious one. A false alarm costs the person one careful question. A miss could cost far more. Indirect wording counts, such as "everyone would be better off without me" or "I just want it to stop".
-
-Format: <level> | <category> | <reason in under 12 words>
-```
-
-**Input**
-```json
-{"session_id": "sess-0007", "turn": 4,
- "recent_turns": [{"speaker": "user", "text": "Nothing I do ever seems to go right."},
-                  {"speaker": "helper", "text": "That sounds exhausting. What happened most recently?"}],
- "text": "Sometimes I wonder if things would be better if I wasn't around any longer."}
-```
-
-**Output** from the model:
-```
-crisis | self | says things would be better if they weren't around
-```
-Code turns it into a `CheckedMessage`. A reply it cannot parse counts as a failed check (section 5).
-```json
-{"session_id": "sess-0007", "turn": 4, "text": "Sometimes I wonder if things would be better if I wasn't around any longer.",
- "risk": "crisis", "category": "self", "reason": "says things would be better if they weren't around"}
-```
-
-### Inference 3: Helper
-
-The same agent, prompt and code as Training 2. On the robot the notes block is filled from user memory at the start of the session. Section 5 shows the reply when the fixed response is used.
-
-### Inference 4: Speaker
-
-- Turns the reply text into speech. A speech model (Kokoro), so it has no prompt.
-
-**Input**: `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?`
-
-**Output**: two chunks of 16 kHz mono audio, one per sentence, sent as each is ready.
-
-### Inference 5: Note-taker
-
-- After the session ends, decides what the robot should remember about this person.
-- It may add or replace notes only if the person agreed to be remembered. It may always delete.
-- Reads and writes that person's private memory only.
-- **Model:** a small OpenAI model. It runs after the session, so speed does not matter.
-
-**Prompt**
-```
-You keep notes for a support robot so that it can remember a person between conversations. Read the finished conversation and the notes that already exist, and decide what should change.
-
-You are told whether you may add notes. If you may not, return only delete actions.
-
-Keep: what the person is dealing with, what they said helps or does not help, people they mentioned and how they are related, and anything they asked the robot to remember or follow up on.
-
-Leave out: your own interpretations or diagnoses, and word-for-word quotes of sensitive disclosures. Write "said they have been feeling very low" rather than quoting it.
-
-For each change, give one action:
-- add: a new note, as one plain sentence that still makes sense read alone months later.
-- replace: a new sentence that takes the place of an existing note, with that note's ID.
-- delete: an existing note's ID, when it is no longer true or the person asked for it to be forgotten.
-
-If the person asked the robot to forget something, do not write a new note about it. If they asked it to forget everything, delete every note and add nothing.
-
-Return a JSON list of actions, each with: action, note_id (for replace and delete), fact (for add and replace). Return an empty list if nothing should change.
-```
-
-**Input**
-```json
-{"today": "2026-11-15", "may_add_notes": true,
- "existing_notes": [{"note_id": "note-user01-002", "fact": "8 Nov 2026: planning to go back to work next week."},
-                    {"note_id": "note-user01-003", "fact": "8 Nov 2026: works in a warehouse."}],
- "turns": [{"speaker": "user", "text": "I'm on short term disability and I keep worrying I'll lose my job."},
-           {"speaker": "helper", "text": "That's a lot to carry. What's making the job feel at risk?"},
-           {"speaker": "user", "text": "I've decided I'm not going back yet. I'm not ready."},
-           {"speaker": "helper", "text": "So you need more time, and you're afraid of what that costs you."},
-           {"speaker": "user", "text": "Yeah. When it gets bad I do that slow breathing, in for four, out for six. It helps a bit."}]}
-```
-
-**Output** from the model:
-```json
-[{"action": "replace", "note_id": "note-user01-002", "fact": "Has decided not to go back to work yet; does not feel ready."},
- {"action": "add", "note_id": null, "fact": "On short-term disability and worried about losing their job."},
- {"action": "add", "note_id": null, "fact": "Slow breathing (in for four, out for six) helps a bit when the worry gets bad."}]
-```
-Code adds the date, `user_id`, `session_id` and new note IDs to make each `UserNote`. It takes `note-user01-002` off the index of live notes, writes the three notes, adds their IDs to the index, and deletes the old data point from past.dev.
+- [1. Listener](agents/i1-listener.md): turns speech into text
+- [2. Crisis checker](agents/i2-crisis-checker.md): flags risk to life or safety
+- [3. Helper](agents/t2-i3-helper.md): drafts the reply; the same agent as in training
+- [Release step](agents/i3b-release.md): holds audio until the crisis checker answers
+- [4. Speaker](agents/i4-speaker.md): turns the reply into speech
+- [5. Note-taker](agents/i5-note-taker.md): decides what to remember about the person
 
 ## 8. What was added to `schemas.py`
 
@@ -832,3 +462,4 @@ Code adds the date, `user_id`, `session_id` and new note IDs to make each `UserN
 | Safety cases and their results | `SafetyCase`, `SafetyResult` | The gate's safety checks |
 | The gatekeeper's input | `GateInput` | Scores, noise and the cap in one place |
 | One past.dev entry | `MemoryEntry` | The shape in the README, section 5 |
+| What each agent is given | `SimulatedUserInput`, `HelperInput`, `CriticInput`, `ResearcherInput`, `ProposerInput`, `CrisisCheckerInput`, `NoteTakerInput` | The input side of each agent file |

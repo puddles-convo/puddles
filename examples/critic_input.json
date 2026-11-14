@@ -1,0 +1,68 @@
+{
+  "round": 3,
+  "policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
+  "earlier_patterns": [
+    {
+      "id": "pattern-r01",
+      "name": "replies-too-long",
+      "status": "fixed",
+      "rule_id": "C4"
+    },
+    {
+      "id": "pattern-r02",
+      "name": "lists-of-options",
+      "status": "fixed",
+      "rule_id": "C5"
+    }
+  ],
+  "conversations": [
+    {
+      "conversation_id": "conv-r03-0017",
+      "empathy": 3,
+      "relevance": 2,
+      "note": "Suggested HR before asking anything about the situation.",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "I'm feeling anxious that I'm going to lose my job."
+        },
+        {
+          "speaker": "helper",
+          "text": "That sounds really stressful. Have you tried talking to HR about your options?"
+        }
+      ]
+    },
+    {
+      "conversation_id": "conv-r03-0021",
+      "empathy": 3,
+      "relevance": 2,
+      "note": "Offered a coping tip in the first reply.",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "I can't sleep since the breakup."
+        },
+        {
+          "speaker": "helper",
+          "text": "I'm sorry, that's hard. Some people find a fixed bedtime helps. Would that be worth a try?"
+        }
+      ]
+    },
+    {
+      "conversation_id": "conv-r03-0033",
+      "empathy": 2,
+      "relevance": 3,
+      "note": "Asked a fitting question but did not acknowledge the feeling first.",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "My mum is in hospital and I'm scared."
+        },
+        {
+          "speaker": "helper",
+          "text": "What have the doctors told you so far?"
+        }
+      ]
+    }
+  ]
+}

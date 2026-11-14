@@ -6,16 +6,17 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 
 **Status:** this README is the agreed design. No pipeline code is in this repo yet. Scores, counts and sources in the examples are illustrative.
 
-- The prompt for every agent, with full example inputs and outputs: [docs/agents.md](docs/agents.md)
+- One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
+- The design behind memory, policy and the crisis path: [docs/agents.md](docs/agents.md)
 - Record formats: `schemas.py` (version 2), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
 ## Contents
 
-1. [Training agents](#1-training-agents)
-2. [Inference agents](#2-inference-agents)
-3. [Training steps](#3-training-steps)
-4. [Inference steps](#4-inference-steps)
+1. [Training steps](#1-training-steps)
+2. [Training agents](#2-training-agents)
+3. [Inference steps](#3-inference-steps)
+4. [Inference agents](#4-inference-agents)
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
 7. [Handoffs](#7-handoffs)
@@ -23,119 +24,130 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 9. [Data](#9-data)
 10. [Robot side](#10-robot-side)
 
-## 1. Training agents
+## 1. Training steps
 
 Training is the offline loop that improves the policy. It runs in the cloud in rounds, with no human in it.
 
-| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
-|---|---|---|---|---|---|
-| **1. Simulated user** | • Plays a person from an ESConv scenario<br>• Reacts honestly and opens up slowly | Nothing (no access) | Nothing | Scenario: anxiety, job crisis, "I am on short term disability and I am afraid I will lose my job"<br>plus the helper's last line | `Not yet. I'm on short term disability and I'm not ready to go back.` |
-| **2. Helper** | • Replies to the person, following the policy file<br>• Same model, prompt and code as on the robot | Nothing during training | Nothing | `policy-v4` and the turns so far:<br>user: "I'm feeling anxious that I'm going to lose my job." | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
-| **3. Judge** | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
-| **4. Critic** | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
-| **5. Researcher** | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
-| **6. Proposer** | • Writes exactly one change to the policy<br>• Does not repeat an edit that was reverted | Earlier edits and their outcomes | The proposed edit | The current policy, the pattern and the sources | `{"action": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}` |
-| **7. Gatekeeper** (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
-
-## 2. Inference agents
-
-Inference is the live conversation with a person. The policy is fixed for the whole conversation.
-
-| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
-|---|---|---|---|---|---|
-| **1. Listener** (speech model) | • Turns the person's speech into text | Nothing | Nothing | About 3 seconds of audio | `I'm feeling anxious that I'm going to lose my job.` |
-| **2. Crisis checker** | • Checks every message for risk to life or safety<br>• Runs at the same time as the helper | Nothing | Nothing | The latest message and the last few turns:<br>"Sometimes I wonder if things would be better if I wasn't around any longer." | Level `crisis`, category `self`, reason "says things would be better if they weren't around" |
-| **3. Helper** | • Drafts the reply, following the policy file<br>• Same model, prompt and code as in training | Notes about this person, once at the start of the session | Nothing | `policy-v4`, the notes ("on short-term disability and worried about losing their job") and the turns so far | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
-| **Release** (code, no model) | • Holds all audio until the crisis checker answers<br>• Crisis: fixed response. Checker failed: holding line. Otherwise: the draft. | Nothing | Nothing | The risk level and the helper's draft | The draft, or a fixed response such as "I'm really glad you told me that. Are you thinking about ending your life? ... You can call or text 988 ..." |
-| **4. Speaker** (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
-| **5. Note-taker** | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced or deleted | The finished session and the existing notes | `[{"action": "add", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
-
-## 3. Training steps
-
 ```
 TRAINING  (one round; down the left is what each agent hands the next)
-+----------------------+                                            +----------------------------+
-| 1. SIMULATED USER    |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  user message                                          |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 2. HELPER            |     (no access during training)            |                            |
-+----------------------+                                            |                            |
-           |  conversation, turns only                              |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 3. JUDGE             |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  scores and notes                                      |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 4. CRITIC            | <- reads: earlier patterns and outcomes -- |      TRAINING MEMORY       |
-|                      | -- writes: failure pattern --------------> |         (past.dev)         |
-+----------------------+                                            |                            |
-           |  failure pattern, or none found                        |   shared by the training   |
-           v                                                        |        agents only         |
-+----------------------+                                            |                            |
-| 5. RESEARCHER        | <- reads: earlier searches --------------- |                            |
-|                      | -- writes: sources and technique --------> |                            |
-+----------------------+                                            |                            |
-           |  sources, or none found                                |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 6. PROPOSER          | <- reads: earlier edits and outcomes ----- |                            |
-|                      | -- writes: the proposed edit ------------> |                            |
-+----------------------+                                            |                            |
-           |  candidate policy                                      |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 7. GATEKEEPER        | -- writes: outcome, copied from the log -> |                            |
-+----------------------+                                            |                            |
-           :  policy in force; the next round starts again at 1     |                            |
-           :                                                        +----------------------------+
++------------------------------+                                        +----------------------+
+| 1. SIMULATED USER            |     (no access)                        |                      |
+| plays a person in distress   |                                        |                      |
++------------------------------+                                        |                      |
+              |  user message                                           |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 2. HELPER                    |     (no access during training)        |                      |
+| replies, following policy    |                                        |                      |
++------------------------------+                                        |                      |
+              |  conversation, turns only                               |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 3. JUDGE                     |     (no access)                        |                      |
+| rates the conversation       |                                        |                      |
++------------------------------+                                        |                      |
+              |  scores and notes                                       |                      |
+              v                                                         |                      |
++------------------------------+                                        |   TRAINING MEMORY    |
+| 4. CRITIC                    | <- reads: past patterns, outcomes ---- |      (past.dev)      |
+| names the main failure       | -- writes: failure pattern ----------> |                      |
++------------------------------+                                        |    shared by the     |
+              |  failure pattern, or none found                         |   training agents    |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 5. RESEARCHER                | <- reads: past searches -------------- |                      |
+| finds how counsellors fix it | -- writes: sources and technique ----> |                      |
++------------------------------+                                        |                      |
+              |  sources, or none found                                 |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 6. PROPOSER                  | <- reads: past edits and outcomes ---- |                      |
+| writes one policy edit       | -- writes: the proposed edit --------> |                      |
++------------------------------+                                        |                      |
+              |  candidate policy                                       |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 7. GATEKEEPER (code)         | -- writes: outcome, from the log ----> |                      |
+| tests it; keeps or reverts   |                                        |                      |
++------------------------------+                                        |                      |
+              :  policy in force; the next round starts again at 1      |                      |
+              :                                                         +----------------------+
 ```
 
 - **Down the left** is the order of the steps and what each agent hands straight to the next.
 - **Across** is what each agent reads from and writes to the shared memory.
 - **A round can also end early:** with no pattern found, or no usable source found. Then no edit is made.
 
-## 4. Inference steps
+## 2. Training agents
+
+The agent names link to a file for each one, with its prompt and formats.
+
+| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
+|---|---|---|---|---|---|
+| [**1. Simulated user**](docs/agents/t1-simulated-user.md) | • Plays a person from an ESConv scenario<br>• Reacts honestly and opens up slowly | Nothing (no access) | Nothing | Scenario: anxiety, job crisis, "I am on short term disability and I am afraid I will lose my job"<br>plus the helper's last line | `Not yet. I'm on short term disability and I'm not ready to go back.` |
+| [**2. Helper**](docs/agents/t2-i3-helper.md) | • Replies to the person, following the policy file<br>• Same model, prompt and code as on the robot | Nothing during training | Nothing | `policy-v4` and the turns so far:<br>user: "I'm feeling anxious that I'm going to lose my job." | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
+| [**3. Judge**](docs/agents/t3-judge.md) | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
+| [**4. Critic**](docs/agents/t4-critic.md) | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
+| [**5. Researcher**](docs/agents/t5-researcher.md) | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
+| [**6. Proposer**](docs/agents/t6-proposer.md) | • Writes exactly one change to the policy<br>• Does not repeat an edit that was reverted | Earlier edits and their outcomes | The proposed edit | The current policy, the pattern and the sources | `{"action": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}` |
+| [**7. Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
+
+## 3. Inference steps
+
+Inference is the live conversation with a person. The policy is fixed for the whole conversation.
 
 ```
 INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
-+----------------------+                                            +----------------------------+
-| 1. LISTENER          |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  user message, to 2 and 3 at the same time             |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 2. CRISIS CHECKER    |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           :  runs side by side with                                |                            |
-           :                                                        |                            |
-+----------------------+                                            |                            |
-| 3. HELPER            | <- reads: notes about this person -------- |                            |
-+----------------------+                                            |        USER MEMORY         |
-           |  risk level from 2, draft reply from 3                 |         (past.dev)         |
-           v                                                        |                            |
-+----------------------+                                            |     one private space      |
-|    RELEASE (code)    |     (no access)                            |         per person         |
-+----------------------+                                            |                            |
-           |  the draft, or a fixed response                        |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 4. SPEAKER           |     (no access)                            |                            |
-+----------------------+                                            |                            |
-           |  session record, only if the person agreed             |                            |
-           v                                                        |                            |
-+----------------------+                                            |                            |
-| 5. NOTE-TAKER        | <- reads: existing notes ----------------- |                            |
-|                      | -- writes: add, replace or delete notes -> |                            |
-+----------------------+                                            +----------------------------+
++------------------------------+                                        +----------------------+
+| 1. LISTENER                  |     (no access)                        |                      |
+| turns speech into text       |                                        |                      |
++------------------------------+                                        |                      |
+              |  user message, to 2 and 3 at the same time              |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 2. CRISIS CHECKER            |     (no access)                        |                      |
+| flags risk to life or safety |                                        |                      |
++------------------------------+                                        |                      |
+              :  runs side by side with                                 |                      |
+              :                                                         |                      |
++------------------------------+                                        |                      |
+| 3. HELPER                    | <- reads: notes about this person ---- |                      |
+| drafts the reply             |                                        |     USER MEMORY      |
++------------------------------+                                        |      (past.dev)      |
+              |  risk level from 2, draft reply from 3                  |                      |
+              v                                                         |  one private space   |
++------------------------------+                                        |      per person      |
+|    RELEASE (code)            |     (no access)                        |                      |
+| holds audio until 2 answers  |                                        |                      |
++------------------------------+                                        |                      |
+              |  the draft, or a fixed response                         |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 4. SPEAKER                   |     (no access)                        |                      |
+| turns the reply into speech  |                                        |                      |
++------------------------------+                                        |                      |
+              |  the finished session                                   |                      |
+              v                                                         |                      |
++------------------------------+                                        |                      |
+| 5. NOTE-TAKER                | <- reads: existing notes ------------- |                      |
+| keeps notes on this person   | -- writes: note changes -------------> |                      |
++------------------------------+                                        +----------------------+
 ```
 
 - **The crisis checker and the helper start together**, so the check adds no delay.
 - **Nothing is spoken until the crisis checker has answered.** On a crisis the helper's draft is discarded.
 - **With no connection** the robot cannot understand speech, so it plays a line stored on the device that gives the 911 and 988 numbers.
+
+## 4. Inference agents
+
+| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
+|---|---|---|---|---|---|
+| [**1. Listener**](docs/agents/i1-listener.md) (speech model) | • Turns the person's speech into text | Nothing | Nothing | About 3 seconds of audio | `I'm feeling anxious that I'm going to lose my job.` |
+| [**2. Crisis checker**](docs/agents/i2-crisis-checker.md) | • Checks every message for risk to life or safety<br>• Runs at the same time as the helper | Nothing | Nothing | The latest message and the last few turns:<br>"Sometimes I wonder if things would be better if I wasn't around any longer." | Level `crisis`, category `self`, reason "says things would be better if they weren't around" |
+| [**3. Helper**](docs/agents/t2-i3-helper.md) | • Drafts the reply, following the policy file<br>• Same model, prompt and code as in training | Notes about this person, once at the start of the session | Nothing | `policy-v4`, the notes ("on short-term disability and worried about losing their job") and the turns so far | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
+| [**Release**](docs/agents/i3b-release.md) (code, no model) | • Holds all audio until the crisis checker answers<br>• Crisis: fixed response. Checker failed: holding line. Otherwise: the draft. | Nothing | Nothing | The risk level and the helper's draft | The draft, or a fixed response such as "I'm really glad you told me that. Are you thinking about ending your life? ... You can call or text 988 ..." |
+| [**4. Speaker**](docs/agents/i4-speaker.md) (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
+| [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced or deleted | The finished session and the existing notes | `[{"action": "add", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
 
 ## 5. The memory
 
@@ -372,7 +384,7 @@ Datasets are loaded at run time and are not committed to this repo.
 
 ## 10. Robot side
 
-The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from section 2 run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from section 4 run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
 
 ```
 +----------------------------+                          +------------------------------------+

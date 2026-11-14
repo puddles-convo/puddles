@@ -1,0 +1,32 @@
+{
+  "policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
+  "at_length_limit": false,
+  "pattern": {
+    "id": "pattern-r03",
+    "name": "advice-before-understanding",
+    "status": "open",
+    "description": "Gives a suggestion in its first reply without asking about the person's circumstances."
+  },
+  "sources": [
+    {
+      "url": "(url 1 from Exa)",
+      "technique": "Ask one open question and reflect the answer before any suggestion."
+    }
+  ],
+  "earlier_edits": [
+    {
+      "id": "edit-r01",
+      "action": "reword",
+      "rule_id": "C4",
+      "outcome": "kept",
+      "summary": "Limit replies to one or two sentences."
+    },
+    {
+      "id": "edit-r02",
+      "action": "add",
+      "rule_id": "C5",
+      "outcome": "kept",
+      "summary": "Offer one small suggestion and ask whether it fits."
+    }
+  ]
+}

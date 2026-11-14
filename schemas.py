@@ -162,6 +162,83 @@ class GateInput(Strict):
     safety_case_set: str
 
 
+# ---------- what each agent is given (code builds these, then renders the prompt) ----------
+
+class SimulatedUserInput(Strict):
+    scenario: Scenario
+    turns: list[Turn]
+
+
+class HelperInput(Strict):
+    policy_version: str
+    user_notes: list[str] = []  # empty in training
+    turns: list[Turn]
+
+
+class ScoredConversation(Strict):
+    conversation_id: str
+    empathy: Score
+    relevance: Score
+    note: str
+    turns: list[Turn]
+
+
+class PatternBrief(Strict):
+    id: str
+    name: str
+    description: Optional[str] = None
+    status: Optional[Literal["open", "fixed", "recurring"]] = None
+    rule_id: Optional[str] = None  # the rule that fixed it, if any
+
+
+class CriticInput(Strict):
+    round: int
+    policy_text: str
+    earlier_patterns: list[PatternBrief] = []  # complete list, built from the log
+    from_memory: list[str] = []  # detail found by recall, loaded from record files
+    conversations: list[ScoredConversation]  # the lowest-scoring ones, in full
+
+
+class ResearcherInput(Strict):
+    pattern: PatternBrief
+    earlier_queries: list[str] = []  # complete list, built from the log
+
+
+class EditSummary(Strict):
+    id: str
+    action: EditAction
+    rule_id: str
+    outcome: Literal["kept", "reverted"]
+    summary: str
+
+
+class ProposerInput(Strict):
+    policy_text: str
+    at_length_limit: bool
+    pattern: PatternBrief
+    sources: list[Source]
+    earlier_edits: list[EditSummary] = []  # complete list, built from the log
+
+
+class CrisisCheckerInput(Strict):
+    session_id: str
+    turn: int
+    recent_turns: list[Turn] = []
+    text: str
+
+
+class ExistingNote(Strict):
+    note_id: str
+    fact: str
+
+
+class NoteTakerInput(Strict):
+    today: str  # ISO date, supplied by code
+    may_add_notes: bool  # false when the person declined to be remembered
+    existing_notes: list[ExistingNote] = []
+    turns: list[Turn]
+
+
 # ---------- what each model returns (code adds IDs, dates and versions) ----------
 
 class JudgeInput(Strict):
