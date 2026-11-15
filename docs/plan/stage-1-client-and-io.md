@@ -59,7 +59,7 @@ The crisis checker runs on the helper's model, and a fallback judge may run on a
 |---|---|
 | A model call from a new graph node, counted and traced | Run the node's work inside `with puddles.usage.metering(meter, "<agent>")`. `puddles.graph` already does this for every node, the judge and the gate included, so a judge or gate passed in through `RoundDeps` is metered under `judge` or `gatekeeper` with no more code. |
 | A plain-text model call | `TracedClient(client, "<agent>").complete(...)`. It uses the meter set by `metering`, or one passed as `TracedClient(client, name, meter=...)`. |
-| Schema output from the helper's endpoint | `TracedClient(client, "crisis_checker").complete_json(system, messages, Schema, max_tokens=..., deadline_s=3)`. Returns the validated model. Raises `loop.errors.SchemaError` after two bad replies, `DeadlineExceeded` when time runs out, `LLMError` for anything else; the first two are subclasses of `LLMError`. |
+| Schema output from the helper's endpoint | `TracedClient(client, "crisis_checker").complete_json(system, messages, Schema, max_tokens=..., deadline_s=5)`. Returns the validated model. Raises `loop.errors.SchemaError` after two bad replies, `DeadlineExceeded` when time runs out, `LLMError` for anything else; the first two are subclasses of `LLMError`. |
 | The same, in a test | `FakeClient([...json text...]).complete_json(...)`. The retry and the deadline behave as on a real client. |
 | Schema output from the OpenAI API | `OpenAILLM().structured(...)`, as before. It reports its own requests, with the output limit of the agent named by `metering`. |
 | A scripted model in a fake round | Nothing: the graph wraps any `LLM` that lacks `reports_usage` in `puddles.tracing.TracedLLM`, which estimates its tokens. |
