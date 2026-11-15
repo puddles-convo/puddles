@@ -220,3 +220,37 @@ def test_run_batch_without_out_path_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_batch(_helper(), _user(["a"]), POLICY, [_scenario()], round=1, now=NOW)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_tag_goes_into_the_conversation_id():
+    from loop.runner import conversation_id
+
+    assert conversation_id(3, "s1") == "conv-r03-s1"
+    assert conversation_id(3, "s1", "val") == "conv-r03-val-s1"
+    record = run_conversation(_helper(), _user(["Hello."]), POLICY, _scenario(), round=3, now=NOW, tag="val")
+    assert record.id == "conv-r03-val-fixture-0001" and record.scenario_id == "fixture-0001"
+    untagged = run_conversation(_helper(), _user(["Hello."]), POLICY, _scenario(), round=3, now=NOW, tag=None)
+    assert untagged.id == "conv-r03-fixture-0001"
+
+
+def test_a_tagged_batch_shares_no_id_with_the_untagged_batch_of_the_same_round(tmp_path):
+    scenarios = [_scenario("fixture-0001"), _scenario("fixture-0002")]
+    train = run_batch(_helper(), _user(["Hello."]), POLICY, scenarios, round=1, now=NOW,
+                      out_path=tmp_path / "round-01-train.jsonl")
+    validation = run_batch(_helper(), _user(["Hello."]), POLICY, scenarios, round=1, now=NOW,
+                           out_path=tmp_path / "round-01-validation.jsonl", tag="val")
+    assert [r.id for r in validation.records] == ["conv-r01-val-fixture-0001", "conv-r01-val-fixture-0002"]
+    assert not {r.id for r in train.records} & {r.id for r in validation.records}
+    assert len((tmp_path / "round-01-train.jsonl").read_text().splitlines()) == 2  # not overwritten
+
+
+@pytest.mark.parametrize("tag", ["", "Val", "val-1", "1val", "va l", "val\n"])
+def test_a_bad_tag_is_refused_before_any_conversation_runs(tag):
+    from loop.runner import conversation_id
+
+    helper, user = _helper(), _user(["Hello."])
+    with pytest.raises(ValueError, match="tag"):
+        run_batch(helper, user, POLICY, [_scenario()], round=1, tag=tag)
+    assert helper.calls == [] and user.calls == []
+    with pytest.raises(ValueError, match="tag"):
+        conversation_id(1, "s1", tag)

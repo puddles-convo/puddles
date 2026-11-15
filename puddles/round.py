@@ -22,6 +22,8 @@ from schemas import (
     LogEdit,
     LogPattern,
     LogPolicy,
+    LogSafety,
+    LogScores,
     MemoryCopyEvent,
     PolicyEdit,
     Record,
@@ -49,6 +51,9 @@ class RoundResult:
     edit: Optional[PolicyEdit] = None
     candidate_path: Optional[Path] = None
     refs: dict[str, RecordRef] = field(default_factory=dict)
+    # Set by the gate, for the round event. None means not measured, never that it passed.
+    scores: Optional[LogScores] = None
+    safety: Optional[LogSafety] = None
 
 
 def policy_in_force(root: Path, fallback: Path) -> Path:
@@ -209,7 +214,8 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
 
     A promoted policy is written just before the round event; prepare_round removes it if a
     crash comes between the two. Without `start_policy` (the stage-0 graph runner) no .meta.json
-    is written and no replay check runs.
+    is written and no replay check runs. With a gate outcome, the gate's `result.scores` and
+    `result.safety` go into the event; without one both stay empty.
     """
     base_text = result.base_policy_path.read_text()
     base_version = parse_policy(base_text).version
@@ -236,7 +242,8 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         pattern=LogPattern(id=p.id, same_as_pattern_id=p.same_as_pattern_id, name=p.name, seen_in=p.seen_in,
                            out_of=p.out_of, status_before=result.status_before) if p else None,
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
-                     rule_text=result.edit.rule_text) if result.edit and gate else None)
+                     rule_text=result.edit.rule_text) if result.edit and gate else None,
+        scores=result.scores if gate is not None else None, safety=result.safety if gate is not None else None)
     if promoted:
         version, text = promoted
         replay.policy_path(root, version).write_text(text)
