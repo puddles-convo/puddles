@@ -167,7 +167,7 @@ curl -s -X POST $B/sessions/sess-0007/end -H "Authorization: Bearer $T"
 
 ### The same in Python
 
-Every call handles a lost connection, a timeout, an unexpected status and an answer that is not JSON; a turn with no usable answer speaks the stored offline line. The end call runs on its own thread, and the next session for that person waits for it. `speak` is yours: it sends the text to text-to-speech and must not print, log or trace it.
+Every call handles a lost connection, a timeout, an unexpected status and an answer that is not JSON; a turn with no usable answer speaks the stored offline line. The end call runs on its own thread, a normal (not daemon) thread kept in a table with one entry per person: the next session for that person waits for it, and `finish_all()` joins every one before the process exits or the service shuts down, so no end request is cut off. `speak` is yours: it sends the text to text-to-speech and must not print, log or trace it.
 
 ```python
 import logging
@@ -179,7 +179,7 @@ log = logging.getLogger("brain.puddles")  # IDs, statuses and flags only; never 
 OFFLINE = ("I can't connect right now, so I can't listen properly. If you are in danger, please call 911. "
            "If you are thinking about hurting yourself, call or text 988.")  # stored on the robot
 brain = httpx.Client(base_url="http://127.0.0.1:8765", headers={"Authorization": "Bearer dev-token"})
-ending: dict[str, threading.Thread] = {}  # user_id -> its end call, still running
+ending: dict[str, threading.Thread] = {}  # user_id -> its end call, still running (one per person)
 
 
 def speak(text: str) -> None:
@@ -230,8 +230,15 @@ def end_in_background(user_id: str, session_id: str) -> None:
                  notes.get("failed"), len(notes.get("undeleted") or []))
         ending.pop(user_id, None)
 
-    ending[user_id] = thread = threading.Thread(target=run, daemon=True)
+    thread = threading.Thread(target=run, name=f"end-{session_id}")  # not a daemon: the end must complete
+    ending[user_id] = thread
     thread.start()
+
+
+def finish_all() -> None:
+    """Call before the process exits or the service shuts down, so every end request is sent and completed."""
+    for thread in list(ending.values()):
+        thread.join()
 
 
 sid = start("user-01", remember_me=False, consent_for_training=False)  # the person's two answers, asked
@@ -239,29 +246,34 @@ if sid:
     for heard in ["Work has been really stressful lately.", "Some days I just want to die."]:
         turn(sid, heard)
     end_in_background("user-01", sid)
+finish_all()  # in your brain: on shutdown, not after every session
 ```
 
 What it did against the fake-mode app, with `speak` recording which line it was given, and more calls added after the page's own lines to try each failure. The log lines are the client's own and hold no text; session IDs differ from run to run:
 
 ```
-== the page's own lines: start, two turns, end in the background
+== the page's own lines: start, two turns, end in the background, finish_all
 log: start: 201 None
-log: turn sess-20261115141348-9ab7cd28: 200 None fixed=False
+log: turn sess-20261115141857-9d44a4a5: 200 None fixed=False
 speak: the helper's reply
-log: turn sess-20261115141348-9ab7cd28: 200 None fixed=True
+log: turn sess-20261115141857-9d44a4a5: 200 None fixed=True
 speak: the unsure crisis response
-end running in background: True
-== same person again at once: start waits for the end, then gets a session
-log: end sess-20261115141348-9ab7cd28: 200 kept=False notes_failed=False undeleted=0
+log: end sess-20261115141857-9d44a4a5: 200 kept=False notes_failed=False undeleted=0
+ends still running after finish_all: [] | live sessions: []
+== a session ended in the background, then the same person again at once: start waits for that end
+log: start: 201 None
+log: turn sess-20261115141857-e3452ba1: 200 None fixed=False
+speak: the helper's reply
+log: end sess-20261115141857-e3452ba1: 200 kept=False notes_failed=False undeleted=0
 log: start: 201 None
 second session: True | end finished first: True
 == a turn after the end of the first session (404)
-log: turn sess-20261115141348-9ab7cd28: 404 session_not_found fixed=None
+log: turn sess-20261115141857-9d44a4a5: 404 session_not_found fixed=None
 speak: the offline line
 == turn_failed (run_turn made to raise)
-log: turn sess-20261115141348-b0f04945: 500 turn_failed fixed=None
+log: turn sess-20261115141857-9fb600cc: 500 turn_failed fixed=None
 speak: the offline line
-log: end sess-20261115141348-b0f04945: 200 kept=False notes_failed=False undeleted=0
+log: end sess-20261115141857-9fb600cc: 200 kept=False notes_failed=False undeleted=0
 == no connection (nothing listening)
 log: start: None None
 speak: the offline line
@@ -281,7 +293,7 @@ The client speaks the offline line for every turn it cannot use; what to do next
 
 - **Always speak the returned `text`, exactly as given.** Do not shorten, rephrase, translate or add to it. The service has already chosen the safe line; the brain never chooses between lines itself.
 - **A keyword match forces the crisis response even when the check failed.** The keyword check runs first and wins over everything the checker did or did not say.
-- **`risk` and `category` are `null` when the check did not answer** (`check_status` is `late`, `failed` or anything but `"answered"`). Treat that as unknown, never as calm. They can also read `"none"` on a crisis response forced by a keyword (section 9 shows one).
+- **`risk` and `category` are `null` when the check did not answer** (`check_status` is `late`, `failed` or anything but `"answered"`). Treat that as unknown, never as calm. On a crisis response forced by a keyword, `risk` can read `"none"` while `category` is `null` (section 9 shows one); `category` is never `"none"`.
 - **So the only reliable sign of a fixed line is `fixed_handoff_response` true.** A fixed line is one of the three crisis responses, the holding line or the offline line, never the helper's words. Speak all of it, do not let the person's next words cut it off, and append nothing (no filler, no follow-up from another model).
 - **The only reliable sign of a crisis response is `fixed_handoff_response` true together with `keyword_matched` true or `risk` equal to `"crisis"`.** Use that, not `risk` alone, for anything that must react to a crisis.
 - **When the check did not answer and no keyword matched**, the text is the holding line ("Sorry, I lost my thread for a moment. Could you say that again?") on the first failed check in a row, and the offline line on the second and later ones.
@@ -324,12 +336,12 @@ Store it on the device, because with no connection nothing can be fetched.
 
 | Remember me | Use for training | What is kept after the session |
 |---|---|---|
-| No | No | Nothing new. Notes the person asked to forget are deleted, when the notes step succeeds (below). |
+| No | No | Nothing new. A request to forget is acted on, but the end response cannot confirm a specific note went (below). |
 | Yes | No | Notes only: `notes/<user_id>/`. No session file, no record, no trace. |
 | No | Yes | The session file, the record and the traces. No new notes. |
 | Yes | Yes | Both |
 
-**Forgetting is attempted whatever the person answered, but it can fail.** The note-taker runs at the end of every session with at least one turn, so a request to forget is acted on even with "remember me" off. But the notes step can fail before it changes anything (`notes.failed` true in the end response), and past.dev can be slow to confirm a deletion (the note ID is then in `notes.undeleted`; the service keeps retrying it). So read `notes.failed` and `notes.undeleted`, and never tell the person something was deleted unless the end response shows it: `failed` false and the note not in `undeleted`. Forgetting notes does not remove a session file, record or trace kept with training consent.
+**Forgetting is attempted whatever the person answered, but it can fail.** The note-taker runs at the end of every session with at least one turn, so a request to forget is acted on even with "remember me" off. But the notes step can fail before it changes anything (`notes.failed` true in the end response), and past.dev can be slow to confirm a deletion. A deletion past.dev has not confirmed stays pending, with its note ID in `notes.undeleted`, and is retried by later note-store operations for that person; there is no separate background retry. Even `failed` false and an empty `undeleted` do not prove that the particular thing the person asked to forget was deleted, because the response gives counts, not which notes: `deleted` above zero means some note was removed, not which one. So the robot must not confirm that a specific fact was forgotten; the most it can say is that it has passed the request on. Forgetting notes does not remove a session file, record or trace kept with training consent.
 
 **Your brain keeps logs too.** With training consent off, nothing the person said may be kept anywhere, so the brain must not log the person's text, the transcript, the reply text or the audio either: not in Modal logs, not in error reports, not in traces. Log session IDs, statuses, counts and timings only. The service itself never logs text, so the gap would only be on your side.
 
