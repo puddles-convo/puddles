@@ -42,17 +42,19 @@ def with_summary(node: str, fn: Callable[[RoundState], dict], root: Path) -> Cal
 
 `node_summary` returns a small dict that can be written as JSON. It holds no conversation text.
 
+**"No conversation text" means no turn of any conversation is copied**, in a summary or in the report: nothing a helper or a simulated user said. A round's reason, a pattern's name, a rule's text and a source's URL are shown as the decision log and the records hold them; they are the loop's own records of a training round, and the view does not rewrite them.
+
 | Node | Keys |
 |---|---|
 | `converse` | `finished`, `failed` (counts), `file` (the train conversations file, relative to the root) |
-| `judge` | `scored`, `unscored` (counts), `mean_empathy`, `mean_relevance` (over what was scored; `null` when nothing was), `judge_version` (from the scores file's first line; `null` when there is no scores file) |
+| `judge` | `scored`, `unscored` (counts), `mean_empathy`, `mean_relevance` (over every conversation that was scored this round, not only the ones passed on to the critic; `null` when nothing was), `judge_version` (from the scores file's first line; `null` when there is no scores file) |
 | `critic` | `pattern` (its name) and `seen_in`, `out_of`; or `pattern: null` and `reason` |
 | `researcher` | `queries` (count), `sources` (their URLs) |
 | `proposer` | `action`, `rule_id`, `rule_text`; or `edit: null` and `reason` |
 | `gate` | `decision`, `quality_before`, `quality_after`, `noise`, `safety_passed`, `failed_checks` (names) |
 | `finish` | `outcome`, `policy_in_force`, `copies` (a list of `{record_id, status}` from the memory-copy events of this round) |
 
-- A value that was not measured is `null`, never 0 and never `true`. For the gate, `quality_before`, `quality_after` and `noise` come from `result.scores` and are `null` when it is `None`; `failed_checks` comes from `<root>/scores/round-NN-gate.json` and is `null` when that file does not exist (a stand-in gate).
+- A value that was not measured is `null`, never 0 and never `true`. For the gate, `quality_before`, `quality_after` and `noise` come from `result.scores` and are `null` when it is `None`; `failed_checks` comes from `<root>/scores/round-NN-gate.json` and is `null` when that file does not exist (a stand-in gate). `safety_passed` is `result.safety.passed` and is `null` when `result.safety` is `None`: the gate outcome's own `safety_passed` is a plain true or false even for a stand-in, so it is never used for the view.
 
 ## 2. Numbers on the round's MLflow run
 
@@ -71,19 +73,19 @@ def build_report(root: Path, round_: int) -> str         # in puddles/round_view
 def report_path(root: Path, round_: int) -> Path          # <root>/reports/round-NN.md
 ```
 
-The script writes `build_report(...)` to `report_path(...)`, prints it, and attaches the file to the MLflow run named `round-NN` in the experiment `puddles` as an artifact under `reports/`. The tracking address is `--mlflow`, else `MLFLOW_TRACKING_URI`, else the default in `puddles/tracing.py`. If there is no such run, it prints one line saying the report was not attached, and still exits 0. Exit code 2, with one line on standard error, when the root has no log or the round is not in it.
+`build_report` returns the text and writes nothing. The script writes it to `report_path(...)`, prints it, and attaches the file to the MLflow run named `round-NN` in the experiment `puddles` as an artifact under `reports/`. The tracking address is `--mlflow`, else `MLFLOW_TRACKING_URI`, else the default in `puddles/tracing.py`. If there is no such run, or attaching fails for any reason, it prints one line saying the report was not attached, and still exits 0. With more than one run of that name, the most recent is used. Exit code 2, with one line on standard error, when the root has no log, the log cannot be read, or the round is not in it.
 
 The report is markdown with these sections, in this order:
 
 1. `# Round N: <outcome>`, then the reason.
-2. `## Nodes`: one table row per node that ran: what it received, what it produced, where that went (a file path relative to the root, the decision log, memory). A node that did not run has a row that says so.
+2. `## Nodes`: one table row per node that ran: what it received, what it produced, where that went (a file path relative to the root, the decision log, memory). A node that did not run has a row that says so. Which nodes ran is worked out from the files: `converse`, `judge` and `finish` always; `critic` unless the event's reason starts with one of the two sentences graph.md gives for a round with nothing scored (judging.md may append a sentence about unscored conversations after it); `researcher` when the event has a pattern; `proposer` when the round has a research record and its outcome is not `no_evidence`; `gate` when the round has a gate outcome record.
 3. `## Conversations`: a table of ID, empathy, relevance, and whether the critic was given it. Unscored conversations are listed with empty scores and the word `unscored`. Failed conversations are listed from the failures file with their reason. No conversation text.
-4. `## Memory`: each record of the round, who wrote it and who read it later, from `puddles.round.memory_trace`; and each memory copy with its status.
-5. `## Policy change`: the edit as a diff of rules (`+ C9. ...`, `- C4. ...`, or both lines for a rewording), and the policy in force after the round. `No edit.` when there was none.
+4. `## Memory`: each record of the round, who wrote it and who read it later, from `puddles.round.memory_trace`; and each memory copy event of the round with its status, one line per event.
+5. `## Policy change`: the edit as a diff of rules (`+ C9. ...`, `- C4. ...`, or both lines for a rewording), and the version of the policy in force after the round. `No edit.` when there was none.
 6. `## Gate`: every check in `scores/round-NN-gate.json` with `passed`, `failed` or `not run`; quality before and after and the noise; the safety cases that failed. For a stand-in gate, one line that says it was a stand-in and nothing was measured. `The gate did not run.` when it did not.
-7. `## Cost`: per agent, calls, tokens in and out, and dollars, from `<root>/log/usage.jsonl` for this round.
+7. `## Cost`: per agent, calls, tokens in and out, and dollars to four decimal places, from the finished calls in `<root>/log/usage.jsonl` for this round.
 
-Which conversations the critic was given is read from the critic's pattern record when it names them and otherwise from `select_for_critic` applied to the round's scores file; where neither exists the column is empty.
+Which conversations the critic was given is `puddles.judging.select_for_critic` applied to the round's scores file (`<root>/scores/round-NN-train.jsonl`) with the default number; with no scores file (the stub judge) the column is empty. A round run with another `critic_conversations` is not told apart; that is a stated limit.
 
 `build_report` works from the files alone, so it can be run on a root long after the round, and on a round that ended at any of its exits.
 
@@ -96,6 +98,6 @@ Which conversations the critic was given is read from the critic's pattern recor
 3. The report of a kept round shows the rule diff; of a reverted round with the real gate, the failed checks by name.
 4. With a stand-in gate, the gate's numbers are absent from the MLflow run and `null` in the summary, never 0.
 5. `show_round` attaches the report to the round's run; with no such run it still writes and prints it and exits 0.
-6. `build_report` leaves every file under the root byte-for-byte as it was, apart from the report it writes.
+6. `build_report` leaves every file under the root byte-for-byte as it was and writes none; `show_round` adds only the report file.
 
 The acceptance tests are written from this file alone, by someone who has not seen the code.
