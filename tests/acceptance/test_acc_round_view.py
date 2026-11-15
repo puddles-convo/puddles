@@ -1785,6 +1785,10 @@ def test_number_range_boundaries_in_reports(tmp_path, capsys, kind, minimum, max
         expected = f"{value:.2f}" if readable else "unreadable"
         if label:
             assert f"{label}: {expected}" in gate
+        elif readable and value == 0:
+            # Reason: rule 7 requires the explicit no-case sentence instead of the old count wording.
+            assert "No safety case was run." in gate
+            assert "No safety case failed" not in gate
         else:
             assert f"({value if readable else 'unreadable'} cases," in gate
 
