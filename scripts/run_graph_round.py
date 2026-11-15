@@ -237,13 +237,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
                      memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy),
                      judge_panel=judge)
-    if asker is not None:
+    if not args.fake:
+        from puddles import exa
         from puddles.gate_join import safety_models
+        from puddles.judging import judge_models
+        from puddles.usage import model_name
 
-        # The graph's own price check knows nothing of the safety model, so it is checked here, before
-        # tracing is set up (which prints and writes), before memory and before any model call.
+        # Every model the round will use, gathered as run_round gathers them, plus the safety model, which
+        # run_round knows nothing of. Checked here, before tracing is set up (it prints and can write under
+        # the root), before memory and before any model call. run_round's own check stays as a second guard.
+        models = [model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)]
+        models += judge_models(deps.judge_panel)
+        if asker is not None:
+            models += safety_models(asker)
         try:
-            round_meter(deps).prices.check(safety_models(asker))
+            round_meter(deps).prices.check(models, search=deps.search is exa.search)
         except ConfigError as exc:
             _print_error(f"{type(exc).__name__}: {exc}")
             return 2
