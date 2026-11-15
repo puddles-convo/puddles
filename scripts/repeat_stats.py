@@ -14,8 +14,12 @@ import sys
 from pathlib import Path
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/repeat-measure")
-LABELS = ("control", "v1", "v4")
+BASE = ("control", "v1", "v4")
+EXTRA = tuple(sorted(p.name for p in OUT.iterdir() if p.is_dir() and p.name not in BASE)) if OUT.is_dir() else ()
+LABELS = BASE + EXTRA  # extra folders: e.g. the policy in force of each arm (scripts/compare_inforce.sh)
 PAIRS = [("v4", "v1"), ("v4", "control"), ("control", "v1")]
+PAIRS += [(x, y) for x in EXTRA for y in ("v4", "v1", "control")]
+PAIRS += [(x, y) for i, x in enumerate(EXTRA) for y in EXTRA[i + 1:]]
 LAST_NIGHT = {"control": 3.55, "v1": 3.38, "v4": 3.90}  # held-out, loop judge, one set each
 
 
@@ -43,7 +47,7 @@ for lab in LABELS:
         continue
     sd = st.stdev(qs) if len(qs) > 1 else 0.0
     print(f"  {lab:8s} runs {len(qs):2d}  mean {st.mean(qs):.3f}  sd {sd:.3f}  min {min(qs):.3f}  max {max(qs):.3f}"
-          f"  | last night {LAST_NIGHT[lab]:.2f}")
+          + (f"  | last night {LAST_NIGHT[lab]:.2f}" if lab in LAST_NIGHT else ""))
     print(f"           {' '.join(f'{q:.2f}' for q in qs)}")
 
 print("== pairs: per-scenario difference averaged over all runs (95% interval over scenarios)")
