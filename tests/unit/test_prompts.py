@@ -88,7 +88,10 @@ def test_helper_prompt_guides_state_aim_and_boundaries():
     """The live helper reads the person's state, picks one aim, and keeps to its limits."""
     text = render_helper_system(POLICY)
     for phrase in ("main feeling", "rising, steady or easing", "Heard:", "Steadier:", "Understood:",
-                   "Next step:", "go back to an earlier aim", "Never diagnose",
+                   "Next step:", "go back to an earlier aim", "Never diagnose", "Be polite, patient and humble",
+                   "Do not jump to conclusions", "out of touch with reality", "Do not argue with them",
+                   "whether they are thinking about ending their life", "988", "whether they are safe right now",
+                   "talk about ways of dying",
                    "follow the Safety section of the policy", "the policy wins", "at most about 40 words"):
         assert phrase in text
     # The guidance comes before the policy, and the helper is never told a risk level.

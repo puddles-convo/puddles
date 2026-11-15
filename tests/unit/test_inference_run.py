@@ -16,6 +16,7 @@ def test_fake_run_writes_one_row_per_message_through_the_release_step(tmp_path):
     assert rows[1]["keyword"] is True and rows[1]["released"] == "fixed line"
     assert rows[2]["risk"] == "crisis" and rows[2]["released"] == "fixed line"
     assert rows[1]["robot"] != rows[0]["robot"]
+    assert rows[1]["helper_draft"] == rows[0]["robot"]  # drafted, then held back by the release step
 
 
 def test_missing_policy_is_an_error(tmp_path):
@@ -30,7 +31,7 @@ def test_deadline_raises_the_http_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("HELPER_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("HELPER_MODEL", "m")
     monkeypatch.setattr(inference_run, "run_turn", lambda session, text: seen.append(
-        (session.helper_client.timeout, session.checker_client.timeout)) or (_ for _ in ()).throw(SystemExit))
+        (session.helper_client.client.timeout, session.checker_client.timeout)) or (_ for _ in ()).throw(SystemExit))
     messages = tmp_path / "m.txt"
     messages.write_text("hi\n", encoding="utf-8")
     try:

@@ -6,8 +6,9 @@
 
 Each message goes through run_turn exactly as in scripts/chat.py: keyword check, crisis checker and helper
 in parallel, then the release step. Unlike chat.py there are no notes, no past.dev and no note-taker, so only
-HELPER_* is needed. Use it for scripted test messages only, never for what a real person said: the
-messages and replies are written to --out.
+HELPER_* is needed. Each row also keeps the helper's draft, which shows how the prompt handled a turn even
+when the release step spoke a fixed line instead. Use it for scripted test messages only, never for what a
+real person said: the messages and replies are written to --out.
 
 --deadline sets the crisis checker's deadline in seconds. Keep the path's 3 seconds on a real endpoint;
 raise it only for a slow local model, where every turn would otherwise get the holding line.
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Sequence
 
@@ -29,6 +31,24 @@ from puddles.inference.turn import Session, TurnResult, run_turn
 from scripts.chat import fake_checker, fake_helper
 
 
+class _Recording:
+    """Keeps the helper's last draft, so a turn that released a fixed line still shows what the helper wrote."""
+
+    def __init__(self, client: ChatClient) -> None:
+        self.client = client
+        self.last: str | None = None
+        self.done = threading.Event()
+
+    def complete(self, system: str, messages: list[dict[str, str]], *,
+                 max_tokens: int, temperature: float = 0.7, seed: int | None = None) -> str:
+        try:
+            self.last = self.client.complete(system, messages, max_tokens=max_tokens, temperature=temperature,
+                                             seed=seed)
+            return self.last
+        finally:
+            self.done.set()
+
+
 def _from_helper(result: TurnResult) -> bool:
     """The release step's own rule: the draft is spoken only after a clean check."""
     checked = result.checked
@@ -36,13 +56,14 @@ def _from_helper(result: TurnResult) -> bool:
             and checked.risk in ("none", "concern") and not result.helper_failed)
 
 
-def _row(n: int, message: str, result: TurnResult) -> dict[str, object]:
+def _row(n: int, message: str, result: TurnResult, draft: str | None) -> dict[str, object]:
     checked = result.checked
     return {
         "turn": n,
         "person": message,
         "robot": result.reply.text,
         "released": "helper" if _from_helper(result) else "fixed line",
+        "helper_draft": draft,
         "risk": checked.risk if checked is not None else None,
         "category": checked.category if checked is not None else None,
         "check_status": result.check_status,
@@ -80,7 +101,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ConfigError, PolicyError, OSError, ValueError) as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-    session = Session(session_id="inference-run", policy=policy, helper_client=helper_client,
+    recording = _Recording(helper_client)
+    session = Session(session_id="inference-run", policy=policy, helper_client=recording,
                       checker_client=checker_client, path=path, user_notes=notes,
                       deadline_s=args.deadline, helper_wait_s=max(30.0, args.deadline or 0.0))
     out = Path(args.out)
@@ -89,11 +111,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"policy {policy.version}, helper system message {words} words, {len(messages)} messages", file=sys.stderr)
     with out.open("w", encoding="utf-8") as fh:
         for n, message in enumerate(messages, 1):
+            recording.last = None
+            recording.done.clear()
             result = run_turn(session, message)
-            row = _row(n, message, result)
+            recording.done.wait(session.helper_wait_s)  # a fixed line is released without waiting for the draft
+            row = _row(n, message, result, recording.last)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             print(f"person: {message}\nrobot:  {result.reply.text}\n"
                   f"        [released={row['released']} risk={row['risk']} keyword={row['keyword']}]")
+            if row["released"] != "helper":
+                print(f"        helper draft, not spoken: {recording.last}")
     return 0
 
 
