@@ -46,8 +46,9 @@ Spec: [docs/agents/t7-gatekeeper.md](../agents/t7-gatekeeper.md). It is code. It
 
 They are built. This lane is tuning.
 
-- [ ] For each agent, 5 to 10 hand-checked cases in `fixtures/`: an input and what a good answer must contain. `fixtures/bad_conversations.json` (four conversations) is the start for the critic.
-- [ ] `scripts/try_agent.py <agent> <case file>`: runs the real model on each case and prints the answer beside the expectation.
+- [x] For each agent, 5 to 10 cases in `fixtures/cases/`: an input and what a good answer must contain (6 for the critic, 5 each for the researcher and the proposer). `fixtures/bad_conversations.json` (four conversations) is the start for the critic. Contract: [docs/specs/case-files.md](../specs/case-files.md).
+- [ ] The cases are hand-checked. Open: they were written by a model as drafts, every one has `reviewed_by` null, and a person has to read them. `fixtures/cases/README.md` lists the one-word checks to look at first.
+- [x] `scripts/try_agent.py <agent> <case file>`: runs the real model on each case and prints the answer beside the expectation. Only `--dry-run` and scripted models have been run; no real model call has been made. "Met its expectations" covers the expectations written in the case, not the agent's own checks; the README says which those are.
 - [ ] Change the prompt in `docs/agents/<agent>.md` (the code reads it from there), re-run, keep what helps.
 - [ ] One live Exa search through the researcher, with the returned URLs checked against what Exa sent.
 
