@@ -780,3 +780,94 @@ def test_a_queued_note_cannot_go_back_on_the_index(store: NoteStore) -> None:
     with pytest.raises(ValueError):
         store.write(to_record(NoteAction(action="add", kind="goals", fact="x"), user_id="user-01",
                               session_id="s", note_id=gone, today=TODAY, now=NOW))
+
+
+# ---------- an intent is dropped only when the thing is known done ----------
+
+def new_note(store: NoteStore, fact: str = "Sent but never answered.") -> "notes.UserNote":
+    return to_record(NoteAction(action="add", kind="people", fact=fact), user_id="user-01", session_id="s",
+                     note_id=store.next_note_id("user-01"), today=TODAY, now=NOW)
+
+
+@pytest.mark.parametrize("killed_in_cleanup", [False, True])
+def test_a_lost_ingest_response_still_queues_the_note(store: NoteStore, mem: FakeUserMemory,
+                                                      monkeypatch: pytest.MonkeyPatch, killed_in_cleanup: bool) -> None:
+    note = new_note(store)
+    real_ingest = mem.ingest
+
+    def stored_then_lost(entry):
+        real_ingest(entry)  # past.dev stored it ...
+        raise PastError("connection reset")  # ... and the answer never came back
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mem, "ingest", stored_then_lost)
+        if killed_in_cleanup:
+            stop_after(patch, "counter.json", nth=2)  # the cleanup that drops the `writing` entry
+        with pytest.raises(KeyboardInterrupt if killed_in_cleanup else PastError):
+            store.write(note)
+    assert note.id in mem.entries and store.pending_deletes("user-01") == [note.id]
+    again = restart(store)
+    result = session(again, "user-01", [], forget_everything=True, remember_me=False)
+    assert note.id not in mem.entries and result.undeleted == []
+    assert_clean(again)
+
+
+def test_an_ingest_that_raises_is_queued_even_if_nothing_was_stored(store: NoteStore, mem: FakeUserMemory) -> None:
+    note = new_note(store)
+
+    def refused(entry):
+        raise PastError("400")
+
+    mem.ingest = refused
+    with pytest.raises(PastError):
+        store.write(note)
+    # A refusal cannot be told apart from a lost answer, so the note is queued; it was never visible.
+    assert store.pending_deletes("user-01") == [note.id] and store.stored("user-01") == {}
+
+
+def test_a_failure_before_ingest_is_called_queues_nothing(store: NoteStore, mem: FakeUserMemory) -> None:
+    note = new_note(store)
+    sent = []
+    mem.ingest = lambda entry: sent.append(entry) or "never"
+
+    def no_audience(*args, **kwargs):
+        raise PastError("503")
+
+    mem.ensure_audience = no_audience
+    with pytest.raises(PastError):
+        store.write(note)
+    assert sent == [] and store.pending_deletes("user-01") == []
+    assert set(json.loads((store.root / "notes/user-01/counter.json").read_text())) == {"next"}
+
+
+@pytest.mark.parametrize("operation", ["ensure_person", "next_note_id"])
+def test_ensure_person_and_next_note_id_finish_an_interrupted_take_off(store: NoteStore, mem: FakeUserMemory,
+                                                                       monkeypatch: pytest.MonkeyPatch,
+                                                                       operation: str) -> None:
+    gone, kept = seed(store, "user-01", ("people", "Forget me."), ("goals", "Keep me."))
+    with monkeypatch.context() as patch:
+        stop_after(patch, "pending_deletes.json")
+        with pytest.raises(KeyboardInterrupt):
+            store.take_off("user-01", [gone])
+    assert gone in index_ids(store, "user-01")  # the kill left it on the index
+    again = restart(store)
+    getattr(again, operation)("user-01")
+    assert index_ids(again, "user-01") == [kept] and gone not in again.stored("user-01")
+    assert again.pending_deletes("user-01") == [gone] and gone in mem.entries  # local only; no remote call
+
+
+def test_next_note_id_queues_a_write_left_by_a_stopped_store(store: NoteStore, mem: FakeUserMemory,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    note = new_note(store)
+
+    def stop(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mem, "wait", stop)
+        with pytest.raises(KeyboardInterrupt):
+            store.write(note)
+    again = restart(store)
+    assert again.next_note_id("user-01") == "note-user-01-002"
+    assert again.pending_deletes("user-01") == [note.id]
+    assert set(json.loads((store.root / "notes/user-01/counter.json").read_text())) == {"next"}

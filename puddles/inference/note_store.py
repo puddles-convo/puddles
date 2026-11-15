@@ -158,6 +158,7 @@ class NoteStore:
         return self.root / "notes" / check_user_id(user_id)
 
     def ensure_person(self, user_id: str) -> None:
+        self._recover(user_id)
         self.memory.ensure_audience(audience_for(user_id), [user_id, NOTE_TAKER])
 
     # ---------- the files (reading them never changes anything) ----------
@@ -261,6 +262,7 @@ class NoteStore:
 
     def next_note_id(self, user_id: str) -> str:
         """A number is never used twice, even after a delete."""
+        self._recover(user_id)
         counter = self._counter(user_id)
         n = int(counter["next"])
         self._save_counter(user_id, {**counter, "next": n + 1})
@@ -318,14 +320,14 @@ class NoteStore:
             audience=audience_for(user_id),
             metadata={"type": "user_note", "kind": note.kind, "user_id": user_id, "session_id": note.session_id})
         self._set_writing(user_id, [*self._writing(user_id), {"note_id": note.id, "owner": self._owner}])
-        accepted = False
+        handed_over = False  # once ingest is called, past.dev may hold the entry whatever comes back
         try:
             self.ensure_person(user_id)
+            handed_over = True
             ingestion_id = self.memory.ingest(entry)
-            accepted = True
             confirmed = self.memory.wait(ingestion_id)
         except Exception as exc:
-            self._abandon_write(user_id, note.id, accepted)
+            self._abandon_write(user_id, note.id, handed_over)
             raise PastError(f"note {note.id} was not written: {exc}") from exc
         if not confirmed:
             self._abandon_write(user_id, note.id, True)
@@ -334,9 +336,10 @@ class NoteStore:
         stored[note.id] = note
         self._save_stored(user_id, stored)  # stays in `writing` until save_index puts it on the index
 
-    def _abandon_write(self, user_id: str, note_id: str, accepted: bool) -> None:
-        if accepted:
-            self._add_pending(user_id, [note_id])  # past.dev took it and may still store it
+    def _abandon_write(self, user_id: str, note_id: str, handed_over: bool) -> None:
+        """Drop the `writing` intent only once it is replaced by a delete intent, or nothing was ever sent."""
+        if handed_over:
+            self._add_pending(user_id, [note_id])  # a lost response cannot prove past.dev did not store it
         self._set_writing(user_id, [w for w in self._writing(user_id) if w["note_id"] != note_id])
 
     def take_off(self, user_id: str, note_ids: list[str]) -> None:
