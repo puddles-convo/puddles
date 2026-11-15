@@ -257,6 +257,10 @@ def test_without_fake_constructs_documented_dependencies(tmp_path, capsys, monke
     monkeypatch.setenv("EXA_API_KEY", "acceptance-placeholder-not-a-real-key")
     exa = importlib.import_module("puddles.exa")
     judge_api = importlib.import_module("puddles.eval.judge")
+    safety_api = importlib.import_module("puddles.eval.safety")
+    # The default real gate now needs safety configuration; the mocked round makes no asks.
+    monkeypatch.setattr(safety_api.OpenAIYesNo, "from_env",
+                        classmethod(lambda cls: SimpleNamespace(model="fake")))
     judge_panel = SimpleNamespace(version="acceptance-judge")
     helper, user = FakeClient([]), FakeClient([])
     probe = "acceptance search probe"
