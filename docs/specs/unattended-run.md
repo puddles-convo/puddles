@@ -142,6 +142,42 @@ next candidate then needed 4.425 to be kept.
   as they already were whenever the policy in force was scored again. The numbers of earlier
   measurements stay in the decision log.
 
+## 5. What was tried and rejected is not tried again (`puddles/agents/critic.py`, `puddles/agents/proposer.py`, `puddles/decision_log.py`, `scripts/run_loop.py`)
+
+Added at 05:20 on 2026-11-15, from the run itself. The loop proposed the same idea it had already seen
+rejected: rounds 5 and 7 both made C9 stricter, and both candidates scored about 0.65 below the policy
+in force; rounds 2, 3 and 6 all reworded C1. The cause is in the code, not the models: when the critic
+names an earlier pattern that already has a rule, the proposer's check forbids adding a rule, so it
+must reword that same rule again, and nothing counts how often that has failed.
+
+- **5.1 The setting.** `PUDDLES_PARK_REVERTED`: `1` is on, unset or `0` is off, anything else is a
+  refusal before any model call in `scripts/run_loop.py` (exit 2, like 4.1). Off is today's behaviour:
+  the same prompts, the same checks. No existing test changes.
+- **5.2 What is parked.** Worked out by code from the decision log's round events only, for the policy
+  version in force, P. A *failed try* is a round whose outcome is `reverted`, whose `policy.base` is
+  P, and that has an edit. It is a *negative result* when both logged qualities are present and
+  `scores.after.quality` is lower than `scores.before.quality`.
+  - A **rule** is parked on P when one failed try that reworded or removed it was a negative result,
+    or when two failed tries reworded or removed it.
+  - A **pattern** (by its identity, following `same_as_pattern_id` the way the log already does) is
+    parked on P when one failed try for it was a negative result, or when two failed tries were for it.
+  - A keep changes the policy in force, so nothing is parked on the new version until it has failed
+    tries of its own.
+- **5.3 The critic does not name a parked pattern.** With the setting on, the critic's input marks each
+  parked pattern as parked, with the rounds that tried it and what they measured. The check rejects
+  an answer whose `same_as_pattern_id` is a parked pattern, with a reason that says it is parked on
+  this policy and asks for a different pattern or none. The usual single retry applies; a second
+  failure takes the existing path (the round ends as `no_pattern` with the failure as its reason).
+- **5.4 The proposer does not edit a parked rule.** With the setting on, the proposer's input lists the
+  parked rules, each with the edits that tried it and the measured result. The check rejects a
+  `reword` or `remove` of a parked rule, with a reason naming the earlier edit and its result and
+  asking for a different rule or a new one. The existing check "this pattern already has an active
+  rule; reword or remove it instead of adding" does not apply when that rule is parked, so the
+  proposer always has a legal move.
+- **5.5 Limits, stated.** The critic can describe an old weakness under a new name; then 5.3 does not
+  fire, and 5.4 still keeps the parked rule from being edited. A new rule that restates a rejected
+  rewording in other words is not detected.
+
 ## Knowingly left out tonight
 
 Each is a reproduced finding and becomes an issue.
