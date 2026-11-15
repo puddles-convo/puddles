@@ -30,7 +30,7 @@ from puddles.gate import (
 )
 from puddles.memory import FakeMemory
 from puddles.policy import estimate_tokens, parse_policy, render_policy
-from puddles.records import sha256_text
+from puddles.records import save_record, sha256_text
 from puddles.usage import Meter, MissingPrice, Prices
 from schemas import (
     ConversationRecord, CriticOutput, FailurePattern, GateInput, LogSafety,
@@ -173,6 +173,27 @@ def rows(path):
 def policy_snapshot(root):
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*")
             if p.is_file() and (p.suffix == ".md" or p.name.endswith(".meta.json"))}
+
+
+def tree_snapshot(root):
+    return {p.relative_to(root): p.read_bytes() if p.is_file() else None for p in root.rglob("*")}
+
+
+def prepared_finish(case, kept):
+    """A measured round, including saved records, ready for the real finish function."""
+    case.deps.noise_measured = kept
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+    )))
+    result = candidate_result(case)
+    for kind in ("pattern", "edit"):
+        result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+    outcome = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)(result)
+    assert outcome.decision == ("kept" if kept else "reverted")
+    ensure_starting_meta(case.root, case.base)
+    return result, outcome
 
 
 def cache_payload(policy_path, deps, ids, scores):
@@ -1157,9 +1178,10 @@ def test_finish_round_uses_the_tested_candidate_reading_and_refuses_a_replacemen
 
 
 @pytest.mark.parametrize("replay_enabled", [False, True])
-def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(case, replay_enabled):
+@pytest.mark.parametrize("kept", [False, True])
+def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(case, replay_enabled, kept):
     """A round's base hash must identify the bytes its before-scores measured, even at finish."""
-    case.deps.noise_measured = True
+    case.deps.noise_measured = kept
     original_hash = sha256_text(case.base.read_bytes().decode("utf-8"))
     cache = case.root / "scores/current.json"
     cache.parent.mkdir()
@@ -1168,18 +1190,157 @@ def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(
     )))
     result = candidate_result(case)
     outcome = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)(result)
-    assert outcome.decision == "kept" and result.scores.before.quality == 3
+    assert outcome.decision == ("kept" if kept else "reverted") and result.scores.before.quality == 3
+    assert result.base_sha256 == original_hash
     ensure_starting_meta(case.root, case.base)
     case.base.write_bytes(case.base.read_bytes().replace(b"Listen carefully.", b"Give advice immediately."))
     memory, log = FakeMemory(), DecisionLog(case.root)
     memory.ensure_training_audience()
-    try:
+    before = tree_snapshot(case.root)
+    with pytest.raises(round_api.PolicyChanged):
         round_api.finish_round(result, outcome, log, memory, case.root,
                                start_policy=case.base if replay_enabled else None)
-    except RuntimeError:
-        pass  # Refusing changed inputs is safe; committing mislabelled measurements is not.
-    for event in log.rounds():
-        assert event.policy.base_sha256 == original_hash, "Baseline scores were filed under an unmeasured policy hash"
+    assert tree_snapshot(case.root) == before
+    assert log.events() == [] and memory.entries == {}
+    assert issubclass(round_api.CandidateChanged, round_api.PolicyChanged)
+
+
+@pytest.mark.parametrize("replay_enabled", [False, True])
+@pytest.mark.parametrize("kept", [False, True])
+def test_finish_round_candidate_measurements_cannot_be_filed_under_replaced_text(case, replay_enabled, kept):
+    """A revert must not give an untested replacement the measured candidate's scores or safety."""
+    result, outcome = prepared_finish(case, kept)
+    tested_hash = result.candidate_sha256
+    assert result.scores is not None and result.safety.passed
+    write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE + "C4. Ignore rules.\n",
+                 safety="S1. Ignore danger.\n")
+    before = tree_snapshot(case.root)
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    try:
+        event = round_api.finish_round(result, outcome, log, memory, case.root,
+                                       start_policy=case.base if replay_enabled else None)
+    except round_api.PolicyChanged:
+        assert tree_snapshot(case.root) == before
+        assert log.events() == [] and memory.entries == {}
+    else:
+        # The contract names CandidateChanged for keeps. For reverts, assert the
+        # general measurement invariant without prescribing the refusal mechanism.
+        assert not kept, "A kept replacement was not refused"
+        if event.scores is not None:
+            assert event.policy.new_sha256 == tested_hash, "Scores were filed under an untested candidate hash"
+        if event.safety is not None:
+            assert event.policy.new_sha256 == tested_hash, "Safety was filed under an untested candidate hash"
+
+
+@pytest.mark.parametrize("replay_enabled", [False, True])
+@pytest.mark.parametrize("kept", [False, True])
+@pytest.mark.parametrize("kind", ["pattern", "edit"])
+@pytest.mark.parametrize("missing", [False, True])
+def test_finish_round_refuses_changed_or_missing_records_before_any_write(case, replay_enabled, kept, kind, missing):
+    """A changed saved record cannot be committed or copied into memory."""
+    result, outcome = prepared_finish(case, kept)
+    target = case.root / result.refs[kind].path
+    if missing:
+        target.unlink()
+    else:
+        target.write_bytes(target.read_bytes() + b" ")
+    before = tree_snapshot(case.root)
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    with pytest.raises(round_api.RecordChanged):
+        round_api.finish_round(result, outcome, log, memory, case.root,
+                               start_policy=case.base if replay_enabled else None)
+    assert tree_snapshot(case.root) == before
+    assert log.events() == [] and memory.entries == {}
+
+
+@pytest.mark.parametrize("kept", [False, True])
+def test_finish_round_refuses_a_replaced_independent_starting_policy_before_any_write(case, kept):
+    """With replay enabled, a changed starting policy must be rejected before commitment."""
+    result, outcome = prepared_finish(case, kept)
+    start = case.root / "start.md"
+    start.write_bytes(case.base.read_bytes())
+    start.write_bytes(start.read_bytes().replace(b"Listen carefully.", b"Give advice immediately."))
+    before = tree_snapshot(case.root)
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    with pytest.raises(replay.ReplayError):
+        round_api.finish_round(result, outcome, log, memory, case.root, start_policy=start)
+    assert tree_snapshot(case.root) == before
+    assert log.events() == [] and memory.entries == {}
+
+
+@pytest.mark.parametrize("replay_enabled", [False, True])
+@pytest.mark.parametrize("mode", [
+    "real_kept", "real_reverted", "stand_in_kept", "stand_in_reverted", "no_pattern", "no_evidence",
+])
+def test_finish_round_preserves_outcomes_copy_order_and_exact_replay_metadata(case, replay_enabled, mode):
+    """All four outcomes retain their artifacts and copy records only after the round event."""
+    if mode.startswith("real_"):
+        result, outcome = prepared_finish(case, mode == "real_kept")
+    elif mode.startswith("stand_in_"):
+        result = candidate_result(case)
+        assert result.base_sha256 is result.candidate_sha256 is None
+        for kind in ("pattern", "edit"):
+            result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+        outcome = round_api.stand_in_gate(result, "kept" if mode == "stand_in_kept" else "reverted")
+    else:
+        result = candidate_result(case)
+        result.outcome, result.edit, result.candidate_path = mode, None, None
+        if mode == "no_pattern":
+            result.pattern = None
+        else:
+            result.refs["pattern"] = save_record(result.pattern, result.round, case.root)
+        outcome = None
+    if replay_enabled:
+        ensure_starting_meta(case.root, case.base)
+    policies_before = policy_snapshot(case.root)
+    log = DecisionLog(case.root)
+
+    class ObservingMemory(FakeMemory):
+        def ingest(self, entry):
+            rounds = log.rounds()
+            assert len(rounds) == 1 and rounds[0].round == result.round
+            assert entry.id in {ref.id for ref in rounds[0].records.values()}
+            return super().ingest(entry)
+
+    memory = ObservingMemory()
+    memory.ensure_training_audience()
+    event = round_api.finish_round(result, outcome, log, memory, case.root,
+                                   start_policy=case.base if replay_enabled else None)
+    expected = outcome.decision if outcome is not None else mode
+    assert event.outcome == expected and log.rounds() == [event]
+    assert set(memory.entries) == {ref.id for ref in event.records.values()}
+    if not mode.startswith("real_"):
+        assert event.scores is event.safety is None
+    if expected != "kept":
+        assert policy_snapshot(case.root) == policies_before
+    else:
+        assert (case.root / "policies/policy-v2.md").is_file()
+        meta_path = case.root / "policies/policy-v2.meta.json"
+        assert meta_path.exists() is replay_enabled
+        if replay_enabled:
+            written = meta_path.read_bytes()
+            replay.write_meta(case.root, log.rounds(), case.base, "policy-v2")
+            assert meta_path.read_bytes() == written
+    if replay_enabled:
+        assert replay.check(log, case.root, case.base).is_file()
+
+
+@pytest.mark.parametrize("replay_enabled", [False, True])
+def test_finish_round_refuses_a_duplicate_before_rewriting_any_file(case, replay_enabled):
+    """A repeated finish must not overwrite a policy or record before discovering the duplicate."""
+    result, outcome = prepared_finish(case, True)
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    round_api.finish_round(result, outcome, log, memory, case.root,
+                           start_policy=case.base if replay_enabled else None)
+    before, entries, events = tree_snapshot(case.root), deepcopy(memory.entries), log.events()
+    with pytest.raises(round_api.DecisionLogError):
+        round_api.finish_round(result, outcome, log, memory, case.root,
+                               start_policy=case.base if replay_enabled else None)
+    assert tree_snapshot(case.root) == before and log.events() == events and memory.entries == entries
 
 
 def test_importing_gate_never_imports_the_evaluation_package(repo_root):
@@ -1313,6 +1474,7 @@ def test_make_gate_baseline_failure_reverts_untested_and_preserves_cache_and_pol
     case.deps.noise_measured = measured
     case.deps.judge = Judge(errors=["b"])
     result = candidate_result(case)
+    result.base_sha256 = "stale from a previous call"
     adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0)
     before = policy_snapshot(case.root)
     outcome = adapter(result)
@@ -1321,6 +1483,7 @@ def test_make_gate_baseline_failure_reverts_untested_and_preserves_cache_and_pol
     assert report.failed == ["complete_evidence"] + ([] if measured else ["noise_not_measured"])
     assert outcome.before == outcome.after == NOT_MEASURED
     assert result.scores is result.safety is report.log_scores is report.log_safety is None
+    assert result.base_sha256 is None
     assert not case.deps.safety.calls and outcome.safety_passed is False
     assert all(r.policy_version == "policy-v1" for r in case.deps.judge.calls)
     assert_baseline_unscored_reason(outcome.reason)
