@@ -117,7 +117,7 @@ def ensure_starting_meta(root: Path, start_policy: Path) -> Path
 2. Picks the scenarios named in `scenario_ids` from `deps.scenarios`, in the order of `scenario_ids`. An ID that is not there, a repeated ID or an empty list raises `GateError`.
 3. `loop.runner.run_batch(deps.helper_client, deps.user_client, policy, scenarios, round=round_, max_turns=deps.max_turns, seed=deps.seed, tag=tag, out_path=<root>/conversations/round-NN-<name>.jsonl)`, where `<name>` is `validation` for the tag `val` and the tag itself otherwise (`round-00-current.jsonl`).
 4. For each record, one call `deps.judge.score(record)`. Any exception from it leaves that conversation unscored; the rest are still scored. A result whose `score.conversation_id` is not the record's ID is unscored too.
-5. Saves the `ScoreRecord`s it got to `<root>/scores/round-NN-<name>.jsonl`, one per line, even when some are missing.
+5. Saves the `ScoreRecord`s it got to `<root>/scores/round-NN-<name>.jsonl`, one per line, even when some are missing. When nothing was scored the file is written empty.
 6. Returns `Evidence`. `scores` is set, to `average(...)`, only if no conversation failed and none is unscored. **The conversations that survived are never averaged.**
 
 ### `current_scores`
@@ -127,11 +127,14 @@ The scores of the policy in force on the validation scenarios. Kept in `<root>/s
 ```json
 {"policy_version": "policy-v1", "policy_sha256": "(hash of the policy file's text)",
  "scenario_ids": ["a", "b"], "judge_version": "judge-v1-ab12cd34",
+ "scenarios_sha256": "(see below)", "max_turns": 10, "seed": null,
  "scores": {"empathy": 3.4, "relevance": 3.1, "quality": 3.25, "emotion_change": 0.6}}
 ```
 
-- If that file exists and its `policy_version`, `policy_sha256`, `scenario_ids` and `judge_version` equal the policy file's version, the hash of its text (`puddles.records.sha256_text`), the given IDs in the same order and `deps.judge.version`, its scores are returned and no model is called. A file that cannot be read or does not have these fields counts as absent.
-- Otherwise it calls `score_policy(deps, policy_path, scenario_ids, BASELINE_ROUND, CURRENT_TAG)`. Complete evidence is written to `current.json` and returned. Incomplete evidence raises `GateError` and writes no `current.json`.
+- If that file exists and its `policy_version`, `policy_sha256`, `scenario_ids`, `judge_version`, `scenarios_sha256`, `max_turns` and `seed` equal the policy file's version, the hash of its text (`puddles.records.sha256_text`), the given IDs in the same order, `deps.judge.version`, the hash of the scenarios, `deps.max_turns` and `deps.seed`, its scores are returned and no model is called. A file that cannot be read or does not have every one of these fields counts as absent.
+- `scenarios_sha256` is `puddles.records.sha256_text` of the picked scenarios, in the order of `scenario_ids`, each as `model_dump_json()`, joined with `"\n"`. A scenario whose text changed under the same ID is therefore scored again.
+- Otherwise it calls `score_policy(deps, policy_path, scenario_ids, BASELINE_ROUND, CURRENT_TAG)`. Complete evidence is written to `current.json` and returned. Incomplete evidence raises `GateError` and writes no `current.json`; a `current.json` that was already there and did not match is left as it is, since it can never match.
+- **A limit, stated:** the file does not record which helper or simulated-user model produced the conversations. A root is for one pair of models. Change either and start a new root, or delete `current.json`.
 
 ### `run_gate`
 
@@ -149,7 +152,7 @@ In this order:
 
    If `candidate_file` fails, the other three are `not_run`. Otherwise all three are evaluated, and each is `passed` or `failed`. If any of the four fails, nothing else runs: no conversation, no judge call, no safety check, and the five checks after them are `not_run`, `noise_not_measured` included.
 2. **The safety check** (check 4): one call `deps.safety(candidate.version, reply)`, where `reply(turns)` returns `loop.helper.helper_reply(deps.helper_client, candidate, turns, session_id=f"safety-r{round:02d}", turn=1).text` under the candidate policy, with no crisis checker in front of it. `safety_cases` fails when the result's `passed` is false, and when `deps.safety` raises; a safety check that raised leaves no `SafetyResult`, and validation still runs. The `SafetyResult` is saved as JSON to `<root>/scores/round-NN-safety.json`. The gate does not load cases and asks no yes-or-no question itself; that is inside the safety check it is given.
-3. **Validation**: `score_policy(deps, candidate_path, inp.validation_scenario_ids, inp.round, VALIDATION_TAG)`. Steps 2 and 3 both run even if one fails. `complete_evidence` fails when the evidence is not complete; then `quality_gain` and `dimension_drop` are `not_run`. **It also fails if any validation conversation ID is found in `<root>/conversations/round-NN-train.jsonl`** (a training scenario named `val-a` and a validation scenario named `a` give the same ID): evidence that cannot be told apart from the round's own is not evidence.
+3. **Validation**: `score_policy(deps, candidate_path, inp.validation_scenario_ids, inp.round, VALIDATION_TAG)`. Steps 2 and 3 both run even if one fails. `complete_evidence` fails when the evidence is not complete; then `quality_gain` and `dimension_drop` are `not_run`. **It also fails if any validation conversation ID is found in `<root>/conversations/round-NN-train.jsonl`** (a training scenario named `val-a` and a validation scenario named `a` give the same ID): evidence that cannot be told apart from the round's own is not evidence. The validation IDs are `loop.runner.conversation_id(inp.round, scenario_id, VALIDATION_TAG)` for each ID in `inp.validation_scenario_ids`; the training IDs are the `id` of each line of that file. With no such file there is nothing to clash with. On a clash the gate treats the validation as not measured: `quality_gain` and `dimension_drop` are `not_run`, `after` is `NOT_MEASURED` and `log_scores` is `None`, whatever the judge said. The validation files already written stay where they are; the gate deletes nothing.
 4. With complete evidence, where `before = inp.current_scores` (its `quality` filled in as `(empathy + relevance) / 2` when it is `None`) and `after` is the candidate's scores. Every difference is rounded to 9 decimal places before it is compared:
    - `quality_gain` (check 5) fails unless `after.quality - before.quality > inp.noise`. A gain exactly equal to the noise fails.
    - `dimension_drop` (check 6) fails if `before.empathy - after.empathy > inp.noise`, or the same for relevance. A fall exactly equal to the noise passes.
@@ -178,8 +181,10 @@ Returns a callable for `RoundDeps.gate`. For a `RoundResult` with an edit it:
 1. gets the current scores with `current_scores(deps, result.base_policy_path, validation_scenario_ids)`. If that raises, the candidate is reverted untested: `failed` is `["complete_evidence"]` plus `noise_not_measured` when the flag is off, `before` and `after` are `NOT_MEASURED`, and the reason says the policy in force could not be scored;
 2. builds the `GateInput` (`current_policy` and `candidate_policy` are the two paths as text, `safety_case_set` as given) and calls `run_gate`;
 3. sets `result.scores = report.log_scores` and `result.safety = report.log_safety`;
-4. on `kept`, rewrites `current.json` with the candidate's scores under the promoted version. Its `policy_sha256` is the hash of the text `finish_round` will write for the promoted policy: `puddles.policy.render_policy` of the parsed candidate with its version set to the promoted version;
+4. on `kept`, rewrites `current.json` with the candidate's scores under the promoted version. Its `policy_sha256` is the hash of the text `finish_round` will write for the promoted policy: `puddles.policy.render_policy` of the parsed candidate with its version set to the promoted version. If this write fails the outcome stands and nothing is raised: the file is then stale or missing, it cannot match the promoted policy, and the next round scores the policy in force again;
 5. returns `report.outcome`.
+
+`safety_case_set` is only recorded on the `GateInput`. The safety check that was passed in decides which cases it runs; the gate cannot choose them through the callback. The piece that joins the real safety check makes the two agree.
 
 The callable never raises. It keeps the last `GateReport` on its attribute `last_report`.
 
@@ -215,13 +220,13 @@ Writes `<root>/policies/<version>.meta.json` for the starting policy if it is no
 
 ## 6. What a round that reached the real gate leaves behind
 
-Besides what [graph.md](graph.md) lists, for the work that was done (a candidate stopped by a static check leaves only the gate report):
+Besides what [graph.md](graph.md) lists, for the work that was done. A candidate stopped by a static check leaves, of the gate's own files for round NN, only the gate report; the baseline files below are still written through `make_gate`, because the policy in force is scored before the candidate is looked at, and the candidate file the proposer wrote stays.
 
-- `<root>/conversations/round-NN-validation.jsonl` and `<root>/scores/round-NN-validation.jsonl`. No conversation ID in them appears in `round-NN-train.jsonl`.
+- `<root>/conversations/round-NN-validation.jsonl` and `<root>/scores/round-NN-validation.jsonl`. In a round that was kept, no conversation ID in them appears in `round-NN-train.jsonl`; when one does, the round is reverted (section 2, step 3) and the files stay as the record of it.
 - `<root>/conversations/round-00-current.jsonl`, `<root>/scores/round-00-current.jsonl` and `<root>/scores/current.json`, from the first round that reached the gate.
 - `<root>/scores/round-NN-safety.json` and `<root>/scores/round-NN-gate.json`.
 - A round event whose `scores` and `safety` are filled in when they were measured.
-- `<root>/policies/<starting version>.meta.json`. A reverted round adds no `.meta.json` and no policy file.
+- `<root>/policies/<starting version>.meta.json`. A reverted round adds no `.meta.json` beyond that one and no policy file beyond the proposer's candidate.
 
 ## 7. Tests
 
