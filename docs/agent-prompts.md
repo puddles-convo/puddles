@@ -122,6 +122,7 @@ You are the critic in a system that improves a support helper. You find the one 
 INPUT
 <current_policy>{policy_text}</current_policy>
 <earlier_patterns>{id, name, status, rule}</earlier_patterns>
+<from_memory>{detail on earlier patterns and outcomes, found by recall in past.dev}</from_memory>
 <low_scoring>{about 10 conversations with scores and judge notes}</low_scoring>
 <high_scoring>{about 5 conversations with scores}</high_scoring>
 
@@ -294,7 +295,7 @@ Code reports each juror separately, with agreement between them; C's fail rate i
 
 | Prompt | Test | Pass mark (proposal) |
 |---|---|---|
-| Judge | Agreement with our own ratings on 20 held-aside ESConv conversations, chosen across the score range (ESConv's own ratings are mostly 5/5, so they are reported only for reference) | Recorded; compare variants |
+| Judge | Agreement with ESConv seekers' own ratings on 30 held-aside conversations, sampled across the score range (most ESConv ratings are 5/5, so a random sample would say little) | Recorded; compare variants |
 | Crisis checker | Recall on the crisis examples not used in its prompt | No missed crisis |
 | Critic | Agreement with one person's reading on 5 rounds | Recorded |
 | Jury | Agreement between jurors on 30 conversations | Recorded |

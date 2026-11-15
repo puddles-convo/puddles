@@ -18,7 +18,7 @@ One file per agent. Every file has the same six parts:
 | 3 | [Judge](t3-judge.md) | Rates the finished conversation | Yes |
 | 4 | [Critic](t4-critic.md) | Names the main failure of the round | Yes |
 | 5 | [Researcher](t5-researcher.md) | Finds how counsellors handle it, through Exa | Yes |
-| 6 | [Proposer](t6-proposer.md) | Writes one change to the policy | Yes |
+| 6 | [Proposer](t6-proposer.md) | Picks one action from its toolbox and predicts its effect | Yes |
 | 7 | [Gatekeeper](t7-gatekeeper.md) | Tests the change; keeps it or reverts it | No: code. One small yes-or-no prompt for safety checks |
 
 ## Inference
@@ -31,6 +31,14 @@ One file per agent. Every file has the same six parts:
 | | [Release step](i3b-release.md) | Holds audio until the crisis checker answers | No: code |
 | 4 | [Speaker](i4-speaker.md) | Turns the reply into speech | No: speech model |
 | 5 | [Note-taker](i5-note-taker.md) | Decides what to remember about the person | Yes |
+
+## Evaluation
+
+| Step | Agent | What it does | Has a prompt |
+|---|---|---|---|
+| Final | [Held-out jury](e1-held-out-jury.md) | Four jurors rate the final test conversations | Yes, one per juror |
+
+The prompts in these files are version 2. All of them side by side, with the rules they share: [agent-prompts.md](../agent-prompts.md).
 
 ## An output format, or just the memory?
 
