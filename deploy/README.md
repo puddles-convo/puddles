@@ -9,7 +9,7 @@ The repo's helper, the crisis checker, `scripts/chat.py` and training runs all r
 | Model | `Qwen/Qwen3.5-9B`, served as `qwen3.5-9b`, text only (`--language-model-only`) |
 | GPU | L40S by default (`MODAL_HELPER_GPU`: L4, A10G, L40S, A100-40GB, A100-80GB, H100, H200) |
 | Region | `us-east`, where the robot's API runs (`MODAL_HELPER_REGION`; empty means any region) |
-| Scaling | Scales to zero after 15 min idle. `MODAL_HELPER_MIN_CONTAINERS=1` keeps one warm, **only while the demo runs** |
+| Scaling | Scales to zero after 2 min idle (`MODAL_HELPER_SCALEDOWN_S`). `MODAL_HELPER_MIN_CONTAINERS=1` keeps one warm, **only while the demo runs** |
 | Auth | Bearer key. vLLM reads `VLLM_API_KEY` from the Modal Secret `puddles-helper-key`; the app refuses to start without it |
 | Weights | Cached on the Modal Volume `puddles-helper-hf-cache`, so only the first start downloads them (about 18 GB) |
 | Memory | bf16 weights by default (about 18 GB). `MODAL_HELPER_QUANTIZATION=fp8` halves them, to fit a 24 GB GPU (A10G, L4), for example when the account cannot use an L40S yet |
@@ -111,7 +111,7 @@ That means 10 turns, then one crisis message, such as "I don't want to be here a
 
 ## Cost
 
-You pay for GPU time while a container runs, including the 15 idle minutes before it scales to zero. Check current prices at modal.com/pricing. As a rough guide, an L40S costs about half as much per hour as an H100. Stop the app (`modal app stop puddles-helper`) when nobody needs it, and never leave `MODAL_HELPER_MIN_CONTAINERS=1` on overnight unless a run needs it.
+You pay for GPU time while a container runs, including the idle minutes before it scales to zero (2 by default). The first full smoke test (`--warm 20`, two cold starts, a 15-minute idle window then) cost about $0.74. Most of that was start-up and idle time, not requests. Check current prices at modal.com/pricing. As a rough guide, an L40S costs about half as much per hour as an H100. Stop the app (`modal app stop puddles-helper`) when nobody needs it, and never leave `MODAL_HELPER_MIN_CONTAINERS=1` on overnight unless a run needs it.
 
 ## Not here
 

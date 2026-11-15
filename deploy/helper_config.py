@@ -76,7 +76,7 @@ class HelperSettings:
     gpu: str = "L40S"
     region: str = "us-east"  # the robot's Modal API runs there; empty means any region
     min_containers: int = 0  # scale to zero; set 1 only while the demo runs
-    scaledown_s: int = 15 * 60
+    scaledown_s: int = 2 * 60  # idle GPU time is billed: 15 min cost most of the first test run
     max_model_len: int = 8192
     gpu_memory_utilization: float = 0.90
     concurrency: int = 32

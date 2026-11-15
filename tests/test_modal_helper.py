@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from deploy.helper_config import ENV, HelperSettings, SettingsError, vllm_command
+from deploy.helper_config import CONTAINER_ENV, ENV, HelperSettings, SettingsError, vllm_command
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -66,3 +66,13 @@ def test_fp8_only_when_asked_and_it_survives_the_round_trip():
     cmd = vllm_command(s)
     assert cmd[cmd.index("--quantization") + 1] == "fp8"
     assert HelperSettings.from_env(s.as_env()) == s
+
+
+def test_the_container_does_not_need_a_cuda_compiler():
+    """The first deploy crashed in warm-up: FlashInfer's sampler compiles a kernel and the image has no nvcc."""
+    assert CONTAINER_ENV["VLLM_USE_FLASHINFER_SAMPLER"] == "0"
+    assert "CONTAINER_ENV" in (REPO / "deploy" / "modal_helper.py").read_text()
+
+
+def test_idle_gpu_time_is_short_by_default():
+    assert HelperSettings.from_env({}).scaledown_s == 120
