@@ -131,7 +131,7 @@ The scores of the policy in force on the validation scenarios. Kept in `<root>/s
  "scores": {"empathy": 3.4, "relevance": 3.1, "quality": 3.25, "emotion_change": 0.6}}
 ```
 
-- If that file exists and its `policy_version`, `policy_sha256`, `scenario_ids`, `judge_version`, `scenarios_sha256`, `max_turns` and `seed` equal the policy file's version, the hash of its text (`puddles.records.sha256_text`), the given IDs in the same order, `deps.judge.version`, the hash of the scenarios, `deps.max_turns` and `deps.seed`, its scores are returned and no model is called. A file that cannot be read or does not have every one of these fields counts as absent.
+- If that file exists and its `policy_version`, `policy_sha256`, `scenario_ids`, `judge_version`, `scenarios_sha256`, `max_turns` and `seed` equal the policy file's version, the hash of its text (`puddles.records.sha256_text`), the given IDs in the same order, `deps.judge.version`, the hash of the scenarios, `deps.max_turns` and `deps.seed`, its scores are returned and no model is called. A file that cannot be read, does not have every one of these fields, or whose `scores` is missing or does not validate as `Scores`, counts as absent.
 - `scenarios_sha256` is `puddles.records.sha256_text` of the picked scenarios, in the order of `scenario_ids`, each as `model_dump_json()`, joined with `"\n"`. A scenario whose text changed under the same ID is therefore scored again.
 - Otherwise it calls `score_policy(deps, policy_path, scenario_ids, BASELINE_ROUND, CURRENT_TAG)`. Complete evidence is written to `current.json` and returned. Incomplete evidence raises `GateError` and writes no `current.json`; a `current.json` that was already there and did not match is left as it is, since it can never match.
 - **A limit, stated:** the file does not record which helper or simulated-user model produced the conversations. A root is for one pair of models. Change either and start a new root, or delete `current.json`.
@@ -174,14 +174,16 @@ The report is also saved to `<root>/scores/round-NN-gate.json`: `{"round", "deci
 
 **The gate writes no policy file and changes none.** The candidate file the proposer wrote stays where it is. A reverted candidate leaves the policy in force byte-for-byte as it was.
 
+**Every check and every measurement is about the same bytes.** The gate takes the hash of the candidate file's text (`puddles.records.sha256_text`) when it first reads it for the static checks, and of the current policy's likewise. Every later time the gate loads either file (for the safety replies, for validation, for anything else) it compares the hash of what it read with the first one, and it compares once more after the last judge call, before it decides. Where an existing loader reads the file itself, the gate hashes the file before and after that load and requires both to equal the first hash. A difference at any point is a revert: `complete_evidence` fails, `quality_gain` and `dimension_drop` are `not_run`, `after` is `NOT_MEASURED`, `log_scores` is `None`, and the reason says the candidate (or the current policy) changed while it was being tested. `GateReport` has one more field, `candidate_sha256: Optional[str] = None`: the hash the checks were made on, `None` when the candidate could not be read.
+
 ### `make_gate`
 
 Returns a callable for `RoundDeps.gate`. For a `RoundResult` with an edit it:
 
 1. gets the current scores with `current_scores(deps, result.base_policy_path, validation_scenario_ids)`. If that raises, the candidate is reverted untested: `failed` is `["complete_evidence"]` plus `noise_not_measured` when the flag is off, `before` and `after` are `NOT_MEASURED`, and the reason says the policy in force could not be scored;
 2. builds the `GateInput` (`current_policy` and `candidate_policy` are the two paths as text, `safety_case_set` as given) and calls `run_gate`;
-3. sets `result.scores = report.log_scores` and `result.safety = report.log_safety`;
-4. on `kept`, rewrites `current.json` with the candidate's scores under the promoted version. Its `policy_sha256` is the hash of the text `finish_round` will write for the promoted policy: `puddles.policy.render_policy` of the parsed candidate with its version set to the promoted version. If this write fails the outcome stands and nothing is raised: the file is then stale or missing, it cannot match the promoted policy, and the next round scores the policy in force again;
+3. sets `result.scores = report.log_scores`, `result.safety = report.log_safety` and `result.candidate_sha256 = report.candidate_sha256`;
+4. on `kept`, rewrites `current.json` with the candidate's scores under the promoted version. The candidate is read once more for this, and its hash must equal `report.candidate_sha256`; if it does not, the outcome returned is a revert as described under "the same bytes", and `current.json` is not rewritten. Its `policy_sha256` is the hash of the text `finish_round` will write for the promoted policy: `puddles.policy.render_policy` of the parsed candidate with its version set to the promoted version. If this write fails the outcome stands and nothing is raised: the file is then stale or missing, it cannot match the promoted policy, and the next round scores the policy in force again;
 5. returns `report.outcome`.
 
 `safety_case_set` is only recorded on the `GateInput`. The safety check that was passed in decides which cases it runs; the gate cannot choose them through the callback. The piece that joins the real safety check makes the two agree.
@@ -194,7 +196,8 @@ Writes `<root>/policies/<version>.meta.json` for the starting policy if it is no
 
 ## 3. `puddles/round.py`
 
-- `RoundResult` gets two fields, both `None` by default: `scores: Optional[LogScores]` and `safety: Optional[LogSafety]`. `None` means not measured, never that it passed.
+- `RoundResult` gets three fields, all `None` by default: `scores: Optional[LogScores]`, `safety: Optional[LogSafety]` and `candidate_sha256: Optional[str]`. `None` means not measured, never that it passed.
+- **`finish_round` promotes only the bytes the gate tested.** When the gate outcome is `kept` and `result.candidate_sha256` is set, `finish_round` reads the candidate file once, and if the hash of that text is not `result.candidate_sha256` it raises `puddles.round.CandidateChanged` (a `RuntimeError`) before it writes anything: no policy file, no `.meta.json`, no record, no round event, no memory copy. The promoted policy is rendered from that same reading. With `candidate_sha256` `None` (the stand-in gate) it behaves as before.
 - `finish_round` writes them into the round event as `scores` and `safety` when a gate outcome is given, and leaves both empty otherwise. Its signature does not change.
 
 ## 4. `puddles/graph.py`
