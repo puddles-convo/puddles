@@ -454,3 +454,79 @@ def test_all_pairs_scored_gives_the_unpaired_difference():
     report = P.render_report(_pilot(on, off))
     assert _row(report, "Mean empathy, all sessions") == ["1.33", "1.67", "-0.33"]
     assert _row(report, "Pairs compared, all sessions") == ["3 of 3", "", ""]
+
+
+# ---------- amendment 11: proposed notes that were not stored ----------
+
+def test_note_changes_carries_not_written():
+    assert (P.NoteChanges().not_written, P.NoteChanges().not_written_reasons) == (0, {})
+    result = NotesResult(not_written=3, not_written_reasons={"limit": 1, "write_failed:PastError": 2})
+    ch = P.note_changes([], [], result)
+    assert ch.not_written == 3 and ch.not_written_reasons == {"limit": 1, "write_failed:PastError": 2}
+    assert ch.not_written_reasons is not result.not_written_reasons
+
+
+def _unstored(s, k, reasons):
+    s["changes"]["not_written"] = k
+    s["changes"]["not_written_reasons"] = reasons
+    return s
+
+
+def test_report_shows_unstored_notes():
+    note = {"note_id": "n-1", "kind": "goals", "fact": "Back to work", "last_confirmed": "2026-03-02",
+            "due_date": None}
+    on = [_session("notes_on", 1, notes_after=[note]),
+          _unstored(_session("notes_on", 2, notes_after=[note]), 2, {"write_failed:PastError": 1, "limit": 1}),
+          _session("notes_on", 3, notes_after=[note])]
+    off = [_unstored(_session("notes_off", n), 1, {"consent": 1}) for n in (1, 2, 3)]
+    report = P.render_report(_pilot(on, off))
+    lines = report.splitlines()
+    row = "| 2 | - | (2 proposed notes not stored: limit x1, write_failed:PastError x1) | not stored |"
+    assert lines.count(row) == 1
+    assert lines[lines.index(row) - 1] == "| 2 | goals | Back to work |  |"  # after that session's rows
+    assert lines[lines.index(row) + 1] == "| 3 | goals | Back to work |  |"
+    assert report.count("| not stored |") == 1  # sessions with none get no row
+    deleted = lines.index("| Notes deleted on request | 0 | 0 | |")
+    assert lines[deleted + 1] == "| Notes proposed but not stored | 2 | 3 | |"
+
+
+def test_report_of_a_pilot_written_before_amendment_11():
+    on = [_session("notes_on", n) for n in (1, 2, 3)]
+    off = [_session("notes_off", n) for n in (1, 2, 3)]
+    for s in on + off:
+        assert "not_written" not in s["changes"]
+    report = P.render_report(_pilot(on, off))
+    assert "| Notes proposed but not stored | 0 | 0 | |" in report
+    assert "| not stored |" not in report
+
+
+def test_fake_run_writes_not_written_and_notes_off_reason_is_consent(tmp_path):
+    out = tmp_path / "out"
+    assert S.main(["--personas", str(PERSONAS), "--policy", str(POLICY), "--out", str(out), "--fake",
+                   "--turns", "3"]) == 0
+    pilot = json.loads((out / "pilot.json").read_text(encoding="utf-8"))
+    on = [s for p in pilot["personas"] for s in p["sessions"]["notes_on"]]
+    off = [s for p in pilot["personas"] for s in p["sessions"]["notes_off"]]
+    for s in on + off:
+        assert sum(s["changes"]["not_written_reasons"].values()) == s["changes"]["not_written"]
+    for f in (out / "sessions").rglob("s*.json"):
+        changes = json.loads(f.read_text(encoding="utf-8"))["changes"]
+        assert "not_written" in changes and "not_written_reasons" in changes
+    # FakeNoteTaker would propose an add for every note marker whatever may_add_notes says, but
+    # scripts.persona_pilot.fake_clients gives the markers to the notes_on user only: the fake notes_off
+    # arm proposes no note, so it reports none not stored. A real notes_off run would show "consent".
+    off_total = sum(s["changes"]["not_written"] for s in off)
+    assert off_total == 0 and all(s["changes"]["not_written_reasons"] == {} for s in off)
+    assert all(s["notes_after"] == [] for s in off)
+    on_total = sum(s["changes"]["not_written"] for s in on)
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert f"| Notes proposed but not stored | {on_total} | {off_total} | |" in report
+
+
+def test_notes_off_session_whose_user_speaks_markers_reports_consent(env):
+    talking = S.fake_clients(env.personas["examprep"], 1, "notes_on", env.path)  # a user who speaks the markers
+    result, _ = _run(env, "examprep", 1, "notes_off", clients=talking)
+    assert result.notes_after == []
+    assert result.changes.not_written == 2 and result.changes.not_written_reasons == {"consent": 2}
+    entry = P.session_dict(result, P.SessionScore("unscored", None, ""))
+    assert entry["changes"]["not_written"] == 2 and entry["changes"]["not_written_reasons"] == {"consent": 2}

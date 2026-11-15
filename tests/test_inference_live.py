@@ -14,6 +14,7 @@ import pytest
 
 from loop.llm import FakeClient
 from puddles import tracing
+from puddles.eval.crisis import load_keywords
 from puddles.inference import crisis
 from puddles.inference.live import finish_session, start_notes
 from puddles.inference.note_store import FakeUserMemory, NoteStore
@@ -841,3 +842,108 @@ def test_the_allowed_plain_llm_writes_nothing_of_its_own(tmp_path, store, monkey
     assert PHRASE not in caplog.text and ANSWERED not in caplog.text
     assert holding(tmp_path, PHRASE) == []
     assert holding(tmp_path, ANSWERED) == [notes_dir(people) / "notes.json"]   # the note, by consent, only there
+
+
+# ---------- the robot keeps no note about a crisis ----------
+
+CRISIS_WORDS = "cobalt-ferry-lighthouse"      # in the person's crisis message only
+ORDINARY = ("work has been rough lately", "my manager moved the deadline again")
+CRISIS_MESSAGES = {"scripted-checker": f"[checker:crisis-self] {CRISIS_WORDS}",
+                   "keyword": f"lately I keep thinking I want to {load_keywords()[0]} {CRISIS_WORDS}"}
+
+
+def recording_note_taker(monkeypatch) -> list[str]:
+    """The scripted note-taker, recording the conversation it is shown each time it runs."""
+    import scripts.chat
+
+    seen: list[str] = []
+
+    class Recording(scripts.chat.FakeNoteTaker):
+        def structured(self, system, user, schema):
+            seen.append(user.rsplit("<conversation>\n", 1)[-1].rsplit("\n</conversation>", 1)[0])
+            return super().structured(system, user, schema)
+
+    monkeypatch.setattr(scripts.chat, "FakeNoteTaker", Recording)
+    return seen
+
+
+def crisis_texts() -> list[str]:
+    return list(crisis.load_path().fixed_responses.values())
+
+
+@pytest.mark.parametrize("crisis_message", CRISIS_MESSAGES.values(), ids=CRISIS_MESSAGES.keys())
+def test_the_note_taker_is_not_shown_a_crisis_turn(crisis_message, tmp_path, capsys, monkeypatch):
+    import scripts.chat
+
+    seen = recording_note_taker(monkeypatch)
+    root = tmp_path / "root"
+    code, out, _ = chat(capsys, root, f"{ORDINARY[0]}\n{crisis_message}\n{ORDINARY[1]}\n", "--remember-me", "yes")
+    assert code == 0
+    assert any(text in out for text in crisis_texts())  # the crisis path spoke its fixed response
+    [conversation] = seen
+    assert conversation == "\n".join([f"user: {ORDINARY[0]}", f"helper: {scripts.chat.FAKE_HELPER_LINE}",
+                                      f"user: {ORDINARY[1]}", f"helper: {scripts.chat.FAKE_HELPER_LINE}"])
+    assert CRISIS_WORDS not in conversation and not any(text in conversation for text in crisis_texts())
+
+
+def test_a_turn_that_got_the_holding_line_is_still_shown(tmp_path, capsys, monkeypatch):
+    seen = recording_note_taker(monkeypatch)
+    holding_line = crisis.load_path().holding_line
+    assert holding_line not in crisis_texts()
+    code, out, _ = chat(capsys, tmp_path / "root", f"[checker:fail] what a week {PHRASE}\n{ORDINARY[0]}\n")
+    assert code == 0 and holding_line in out
+    [conversation] = seen
+    assert f"user: [checker:fail] what a week {PHRASE}\nhelper: {holding_line}\n" in conversation
+    assert f"user: {ORDINARY[0]}" in conversation
+
+
+def test_a_session_of_one_crisis_turn_still_runs_the_note_taker_and_keeps_the_record(tmp_path, store, capsys,
+                                                                                    monkeypatch):
+    seen = recording_note_taker(monkeypatch)
+    root = tmp_path / "root"
+    message = f"[checker:crisis-self] {CRISIS_WORDS} [note:follow_up:check on their plan]"
+    code, out, err = chat(capsys, root, f"{message}\n", *row_args(True, True, store))
+    assert code == 0 and out.splitlines()[-1] == f"kept: {session_path(root, 's1')}"
+    assert seen == [""]                                       # it ran, on an empty conversation
+    assert notes_lines(err)[-1] == "notes: 0 added, 0 replaced, 0 confirmed, 0 deleted; not yet confirmed deleted: none"
+    assert not notes_dir(root).exists()                        # no note, not even an empty index
+    record = json.loads(record_path(root, "s1").read_text())
+    assert [t["text"] for t in record["turns"]][0] == message  # the consented transcript holds every turn
+    assert record["turns"][1]["text"] in crisis_texts()
+
+
+def test_a_forget_request_in_an_ordinary_turn_still_deletes_beside_a_crisis_turn(tmp_path, capsys, monkeypatch):
+    root = tmp_path / "root"
+    chat(capsys, root, f"[note:situation:{FACT}]\n", "--remember-me", "yes")
+    first = f"note-{PERSON}-001"
+    assert index_ids(root) == [first]
+    seen = recording_note_taker(monkeypatch)
+    code, _, err = chat(capsys, root, f"please forget that [forget:{first}]\n{CRISIS_MESSAGES['scripted-checker']}\n",
+                        "--remember-me", "yes", session_id="s2")
+    assert code == 0 and "notes: 0 added, 0 replaced, 0 confirmed, 1 deleted" in err
+    assert index_ids(root) == [] and stored_ids(root) == [] and holding(tmp_path, FACT) == []
+    [conversation] = seen
+    assert f"[forget:{first}]" in conversation and CRISIS_WORDS not in conversation
+
+
+@pytest.mark.parametrize("remember_me", [False, True], ids=["remember-no", "remember-yes"])
+def test_without_training_consent_the_same_filtering_and_nothing_new_on_disk(remember_me, tmp_path, capsys,
+                                                                             monkeypatch):
+    seen = recording_note_taker(monkeypatch)
+    root = tmp_path / "root"
+    text = f"{ORDINARY[0]}\n{CRISIS_MESSAGES['keyword']} [note:situation:has a plan for the weekend]\n"
+    code, out, err = chat(capsys, root, text, "--remember-me", "yes" if remember_me else "no", "--training", "no")
+    assert code == 0 and out.splitlines()[-1] == "kept: nothing"
+    [conversation] = seen
+    assert ORDINARY[0] in conversation and CRISIS_WORDS not in conversation and "weekend" not in conversation
+    assert "notes: 0 added, 0 replaced, 0 confirmed, 0 deleted" in err
+    assert not root.exists() and holding(tmp_path, CRISIS_WORDS) == []
+
+
+def test_the_note_takers_prompt_says_to_keep_no_note_about_a_crisis():
+    from puddles.inference.notes import SYSTEM
+
+    assert ("Never write a note about thoughts of suicide or self-harm, a plan or means to harm themselves or "
+            "someone else, or being in danger, and never add a follow_up to check on them.") in SYSTEM
+    assert "if the person asked the robot to forget something, still delete it" in SYSTEM
+    assert "Leave out: your own interpretations or diagnoses" in SYSTEM   # the rule that was there stays

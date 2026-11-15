@@ -129,6 +129,7 @@ class NotesResult:
     deleted: list[str]            # note IDs taken off the index by a delete or by "forget everything"
     dropped_by_limit: list[str]   # existing note IDs dropped by a limit
     not_written: int              # adds and replaces that were dropped: by consent, by "forget everything" or by a limit
+    not_written_reasons: dict[str, int] = field(default_factory=dict)  # why each of those was not stored
     undeleted: list[str]          # IDs off the index that past.dev has not confirmed deleted
     forgot_everything: bool
     failed: bool                  # the model's answer failed twice; nothing was changed
@@ -173,6 +174,8 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
    3. The index saved again with the new notes that were written.
    4. `store.delete(...)` for every note that came off. The IDs it returns go into `undeleted`.
 5. Returns the `NotesResult`.
+
+`not_written_reasons` says why each proposed `add` or `replace` counted in `not_written` was not stored. Its keys come from a fixed set: `"consent"` (dropped because "remember me" is off), `"forget_everything"` (dropped because the same answer asked to forget everything; this wins over `"consent"` when both hold), `"limit"` (a new note dropped by a per-kind limit in step 3), and `"write_failed:" + type(exc).__name__` for a note whose `store.write` raised in step 4.2. Only the exception's type name is kept, never its message, which can repeat the person's words or a note's text. `NoteStore.write` wraps every failure, an ingest that raised and a wait that ran out alike, in `PastError`, so today that key is always `"write_failed:PastError"`. The values sum to `not_written`. An ordinary session, and a session whose model answer failed (step 1), give an empty dict. Nothing else about `take_notes` changes.
 
 `replaced` lists the old notes that came off because of a replace, whether or not the new note's write then succeeded. The order of the IDs in each list of the result is not fixed.
 
