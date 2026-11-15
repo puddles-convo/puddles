@@ -3,6 +3,7 @@
 The existing schemas and training APIs supply files, never the expected report.
 Markdown assertions allow layout choices the contract leaves open.
 """
+from collections import Counter
 from datetime import datetime, timezone
 import json
 import os
@@ -123,6 +124,13 @@ def snapshot(root):
     return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
+def replace_logged_round(root, event):
+    events = DecisionLog(root).events()
+    write_jsonl(DecisionLog(root).path, [
+        event if isinstance(item, RoundEvent) and item.round == event.round else item for item in events
+    ])
+
+
 def section(report, name):
     heading = f"## {name}"
     assert heading in report, f"Missing report section: {name}"
@@ -179,6 +187,8 @@ class Agents:
     def structured(self, system, user, schema):
         self.calls.append(schema)
         if schema is CriticOutput:
+            if self.mode == "critic_error":
+                return schema(found=False, reason="")
             if self.mode == "no_pattern":
                 return schema(found=False, reason="No repeated failure.")
             return schema(
@@ -195,6 +205,8 @@ class Agents:
         assert schema is ResearcherOutput
         self.calls.append(schema)
         search(QUERY)
+        if self.mode == "researcher_error":
+            return schema(queries=[], sources=[])
         return schema(queries=[QUERY], sources=[] if self.mode == "no_evidence" else [
             {"url": URL, "title": "Listening", "technique": "Ask before advising."},
         ])
@@ -367,10 +379,57 @@ def archived_round(root, *, decision="reverted", action="add", measurements=True
     prices = Prices(models={"offline-priced": ModelPrice(10000, 20000)})
     meter = Meter(root, prices, round=round_)
     meter.done(meter.sent("acceptance-agent", "offline-priced", 31, 17), CallUsage(31, 17))
+    # Sent-only calls are not finished calls, even for an otherwise present agent.
+    meter.sent("acceptance-agent", "offline-priced", 997, 999)
+    meter.sent("unfinished-only-agent", "offline-priced", 991, 999)
     # Catch reports that sum the whole log instead of selecting the requested round.
     other = Meter(root, prices, round=round_ + 1)
     other.done(other.sent("other-round-agent", "offline-priced", 991, 999), CallUsage(991, 999))
     return event, objects, records, checks
+
+
+def archived_exit(root, exit_):
+    """Files for each graph exit, independent of spans or a live RoundState."""
+    if exit_ in {"kept", "reverted"}:
+        return archived_round(root, decision=exit_)[0]
+    event, objects, _, _ = archived_round(root)
+    reasons = {
+        "no_conversations": "No conversation finished.",
+        "nothing_scored": "The judge scored no conversation.",
+        "no_pattern": "No repeated failure.",
+        "critic_error": "critic failed: scripted invalid answers",
+        "no_evidence": "No trustworthy source was found for this pattern.",
+        "researcher_error": "researcher failed: scripted invalid answers",
+        "proposer_error": "proposer failed: scripted invalid answers",
+    }
+    kinds = {
+        "no_conversations": (), "nothing_scored": (), "no_pattern": (), "critic_error": (),
+        "no_evidence": ("pattern", "research"), "researcher_error": ("pattern",),
+        "proposer_error": ("pattern", "research"),
+    }[exit_]
+    refs = {kind: ref for kind, ref in event.records.items() if kind in kinds}
+    for kind, ref in event.records.items():
+        if kind not in kinds:
+            (root / ref.path).unlink()
+    if exit_ == "no_evidence":
+        research = objects["research"].model_copy(update={"sources": []})
+        refs["research"] = save_record(research, 7, root)
+    (root / objects["edit"].policy_path).unlink()
+    (root / "scores/round-07-gate.json").unlink()
+    if exit_ == "no_conversations":
+        write_jsonl(root / "conversations/round-07-train.jsonl", [])
+    if exit_ in {"no_conversations", "nothing_scored"}:
+        write_jsonl(root / "scores/round-07-train.jsonl", [])
+    failures_path(root / "conversations/round-07-train.jsonl").unlink()
+    event = RoundEvent(
+        round=7, outcome="no_evidence" if exit_ in {"no_evidence", "researcher_error"} else "no_pattern",
+        reason=reasons[exit_], records=refs, pattern=event.pattern if "pattern" in refs else None,
+        policy=LogPolicy(base="policy-v1", base_sha256=event.policy.base_sha256, in_force="policy-v1"),
+    )
+    write_jsonl(DecisionLog(root).path, [event, *[
+        MemoryCopyEvent(round=7, record_id=ref.id, status="confirmed", attempt=1) for ref in refs.values()
+    ]])
+    return event
 
 
 # Section 1: privacy and the difference between measured and absent values.
@@ -387,14 +446,19 @@ def test_summary_key_and_converse_uses_the_returned_batch(tmp_path):
     assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
 
 
-def test_judge_summary_averages_scored_only_and_reads_file_version(tmp_path):
-    records = [conversation(3, name) for name in ("a", "b", "c")]
-    write_jsonl(tmp_path / "scores/round-03-train.jsonl", [score(records[0]), score(records[1], 4, 4)])
+def test_judge_summary_averages_every_score_instead_of_critic_subset(tmp_path):
+    records = [conversation(3, f"a-{i:02d}") for i in range(13)]
+    # The default ten lowest go to the critic; two higher scores must still count.
+    all_scores = [score(record, 1, 2) for record in records[:10]] + [
+        score(record, 5, 4) for record in records[10:12]
+    ]
+    write_jsonl(tmp_path / "scores/round-03-train.jsonl", all_scores)
     summary = node_summary("judge", {"round": 3, "records": records}, {
-        "scored": [scored(records[0]), scored(records[1], 4, 4)], "unscored": [records[2].id],
+        "scored": [scored(record, 1, 2) for record in records[:10]], "unscored": [records[12].id],
     }, tmp_path)
-    assert summary["scored"] == 2 and summary["unscored"] == 1
-    assert summary["mean_empathy"] == 3 and summary["mean_relevance"] == 4
+    assert summary["scored"] == 12 and summary["unscored"] == 1
+    assert summary["mean_empathy"] == pytest.approx(20 / 12)
+    assert summary["mean_relevance"] == pytest.approx(28 / 12)
     assert summary["judge_version"] == "judge-acceptance-v1"
     assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
 
@@ -425,6 +489,22 @@ def test_stand_in_gate_summary_never_converts_sentinels_to_measurements(tmp_path
         assert summary[key] is None, f"Unmeasured {key} must stay null"
 
 
+@pytest.mark.parametrize("measured_safety,outcome_safety", [
+    (False, True), (True, False), (None, True), (None, False),
+])
+def test_gate_summary_safety_uses_result_and_never_outcome(tmp_path, measured_safety, outcome_safety):
+    event, objects, _, _ = archived_round(tmp_path)
+    result = RoundResult(round=7, outcome="candidate", base_policy_path=tmp_path / "policies/policy-v1.md")
+    result.scores = event.scores
+    result.safety = None if measured_safety is None else LogSafety(
+        case_file="offline-cases", passed=measured_safety, cases=1,
+        failed_case_ids=[] if measured_safety else ["unsafe-case-acceptance"],
+    )
+    objects["outcome"].safety_passed = outcome_safety
+    summary = node_summary("gate", {"round": 7, "result": result}, {"gate": objects["outcome"]}, tmp_path)
+    assert summary["safety_passed"] is measured_safety
+
+
 def test_measured_gate_summary_uses_result_scores_and_all_failed_names(tmp_path):
     event, objects, _, checks = archived_round(tmp_path)
     result = RoundResult(round=7, outcome="candidate", base_policy_path=tmp_path / "policies/policy-v1.md")
@@ -452,11 +532,16 @@ def test_incomplete_gate_summary_keeps_all_failures_and_no_numbers(tmp_path):
 
 def test_finish_summary_reads_this_rounds_copy_events(tmp_path):
     event, _, _, _ = archived_round(tmp_path)
+    log = DecisionLog(tmp_path)
+    for attempt, status in ((2, "pending"), (3, "confirmed"), (4, "confirmed")):
+        log.append(MemoryCopyEvent(round=7, record_id=event.records["pattern"].id,
+                                   status=status, attempt=attempt))
     summary = node_summary("finish", {"round": 7}, {"event": event}, tmp_path)
     assert summary["outcome"] == "reverted" and summary["policy_in_force"] == "policy-v1"
-    assert {(copy["record_id"], copy["status"]) for copy in summary["copies"]} == {
-        (ref.id, "pending" if kind == "research" else "confirmed") for kind, ref in event.records.items()
-    }
+    assert Counter((copy["record_id"], copy["status"]) for copy in summary["copies"]) == Counter(
+        (item.record_id, item.status) for item in log.events()
+        if isinstance(item, MemoryCopyEvent) and item.round == 7
+    )
 
 
 def test_all_node_summaries_leave_round_files_unchanged(tmp_path):
@@ -659,10 +744,8 @@ def test_report_from_files_is_private_ordered_and_read_only(tmp_path, monkeypatc
         row_for(section(report, "Conversations"), record.id)
     assert report_path(root, 7) == root / "reports/round-07.md"
     after = snapshot(root)
-    optional_report = Path("reports/round-07.md")
-    assert {key: value for key, value in after.items() if key != optional_report} == before
-    if optional_report in after:
-        assert after[optional_report] == report.encode("utf-8")
+    assert after == before
+    assert not report_path(root, 7).exists()
 
 
 def test_report_lists_unscored_and_failed_conversations_without_zero_scores(tmp_path):
@@ -682,30 +765,75 @@ def test_report_lists_unscored_and_failed_conversations_without_zero_scores(tmp_
     assert "failed-scenario" in conversations and "offline scripted failure" in conversations
 
 
-def test_report_critic_column_distinguishes_named_and_unnamed_conversations(tmp_path):
-    _, _, records, _ = archived_round(tmp_path)
+def test_report_critic_column_uses_default_score_selection_and_ignores_pattern(tmp_path):
+    event, objects, _, _ = archived_round(tmp_path)
+    lows = [conversation(7, f"low-{i:02d}") for i in range(9)]
+    tie_a, tie_b, high = [conversation(7, name) for name in ("tie-a", "tie-b", "high")]
+    # Deliberately unsorted, including a tie at the default cutoff of ten.
+    records = [high, tie_b, *reversed(lows), tie_a]
+    write_jsonl(tmp_path / "conversations/round-07-train.jsonl", records)
+    write_jsonl(tmp_path / "scores/round-07-train.jsonl", [
+        score(high, 5, 5), score(tie_b, 3, 3),
+        *[score(record, 1, 2) for record in reversed(lows)], score(tie_a, 3, 3),
+    ])
+    # This round could have used critic_conversations=11. The report must use the
+    # documented default of ten even though its pattern names the eleventh item.
+    pattern = objects["pattern"].model_copy(update={
+        "parent_ids": [record.id for record in [*lows, tie_a, tie_b]],
+        "example_conversation_ids": [tie_b.id], "out_of": 11,
+    })
+    refs = {**event.records, "pattern": save_record(pattern, 7, tmp_path)}
+    event = event.model_copy(update={
+        "records": refs, "pattern": event.pattern.model_copy(update={"out_of": 11}),
+    })
+    replace_logged_round(tmp_path, event)
     conversations = section(build_report(tmp_path, 7), "Conversations")
     headers = next(row for row in table_rows(conversations)
                    if any("critic" in cell.lower() for cell in row))
     critic = next(i for i, cell in enumerate(headers) if "critic" in cell.lower())
-    named = row_for(conversations, records[0].id)[critic]
-    unnamed = row_for(conversations, records[1].id)[critic]
-    assert named and named != unnamed
+    selected = {record.id for record in [*lows, tie_a]}
+    # Wording/Boolean markers are not fixed; require consistent, distinct states.
+    given = {row_for(conversations, record.id)[critic] for record in records if record.id in selected}
+    withheld = {row_for(conversations, record.id)[critic] for record in records if record.id not in selected}
+    assert len(given) == len(withheld) == 1
+    assert "" not in given and given.isdisjoint(withheld)
 
 
-def test_report_critic_column_is_empty_without_pattern_or_scores_file(tmp_path):
-    base = policy_file(tmp_path)
-    record = conversation(1, "unscored")
-    write_jsonl(tmp_path / "conversations/round-01-train.jsonl", [record])
-    DecisionLog(tmp_path).append(RoundEvent(
-        round=1, outcome="no_pattern", reason="The judge scored no conversation.",
-        policy=LogPolicy(base="policy-v1", base_sha256=sha256_text(base.read_text()), in_force="policy-v1"),
-    ))
-    conversations = section(build_report(tmp_path, 1), "Conversations")
+@pytest.mark.parametrize("with_pattern", [False, True])
+def test_report_critic_column_is_empty_without_scores_file_even_with_pattern(tmp_path, with_pattern):
+    if with_pattern:
+        _, _, records, _ = archived_round(tmp_path)
+        (tmp_path / "scores/round-07-train.jsonl").unlink()
+        round_ = 7
+    else:
+        base = policy_file(tmp_path)
+        records = [conversation(1, "unscored")]
+        write_jsonl(tmp_path / "conversations/round-01-train.jsonl", records)
+        DecisionLog(tmp_path).append(RoundEvent(
+            round=1, outcome="no_pattern", reason="The judge scored no conversation.",
+            policy=LogPolicy(base="policy-v1", base_sha256=sha256_text(base.read_text()), in_force="policy-v1"),
+        ))
+        round_ = 1
+    conversations = section(build_report(tmp_path, round_), "Conversations")
     headers = next(row for row in table_rows(conversations)
                    if any("critic" in cell.lower() for cell in row))
     critic = next(i for i, cell in enumerate(headers) if "critic" in cell.lower())
-    assert row_for(conversations, record.id)[critic] == ""
+    for record in records:
+        assert row_for(conversations, record.id)[critic] == ""
+
+
+def test_report_memory_lists_repeated_copy_events_separately(tmp_path):
+    event, _, _, _ = archived_round(tmp_path)
+    log = DecisionLog(tmp_path)
+    record_id = event.records["research"].id
+    for attempt, status in ((2, "pending"), (3, "confirmed"), (4, "confirmed")):
+        log.append(MemoryCopyEvent(round=7, record_id=record_id, status=status, attempt=attempt))
+    memory = section(build_report(tmp_path, 7), "Memory")
+    for status in ("pending", "confirmed"):
+        lines = [line for line in memory.splitlines()
+                 if record_id in line and re.search(rf"\b{status}\b", line)]
+        assert len(lines) >= 2, f"Copy events were collapsed for {record_id}: {status}"
+    assert "pattern-other" not in memory
 
 
 @pytest.mark.parametrize("action", ["add", "remove", "reword"])
@@ -745,12 +873,60 @@ def test_report_cost_is_per_agent_and_only_for_requested_round(tmp_path):
     agent = " ".join(row_for(cost, "acceptance-agent"))
     for value in (1, 31, 17, 0.65):
         has_number(agent, value)
+    assert re.search(r"(?<![\d.])0\.6500(?![\d.])", agent), "Dollars must have exactly four decimal places"
     assert "other-round-agent" not in cost
+    assert "unfinished-only-agent" not in cost
+
+
+@pytest.mark.parametrize("existing_report", [False, True])
+def test_build_report_never_creates_or_overwrites_report_file(tmp_path, existing_report):
+    root = tmp_path / "archive"
+    archived_round(root)
+    path = root / "reports/round-07.md"
+    if existing_report:
+        path.parent.mkdir()
+        path.write_bytes(b"A previously saved report must stay untouched.\r\n")
+    before = snapshot(root)
+    report = build_report(root, 7)
+    assert report.startswith("# Round 7: reverted")
+    assert snapshot(root) == before
+    assert path.exists() is existing_report
+
+
+@pytest.mark.parametrize("exit_,ran", [
+    ("no_conversations", {"converse", "judge", "finish"}),
+    ("nothing_scored", {"converse", "judge", "finish"}),
+    ("no_pattern", {"converse", "judge", "critic", "finish"}),
+    ("critic_error", {"converse", "judge", "critic", "finish"}),
+    ("no_evidence", {"converse", "judge", "critic", "researcher", "finish"}),
+    ("researcher_error", {"converse", "judge", "critic", "researcher", "finish"}),
+    ("proposer_error", {"converse", "judge", "critic", "researcher", "proposer", "finish"}),
+    ("kept", set(NODES)), ("reverted", set(NODES)),
+])
+def test_report_infers_nodes_from_files_at_every_exit(tmp_path, exit_, ran):
+    # These use the exact two nothing-scored reasons named by the view contract.
+    # judging.md's appended unscored sentence makes that matching rule ambiguous;
+    # no expectation for a suffixed reason is invented here.
+    root = tmp_path / "archive"
+    event = archived_exit(root, exit_)
+    before = snapshot(root)
+    report = build_report(root, 7)
+    assert report.startswith(f"# Round 7: {event.outcome}")
+    assert event.reason in report
+    nodes = section(report, "Nodes")
+    for name in NODES:
+        row = " ".join(row_for(nodes, name)).lower()
+        unrun = "not run" in row or "did not run" in row
+        assert unrun is (name not in ran), (exit_, name, row)
+    assert snapshot(root) == before
+    assert not (root / "reports/round-07.md").exists()
 
 
 @pytest.mark.parametrize("mode,not_run", [
     ("no_pattern", ("researcher", "proposer", "gate")),
+    ("critic_error", ("researcher", "proposer", "gate")),
     ("no_evidence", ("proposer", "gate")),
+    ("researcher_error", ("proposer", "gate")),
     ("proposer_error", ("gate",)),
     ("no_conversations", ("critic", "researcher", "proposer", "gate")),
     ("nothing_scored", ("critic", "researcher", "proposer", "gate")),
@@ -783,6 +959,14 @@ def test_stand_in_report_explicitly_says_nothing_was_measured(training_round):
 # Section 3 CLI: artifact destination, defaults and error behavior.
 
 
+def assert_not_attached(output, report):
+    assert report in output.out
+    notice = output.out.replace(report, "", 1).strip().splitlines()
+    assert len(notice) == 1
+    assert "attach" in notice[0].lower()
+    assert any(word in notice[0].lower() for word in ("not ", "no ", "skip", "unattach", "couldn't"))
+
+
 def test_show_round_without_matching_run_still_writes_prints_and_preserves_inputs(tmp_path, capsys):
     root = tmp_path / "archive"
     archived_round(root)
@@ -790,12 +974,8 @@ def test_show_round_without_matching_run_still_writes_prints_and_preserves_input
     expected = build_report(root, 7)
     assert show_round.main(["--root", str(root), "--round", "7"]) == 0
     output = capsys.readouterr()
-    assert expected in output.out
+    assert_not_attached(output, expected)
     assert report_path(root, 7).read_text(encoding="utf-8") == expected
-    notice = output.out.replace(expected, "", 1).strip().splitlines()
-    assert len(notice) == 1
-    assert "attach" in notice[0].lower()
-    assert any(word in notice[0].lower() for word in ("not ", "no ", "skip", "unattach", "couldn't"))
     after = snapshot(root)
     assert {key: value for key, value in after.items() if key != Path("reports/round-07.md")} == before
 
@@ -843,6 +1023,55 @@ def test_show_round_attaches_to_named_run_using_tracking_address_precedence(tmp_
         assert not client.list_artifacts(unrelated_id, "reports")
 
 
+@pytest.mark.parametrize("failure", ["tracking_store", "artifact_directory", "artifact_scheme"])
+def test_show_round_attachment_failure_still_writes_prints_and_returns_zero(tmp_path, capsys, failure):
+    root = tmp_path / "archive"
+    archived_round(root)
+    expected = build_report(root, 7)
+    before = snapshot(root)
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("This file prevents any directory being created here.", encoding="utf-8")
+    if failure == "tracking_store":
+        # Unsupported local scheme fails immediately, without connection retries.
+        uri = "acceptance-unsupported://tracking"
+    else:
+        uri = f"sqlite:///{tmp_path}/attachment.db"
+        client = MlflowClient(tracking_uri=uri)
+        location = blocker.as_uri() if failure == "artifact_directory" else "acceptance-unsupported://artifacts"
+        experiment = client.create_experiment("puddles", artifact_location=location)
+        run = client.create_run(experiment, tags={"mlflow.runName": "round-07"})
+        client.set_terminated(run.info.run_id)
+    assert show_round.main(["--root", str(root), "--round", "7", "--mlflow", uri]) == 0
+    assert_not_attached(capsys.readouterr(), expected)
+    assert (root / "reports/round-07.md").read_text(encoding="utf-8") == expected
+    after = snapshot(root)
+    assert {key: value for key, value in after.items() if key != Path("reports/round-07.md")} == before
+
+
+def test_show_round_uses_most_recent_of_several_matching_runs(tmp_path, capsys):
+    root = tmp_path / "archive"
+    archived_round(root)
+    expected = build_report(root, 7)
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("puddles")
+    runs = [client.create_run(experiment.experiment_id, start_time=stamp,
+                              tags={"mlflow.runName": "round-07"}) for stamp in (1000, 2000, 3000)]
+    # Start times and creation order agree; ending the oldest last must not select it.
+    for index, run in enumerate(reversed(runs)):
+        client.set_terminated(run.info.run_id, end_time=4000 + index)
+    assert show_round.main(["--root", str(root), "--round", "7"]) == 0
+    assert expected in capsys.readouterr().out
+    assert (root / "reports/round-07.md").read_text(encoding="utf-8") == expected
+    for run in runs[:-1]:
+        assert not client.list_artifacts(run.info.run_id, "reports")
+    newest = runs[-1].info.run_id
+    assert "reports/round-07.md" in {item.path for item in client.list_artifacts(newest, "reports")}
+    download = tmp_path / "download"
+    download.mkdir()
+    attached = client.download_artifacts(newest, "reports/round-07.md", str(download))
+    assert Path(attached).read_text(encoding="utf-8") == expected
+
+
 def test_show_round_defaults_to_last_round_in_log(tmp_path, capsys):
     root = tmp_path / "archive"
     archived_round(root, round_=7)
@@ -864,3 +1093,26 @@ def test_show_round_invalid_root_or_round_returns_two_with_one_stderr_line(tmp_p
     assert len(output.err.strip().splitlines()) == 1
     assert output.err.strip()
     assert snapshot(root) == before
+
+
+@pytest.mark.parametrize("unreadable", ["directory", "undecodable", "malformed", "invalid_event"])
+def test_show_round_unreadable_log_returns_two_with_one_stderr_line(tmp_path, capsys, unreadable):
+    root = tmp_path / "archive"
+    archived_round(root)
+    path = DecisionLog(root).path
+    if unreadable == "directory":
+        path.unlink()
+        path.mkdir()
+    else:
+        contents = {
+            "undecodable": b"\xff\xfe\xfa\n",
+            "malformed": b'{"event": "round",\n',
+            "invalid_event": b'{"event": "round", "round": "not an integer"}\n',
+        }
+        path.write_bytes(contents[unreadable])
+    before = snapshot(root)
+    assert show_round.main(["--root", str(root), "--round", "7"]) == 2
+    output = capsys.readouterr()
+    assert len(output.err.strip().splitlines()) == 1 and output.err.strip()
+    assert snapshot(root) == before
+    assert not (root / "reports/round-07.md").exists()
