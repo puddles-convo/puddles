@@ -1,5 +1,6 @@
 """The note store and the note-taker (docs/specs/notes.md), offline: a scripted model and FakeUserMemory."""
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -607,3 +608,175 @@ def test_any_exception_from_the_model_is_a_failed_answer(store: NoteStore) -> No
     result = take_notes(store, Down(), user_id="user-01", session_id="s", turns=TURNS, remember_me=True,
                         today=TODAY)
     assert result.failed and "no route" in result.reason and files(store, "user-01") == before
+
+
+# ---------- a process killed between two file writes: the next call finishes the job ----------
+
+def stop_after(monkeypatch: pytest.MonkeyPatch, filename: str, nth: int = 1) -> None:
+    """The process dies right after the nth rename onto `filename` (KeyboardInterrupt passes `except Exception`)."""
+    real_replace, seen = os.replace, []
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == filename:
+            seen.append(dst)
+            if len(seen) == nth:
+                raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "replace", replace_then_stop)
+
+
+def restart(store: NoteStore) -> NoteStore:
+    return NoteStore(store.memory, store.root)
+
+
+def assert_clean(store: NoteStore, user_id: str = "user-01") -> None:
+    """Index and notes.json agree, nothing waits to be deleted, and no write is left in flight."""
+    assert set(index_ids(store, user_id)) == set(store.stored(user_id))
+    assert store.pending_deletes(user_id) == []
+    assert set(json.loads((store.root / "notes" / user_id / "counter.json").read_text())) == {"next"}
+
+
+@pytest.mark.parametrize("crash_after", ["pending_deletes.json", "index.json"])
+def test_killed_take_off_is_finished_before_anything_else(store: NoteStore, mem: FakeUserMemory,
+                                                          monkeypatch: pytest.MonkeyPatch, crash_after: str) -> None:
+    gone, kept = seed(store, "user-01", ("people", "Forget me."), ("goals", "Keep me."))
+    with monkeypatch.context() as patch:
+        stop_after(patch, crash_after)
+        with pytest.raises(KeyboardInterrupt):
+            store.take_off("user-01", [gone])
+    again = restart(store)
+    assert again.helper_notes("user-01", TODAY) == ["Keep me."]
+    assert gone not in index_ids(again, "user-01") and gone not in again.stored("user-01")
+    seen = []
+    real_delete = mem.delete
+    mem.delete = lambda i: seen.append((i, set(index_ids(again, "user-01")), set(again.stored("user-01")))) \
+        or real_delete(i)
+    assert again.delete("user-01", []) == []
+    assert seen and all(i not in ix and i not in st for i, ix, st in seen)
+    assert gone not in mem.entries
+    assert_clean(again)
+
+
+@pytest.mark.parametrize("stop_at", ["before_send", "after_accept", "after_confirm", "after_notes_json"])
+def test_killed_write_is_never_unknown_and_forget_everything_finds_it(store: NoteStore, mem: FakeUserMemory,
+                                                                      monkeypatch: pytest.MonkeyPatch,
+                                                                      stop_at: str) -> None:
+    [kept] = seed(store, "user-01", ("goals", "Kept."))
+    note = to_record(NoteAction(action="add", kind="people", fact="Half written."), user_id="user-01",
+                     session_id="s", note_id=store.next_note_id("user-01"), today=TODAY, now=NOW)
+
+    def stop(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        if stop_at == "before_send":
+            patch.setattr(mem, "ingest", stop)
+        elif stop_at == "after_accept":
+            patch.setattr(mem, "wait", stop)
+        elif stop_at == "after_confirm":
+            real_wait = mem.wait
+            patch.setattr(mem, "wait", lambda *a, **k: real_wait(*a, **k) and stop())
+        else:
+            stop_after(patch, "notes.json")
+        with pytest.raises(KeyboardInterrupt):
+            store.write(note)
+    # The ID was written down before anything was sent.
+    assert note.id in [w["note_id"] for w in json.loads((store.root / "notes/user-01/counter.json").read_text())
+                       ["writing"]]
+    again = restart(store)
+    assert again.helper_notes("user-01", TODAY) == ["Kept."]
+    result = session(again, "user-01", [], forget_everything=True, remember_me=False)
+    assert result.forgot_everything and index_ids(again, "user-01") == [] and again.stored("user-01") == {}
+    assert kept not in mem.entries and note.id not in mem.entries
+    if stop_at == "before_send":
+        # Never sent, so past.dev never confirms a delete; it stays queued and is never visible.
+        assert result.undeleted == [note.id] and again.pending_deletes("user-01") == [note.id]
+    else:
+        assert result.undeleted == []
+        assert_clean(again)
+
+
+@pytest.mark.parametrize("crash_after", [("pending_deletes.json", 1), ("index.json", 1), ("counter.json", 1),
+                                         ("notes.json", 1)])
+def test_killed_save_index_is_finished_by_the_next_call(store: NoteStore, mem: FakeUserMemory,
+                                                        monkeypatch: pytest.MonkeyPatch, crash_after) -> None:
+    gone, kept = seed(store, "user-01", ("people", "Drop me."), ("goals", "Keep me."))
+    new = to_record(NoteAction(action="add", kind="goals", fact="New."), user_id="user-01", session_id="s",
+                    note_id=store.next_note_id("user-01"), today=TODAY, now=NOW)
+    store.write(new)
+    index = [n for n in store.index("user-01").notes if n.note_id == kept]
+    index.append(LiveNote(note_id=new.id, kind="goals", last_confirmed=TODAY))
+    with monkeypatch.context() as patch:
+        stop_after(patch, *crash_after)
+        with pytest.raises(KeyboardInterrupt):
+            store.save_index(LiveNoteIndex(user_id="user-01", notes=index))
+    again = restart(store)
+    facts = again.helper_notes("user-01", TODAY)
+    assert "Drop me." not in facts and "Keep me." in facts
+    # The new note is live only if the index was saved; otherwise it is queued for deletion, never orphaned.
+    published = crash_after[0] != "pending_deletes.json"
+    assert ("New." in facts) is published
+    result = session(again, "user-01", [])
+    assert result.undeleted == [] and gone not in mem.entries and (new.id in mem.entries) is published
+    assert_clean(again)
+
+
+def test_killed_between_two_writes_of_one_session(store: NoteStore, mem: FakeUserMemory,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    [old] = seed(store, "user-01", ("goals", "Old goal."))
+    real_ingest, calls = mem.ingest, []
+
+    def second_dies(entry):
+        calls.append(entry.id)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real_ingest(entry)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mem, "ingest", second_dies)
+        with pytest.raises(KeyboardInterrupt):
+            session(store, "user-01", [{"action": "replace", "note_id": old, "kind": "goals", "fact": "New goal."},
+                                       add("people", "Second.")])
+    first = calls[0]
+    again = restart(store)
+    assert again.helper_notes("user-01", TODAY) == []  # the replaced note is off; the new one never published
+    result = session(again, "user-01", [])
+    assert set(result.undeleted) == {calls[1]}  # the second was never sent, so past.dev cannot confirm it
+    assert old not in mem.entries and first not in mem.entries
+    assert set(index_ids(again, "user-01")) == set(again.stored("user-01")) == set()
+
+
+def test_killed_delete_after_past_dev_confirmed(store: NoteStore, mem: FakeUserMemory,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    gone, kept = seed(store, "user-01", ("people", "Forget me."), ("goals", "Keep me."))
+    store.take_off("user-01", [gone])
+    real_delete = mem.delete
+
+    def confirm_then_die(entry_id):
+        real_delete(entry_id)
+        raise KeyboardInterrupt  # before the queue is saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mem, "delete", confirm_then_die)
+        with pytest.raises(KeyboardInterrupt):
+            store.delete("user-01", [])
+    assert gone not in mem.entries
+    again = restart(store)
+    assert again.helper_notes("user-01", TODAY) == ["Keep me."]
+    # past.dev no longer has it, and a 404 is not a confirmation, so it stays queued; it is never visible.
+    assert again.delete("user-01", []) == [gone] and gone not in again.stored("user-01")
+
+
+def test_a_queued_note_cannot_go_back_on_the_index(store: NoteStore) -> None:
+    gone, kept = seed(store, "user-01", ("people", "Forget me."), ("goals", "Keep me."))
+    notes_before = store.index("user-01").notes
+    store.take_off("user-01", [gone])
+    with pytest.raises(ValueError):
+        store.save_index(LiveNoteIndex(user_id="user-01", notes=notes_before))
+    assert index_ids(store, "user-01") == [kept]
+    store.write(to_record(NoteAction(action="add", kind="goals", fact="x"), user_id="user-01", session_id="s",
+                          note_id=store.next_note_id("user-01"), today=TODAY, now=NOW))
+    with pytest.raises(ValueError):
+        store.write(to_record(NoteAction(action="add", kind="goals", fact="x"), user_id="user-01",
+                              session_id="s", note_id=gone, today=TODAY, now=NOW))
