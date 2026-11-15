@@ -1,8 +1,8 @@
 {
   "frames": [
-    "/Users/moamen/Documents/puddles/figures/fig2-preview-0.5.png",
-    "/Users/moamen/Documents/puddles/figures/fig2-preview-4.png",
-    "/Users/moamen/Documents/puddles/figures/fig2-preview-16.png"
+    "figures/fig2-preview-0.5.png",
+    "figures/fig2-preview-4.png",
+    "figures/fig2-preview-16.png"
   ],
   "script_disabled_svg": true,
   "nested_clocks_verified": true,

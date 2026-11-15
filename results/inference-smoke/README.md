@@ -16,7 +16,7 @@ Three things are still wrong:
 
 ## Settings used
 
-Every real command ran under `sh /Users/moamen/.hermes/cache/scratch/train/with_env_train.sh` (it loads the env file, overrides settings and unsets PYTHONPATH). No value was printed.
+Every real command ran under `sh <env-wrapper>` (it loads the env file, overrides settings and unsets PYTHONPATH). No value was printed.
 
 | Role | Model | URL host | Other settings (names only) |
 |---|---|---|---|
@@ -89,7 +89,7 @@ The two weakest replies:
 
 ## Commands run (run 2)
 
-`W` = `sh /Users/moamen/.hermes/cache/scratch/train/with_env_train.sh env MLFLOW_DISABLE_AGENT_HINT=1 /Users/moamen/Documents/puddles-runall-venv/bin/python`.
+`W` = `sh <env-wrapper> env MLFLOW_DISABLE_AGENT_HINT=1 python`.
 
 - Settings check: `W - <<'EOF' …` printing only whether each variable is set, plus `HELPER_MODEL`, the URL host, `HELPER_MAX_TOKENS_PARAM` and the key names in `HELPER_EXTRA_BODY`.
 - 1A: `W - <<'EOF' … EOF` (log in `runs/smoke2/1a.log`). It calls `helper_reply(client_from_env("HELPER"), check_policy_file(Path("policies/policy-v2.md")), [Turn(user)], session_id="smoke2-1a", turn=1)`, then `crisis.run(client_from_env("HELPER"), crisis.build_input("smoke2-1a", 1, [], msg), crisis.load_path())` on the two messages, then `take_notes(NoteStore(FakeUserMemory(), tmp), PlainLLM.from_env(), user_id="smoke2-1a", session_id="smoke2-1a-s1", turns=<4 turns>, remember_me=True)`.

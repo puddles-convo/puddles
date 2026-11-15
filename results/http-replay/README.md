@@ -41,11 +41,11 @@ From the repo root. The token was made in the shell, kept in a shell variable, p
 
 ```
 TOKEN=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
-PUDDLES_SERVICE_TOKEN=$TOKEN sh /Users/moamen/.hermes/cache/scratch/train/with_env_train.sh \
-  /Users/moamen/Documents/puddles-runall-venv/bin/python -m scripts.serve \
+PUDDLES_SERVICE_TOKEN=$TOKEN sh <env-wrapper> \
+  python -m scripts.serve \
   --policy policies/policy-v2.md --root runs/http-replay/root --port <free port> \
   > runs/http-replay/serve.stdout 2> runs/http-replay/serve.stderr &
-HTTP_REPLAY_TOKEN=$TOKEN /Users/moamen/Documents/puddles-runall-venv/bin/python runs/http-replay/driver.py \
+HTTP_REPLAY_TOKEN=$TOKEN python runs/http-replay/driver.py \
   http://127.0.0.1:<port> runs/http-replay/out runs/http-replay/root
 kill -INT <listener pid>
 ```

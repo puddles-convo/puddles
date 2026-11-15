@@ -15,7 +15,7 @@ The gate is built against a judge and a safety check that are **passed in as arg
 - Tests run from the repo root with:
 
 ```
-env -u PYTHONPATH MLFLOW_DISABLE_AGENT_HINT=1 /Users/moamen/Documents/puddles-runall-venv/bin/python -m pytest -q
+env -u PYTHONPATH MLFLOW_DISABLE_AGENT_HINT=1 python -m pytest -q
 ```
 
 ## Layout

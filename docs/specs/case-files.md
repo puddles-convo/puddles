@@ -13,7 +13,7 @@ Not the judge: it is Ansh's.
 - Tests run from the repo root with:
 
 ```
-env -u PYTHONPATH MLFLOW_DISABLE_AGENT_HINT=1 /Users/moamen/Documents/puddles-runall-venv/bin/python -m pytest -q
+env -u PYTHONPATH MLFLOW_DISABLE_AGENT_HINT=1 python -m pytest -q
 ```
 
 ## Layout
