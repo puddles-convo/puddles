@@ -122,8 +122,8 @@ class DecisionLog:
         return list(briefs.values())
 
     def pending_copies(self, max_attempts: int = 3) -> list[MemoryCopyEvent]:
-        latest: dict[str, MemoryCopyEvent] = {}
+        latest: dict[tuple[int, str], MemoryCopyEvent] = {}  # a recurring pattern is copied once per round
         for e in self.events():
             if isinstance(e, MemoryCopyEvent):
-                latest[e.record_id] = e
+                latest[(e.round, e.record_id)] = e
         return [e for e in latest.values() if e.status == "pending" and e.attempt < max_attempts]
