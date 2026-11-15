@@ -48,7 +48,7 @@ The notes are a short picture of the person as they are now, not a history. Befo
 
 If the person asked the robot to forget something, do not write a new note about it. If they asked it to forget everything, delete every note and add nothing.
 
-Return a JSON list of actions, each with: action, note_id (for replace, confirm and delete), kind and fact (for add and replace), due_date (for a follow_up with a date, as YYYY-MM-DD). Return an empty list if nothing should change.
+Return a JSON object with two fields: forget_everything, true only if the person asked the robot to forget everything about them, and actions, a list of actions, each with: action, note_id (for replace, confirm and delete), kind and fact (for add and replace), due_date (for a follow_up with a date, as YYYY-MM-DD). Return an empty list of actions if nothing should change.
 ```
 
 ### User message
@@ -130,9 +130,9 @@ Format: `NoteTakerInput` in [`schemas.py`](../../schemas.py). Example: [`example
 
 ## 4. Output
 
-JSON, requested as a structured output: a list of changes, which may be empty.
+JSON, requested as a structured output: an object with two fields. `forget_everything` is true only if the person asked the robot to forget everything about them. `actions` is a list of changes, which may be empty; the table and the example below describe that list.
 
-Format: `NoteAction (a list)` in [`schemas.py`](../../schemas.py).
+Format: `NoteTakerOutput` in [`puddles/inference/notes.py`](../../puddles/inference/notes.py), until it is agreed on issue #1; each action is a `NoteAction` in [`schemas.py`](../../schemas.py).
 
 | Field | Type | Meaning |
 |---|---|---|

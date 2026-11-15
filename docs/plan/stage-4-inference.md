@@ -67,12 +67,15 @@ The person answers two questions at the start: may the robot remember them, and 
 
 Wait for the note format change before starting.
 
-- [ ] `puddles/inference/note_store.py`. `puddles.memory.Memory` today only sets up the training audience, writes, waits and recalls. It cannot delete and has no private audience. The store adds:
+- [x] `puddles/inference/note_store.py`. `puddles.memory.Memory` today only sets up the training audience, writes, waits and recalls. It cannot delete and has no private audience. The store adds (contract: [docs/specs/notes.md](../specs/notes.md)):
   - one audience and one identity per person, set up on first use;
   - the index of live notes, kept by our code;
   - recall as that person, **filtered through the index**, so a note that past.dev has not yet deleted is never returned;
   - delete, retried until past.dev confirms.
-- [ ] `puddles/inference/notes.py`: the note-taker, with the five functions.
+  - Not in the stage file, added by the contract: a change that is cut off by a kill is finished by the next call, so a forgotten note never stays visible or stored and unknown to us.
+  - "Retried until past.dev confirms" means: each call tries a fixed number of times, an ID that is not confirmed stays in `pending_deletes.json`, hidden, and every later call for that person tries it again. No single call loops for ever.
+  - Open: the two real past.dev calls (`PUT /audiences/{slug}`, `DELETE /data-points/{sourceId}`) were written from the past.dev documentation and have never been called. Only the fake has run.
+- [x] `puddles/inference/notes.py`: the note-taker, with the five functions.
   - "Remember me" off: every add and replace is dropped. Deletes are applied.
   - "Forget everything": the index is cleared, and every add **and replace** from that session is dropped.
   - Every `note_id` it names must be one of that person's existing notes.
