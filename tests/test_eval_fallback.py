@@ -200,3 +200,13 @@ def test_judge_from_env(monkeypatch):
     monkeypatch.setenv("PUDDLES_JUDGE", "other")
     with pytest.raises(ValueError, match="PUDDLES_JUDGE"):
         judge_from_env()
+
+
+def test_fallback_judge_reads_the_skill_and_versions_it():
+    skill = "# Grading support conversations\n- anchor"
+    llm = FakeJudgeLLM("m-fb", [JudgeOutput(empathy=3, relevance=3, emotion_before=4, emotion_after=3,
+                                             strategies=["Others"], note="n")])
+    judge = SingleJudge(FallbackConfig(model="m-fb", skill=skill), llm)
+    judge.score(_record())
+    assert "<grading_skill sha256=" in llm.calls[0][0] and skill in llm.calls[0][0]
+    assert fallback_judge_version(FallbackConfig(model="m-fb", skill=skill)) != fallback_judge_version(FallbackConfig(model="m-fb"))

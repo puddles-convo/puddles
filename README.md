@@ -7,6 +7,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 **Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The rest of the pipeline is not built yet. Scores, counts and sources in the examples are illustrative.
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
+- **How the judges grade: the grading skill.** Every judge reads a grading guide built from the ESConv training split, and the guide is part of the judge's frozen version. Read this before trusting any score: [How the judges grade](#how-the-judges-grade-the-grading-skill) · [docs/agents/t3-judge.md](docs/agents/t3-judge.md#grading-skill)
 - The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
 - The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
 - Proposed version 2 prompts for every agent, including the held-out jury (not live yet): [docs/agent-prompts.md](docs/agent-prompts.md)
@@ -20,6 +21,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 3. [Inference steps](#3-inference-steps)
 4. [Inference agents](#4-inference-agents)
    - [Models](#models): which model plays each agent
+   - [How the judges grade](#how-the-judges-grade-the-grading-skill): the grading skill every judge reads
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
 7. [How the loop runs experiments](#7-how-the-loop-runs-experiments)
@@ -99,7 +101,7 @@ Which model plays each agent. These are starting choices and none has been bench
 |---|---|---|
 | [1. Simulated user](docs/agents/t1-simulated-user.md) | Qwen3.6-35B-A3B. A different model from the helper, so the helper is not talking to itself | Tinker |
 | [2. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, thinking mode off | Modal |
-| [3. Judge](docs/agents/t3-judge.md) | Three pinned OpenAI judges, each rating and then re-checking its own rating, and Astra (the strongest pinned OpenAI model), who writes the final score. Temperature 0 | OpenAI API |
+| [3. Judge](docs/agents/t3-judge.md) | Three pinned OpenAI judges, each rating and then re-checking its own rating, and Astra (the strongest pinned OpenAI model), who writes the final score. Temperature 0. All of them read the [grading skill](#how-the-judges-grade-the-grading-skill), which is part of the frozen `judge_version` | OpenAI API |
 | [4. Critic](docs/agents/t4-critic.md) | The same OpenAI model as the judge | OpenAI API |
 | [5. Researcher](docs/agents/t5-researcher.md) | The same OpenAI model, with Exa search as its one tool | OpenAI API and Exa |
 | [6. Proposer](docs/agents/t6-proposer.md) | The same OpenAI model as the judge | OpenAI API |
@@ -121,6 +123,31 @@ Which model plays each agent. These are starting choices and none has been bench
 - **The exact OpenAI model** for the judge, critic, researcher and proposer. It must be pinned before the judge is calibrated ([#3](https://github.com/puddles-convo/puddles/issues/3)), because changing it afterwards invalidates the scores. A fallback judge on Tinker is [#23](https://github.com/puddles-convo/puddles/issues/23).
 - **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 3-second limit.
 - **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
+
+## How the judges grade (the grading skill)
+
+**Status: the skill is built** ([`calibration/judge-skill/SKILL.md`](calibration/judge-skill/SKILL.md), about 4,300 tokens). Its text was written by Claude in a Claude Code session from the builder's training-split samples and rendered by the builder (`--from-json calibration/judge-skill/written.json`), because no builder model key was available. **The judges read it when `PUDDLES_JUDGE_SKILL` points to it** (`puddles/eval/judge.py`; off when unset, so the judge without a skill is unchanged). Not yet agreed with the judge's owner, and not yet checked on real conversations. Build it, check it and freeze the judge with it **before stage 5's real baseline runs**. The skill changes the judge's version, so baselines measured without it would have to be run again.
+
+The loop keeps or reverts a change on small score differences, so the judges must grade consistently and the way real people rated support conversations. Rather than tuning the judge prompt by hand, a module builds a **grading skill**: a short guide with anchors for each score and a few rated examples. Every judge and Astra reads it in their system message, on every conversation, in training and in the final evaluation.
+
+| | |
+|---|---|
+| Built by | `python -m puddles.eval.judge_skill`: seeded; without `--yes` it only prints the plan and the estimated cost (7 model calls, about 28,000 prompt tokens). The builder model is `PUDDLES_SKILL_BUILDER_MODEL` and needs a row in the prices table |
+| Built from | **The ESConv training split only.** Conversations are sampled evenly across rating levels, because most ESConv ratings are 5 out of 5 |
+| Never built from | The validation split (the gate and stage 5 grade the loop on it), the test split (final evaluation only), CounselBench-Adv and VERA-MH (outside checks the loop never sees) |
+| What it covers | Empathy and relevance (what raises or lowers each score, anchors for 1, 3 and 5, traps); distress at the start and end (anchors and rules); definitions of the 8 strategy labels; 5 examples with the seekers' own ratings. Examples never include a helper mentioning medication, and leave out ESConv's strategy labels, which are often wrong |
+| Where it lives | `calibration/judge-skill/SKILL.md`, with `skill.meta.json` listing the ESConv IDs behind every guideline and example |
+| How judges read it | Added after the fixed judge prompt as a `<grading_skill>` block, switched on with `PUDDLES_JUDGE_SKILL` |
+| Version | The skill's hash is part of `judge_version`, so any edit makes the frozen judge refuse to run until it is checked again |
+
+**The one check.** Score about 50 validation conversations with the existing calibration command, once without the skill and once with it, on the same conversations. The rule, written before the run: use the skill if agreement with the seekers' ratings (Spearman and weighted kappa) does not fall on empathy or relevance. This is a single look, not tuning: nothing is changed to fit the validation split. Both results go here.
+
+| | Empathy: Spearman / QWK | Relevance: Spearman / QWK |
+|---|---|---|
+| Without the skill | not run | not run |
+| With the skill | not run | not run |
+
+**Limits.** The ratings come from the people seeking help, not from health specialists. ESConv has very few low ratings, so the low end of each scale has the fewest examples; `skill.meta.json` reports how many each level had. The skill contains short ESConv excerpts (CC BY-NC 4.0), credited in its header.
 
 ## 5. The memory
 
