@@ -43,6 +43,7 @@ def test_settings_round_trip_through_the_container_environment():
     ({ENV["lora"]: "maybe"}, "yes/no"),
     ({ENV["gpu_memory_utilization"]: "0.99"}, "between 0.3 and 0.95"),
     ({ENV["max_model_len"]: "lots"}, "whole number"),
+    ({ENV["quantization"]: "int4"}, "must be empty or one of fp8"),
 ])
 def test_bad_settings_are_refused(env, message):
     with pytest.raises(SettingsError, match=message):
@@ -57,3 +58,11 @@ def test_the_settings_module_does_not_need_modal():
 def test_the_modal_app_refuses_to_serve_without_a_key():
     source = (REPO / "deploy" / "modal_helper.py").read_text()
     assert 'os.environ.get("VLLM_API_KEY")' in source and "raise RuntimeError" in source
+
+
+def test_fp8_only_when_asked_and_it_survives_the_round_trip():
+    assert "--quantization" not in vllm_command(HelperSettings.from_env({}))
+    s = HelperSettings.from_env({ENV["gpu"]: "A10G", ENV["quantization"]: "FP8", ENV["max_model_len"]: "4096"})
+    cmd = vllm_command(s)
+    assert cmd[cmd.index("--quantization") + 1] == "fp8"
+    assert HelperSettings.from_env(s.as_env()) == s

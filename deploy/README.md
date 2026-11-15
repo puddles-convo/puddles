@@ -12,6 +12,7 @@ The repo's helper, the crisis checker, `scripts/chat.py` and training runs all r
 | Scaling | Scales to zero after 15 min idle. `MODAL_HELPER_MIN_CONTAINERS=1` keeps one warm, **only while the demo runs** |
 | Auth | Bearer key. vLLM reads `VLLM_API_KEY` from the Modal Secret `puddles-helper-key`; the app refuses to start without it |
 | Weights | Cached on the Modal Volume `puddles-helper-hf-cache`, so only the first start downloads them (about 18 GB) |
+| Memory | bf16 weights by default (about 18 GB). `MODAL_HELPER_QUANTIZATION=fp8` halves them, to fit a 24 GB GPU (A10G, L4), for example when the account cannot use an L40S yet |
 | LoRA | Off. `MODAL_HELPER_LORA=1` adds `--enable-lora --max-lora-rank 32 --max-loras 2`, for a fine-tuned adapter later |
 
 All settings are in `deploy/helper_config.py`, which is tested offline in `tests/test_modal_helper.py`.

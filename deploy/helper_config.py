@@ -20,6 +20,7 @@ HF_CACHE_VOLUME = "puddles-helper-hf-cache"
 VLLM_CACHE_VOLUME = "puddles-helper-vllm-cache"
 
 GPUS = ("L4", "A10G", "L40S", "A100-40GB", "A100-80GB", "H100", "H200")
+QUANTIZATIONS = ("", "fp8")  # "": the model's own bf16 weights; fp8: about half the memory, fits a 24 GB GPU
 
 # Environment variables read at deploy time. Every one is optional.
 ENV = {
@@ -36,6 +37,7 @@ ENV = {
     "lora": "MODAL_HELPER_LORA",
     "max_lora_rank": "MODAL_HELPER_MAX_LORA_RANK",
     "max_loras": "MODAL_HELPER_MAX_LORAS",
+    "quantization": "MODAL_HELPER_QUANTIZATION",
 }
 
 
@@ -77,6 +79,7 @@ class HelperSettings:
     lora: bool = False
     max_lora_rank: int = 32
     max_loras: int = 2
+    quantization: str = ""  # "fp8" to fit a 24 GB GPU (A10G, L4)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "HelperSettings":
@@ -92,6 +95,9 @@ class HelperSettings:
             raise SettingsError(f"{ENV['gpu_memory_utilization']}={util!r} is not a number") from exc
         if not 0.3 <= memory <= 0.95:
             raise SettingsError(f"{ENV['gpu_memory_utilization']}={memory} must be between 0.3 and 0.95")
+        quantization = get("quantization").lower()
+        if quantization not in QUANTIZATIONS:
+            raise SettingsError(f"{ENV['quantization']}={quantization!r} must be empty or one of {', '.join(q for q in QUANTIZATIONS if q)}")
         return cls(
             model=get("model") or d.model,
             served_name=get("served_name") or d.served_name,
@@ -106,6 +112,7 @@ class HelperSettings:
             lora=_bool(get("lora"), ENV["lora"]) if get("lora") else d.lora,
             max_lora_rank=_int(get("max_lora_rank"), ENV["max_lora_rank"], 1, 64) if get("max_lora_rank") else d.max_lora_rank,
             max_loras=_int(get("max_loras"), ENV["max_loras"], 1, 8) if get("max_loras") else d.max_loras,
+            quantization=quantization,
         )
 
     def as_env(self) -> dict[str, str]:
@@ -116,6 +123,7 @@ class HelperSettings:
             "max_model_len": self.max_model_len, "gpu_memory_utilization": self.gpu_memory_utilization,
             "concurrency": self.concurrency, "text_only": "1" if self.text_only else "0",
             "lora": "1" if self.lora else "0", "max_lora_rank": self.max_lora_rank, "max_loras": self.max_loras,
+            "quantization": self.quantization,
         }
         return {ENV[key]: str(value) for key, value in values.items()}
 
@@ -134,6 +142,8 @@ def vllm_command(s: HelperSettings) -> list[str]:
     ]
     if s.text_only:
         cmd.append("--language-model-only")
+    if s.quantization:
+        cmd += ["--quantization", s.quantization]
     if s.lora:
         cmd += ["--enable-lora", "--max-lora-rank", str(s.max_lora_rank), "--max-loras", str(s.max_loras)]
     return cmd
