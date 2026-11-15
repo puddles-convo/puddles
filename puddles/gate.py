@@ -637,11 +637,11 @@ class _Gate:
         self.last_report: Optional[GateReport] = None
 
     def __call__(self, result: RoundResult) -> GateOutcome:
-        result.scores, result.safety, result.candidate_sha256 = None, None, None
+        result.scores, result.safety, result.candidate_sha256, result.base_sha256 = None, None, None, None
         try:
             report = self._gate(result)
         except Exception as exc:  # noqa: BLE001  the candidate is reverted untested
-            result.scores, result.safety, result.candidate_sha256 = None, None, None
+            result.scores, result.safety, result.candidate_sha256, result.base_sha256 = None, None, None, None
             report = self._untested(result, f"the gate could not run ({type(exc).__name__}: {exc})")
         self.last_report = report
         return report.outcome
@@ -653,6 +653,7 @@ class _Gate:
             before, base_sha = _current_scores(self.deps, result.base_policy_path, self.ids)
         except Exception as exc:  # noqa: BLE001
             return self._untested(result, f"the policy in force could not be scored ({type(exc).__name__}: {exc})")
+        result.base_sha256 = base_sha  # the text the before-scores are about, kept or reverted
         inp = GateInput(round=result.round, edit_id=result.edit.id, current_policy=str(result.base_policy_path),
                         candidate_policy=str(result.candidate_path), validation_scenario_ids=self.ids,
                         current_scores=before, noise=self.noise, token_cap=self.token_cap,

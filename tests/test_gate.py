@@ -929,7 +929,7 @@ def test_current_json_whose_scores_do_not_validate_counts_as_absent(tmp_path):
     assert len(deps.judge.calls) == calls + 5
 
 
-def kept_result(tmp_path, *, candidate_sha256):
+def kept_result(tmp_path, *, candidate_sha256, base_sha256=None, decision="kept"):
     from puddles.records import save_record
     from schemas import GateOutcome, PolicyEdit
 
@@ -943,12 +943,26 @@ def kept_result(tmp_path, *, candidate_sha256):
                       new_policy_version="policy-v2-candidate", policy_path=str(candidate), summary="Ask first.",
                       action="add", rule_id="C9", rule_text=NEW_RULE)
     result = RoundResult(round=1, outcome="candidate", base_policy_path=start, edit=edit, candidate_path=candidate,
-                         candidate_sha256=candidate_sha256)
+                         candidate_sha256=candidate_sha256, base_sha256=base_sha256,
+                         pattern=_pattern_record(), status_before="open")
     result.refs["edit"] = save_record(edit, 1, root)
     outcome = GateOutcome(id="gate-r01", written_by="gatekeeper", created_at=now(), parent_ids=["edit-r01"],
-                          round=1, edit_id="edit-r01", decision="kept", before=gate.NOT_MEASURED,
-                          after=gate.NOT_MEASURED, safety_passed=True, policy_in_force="policy-v2")
+                          round=1, edit_id="edit-r01", decision=decision, before=gate.NOT_MEASURED,
+                          after=gate.NOT_MEASURED, safety_passed=True,
+                          policy_in_force="policy-v2" if decision == "kept" else "policy-v1")
     return root, candidate, result, outcome
+
+
+def _pattern_record():
+    from schemas import FailurePattern
+
+    return FailurePattern(id="pattern-r01", written_by="critic", created_at=now(), round=1,
+                          name="advice-before-understanding", description="Advice first.", seen_in=1, out_of=5,
+                          example_conversation_ids=["conv-r01-fixture-0001"])
+
+
+def files_under(root):
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
 
 
 def test_finish_round_refuses_a_candidate_changed_after_the_gate_and_writes_nothing(tmp_path):
@@ -972,3 +986,109 @@ def test_finish_round_with_the_stand_in_gate_promotes_as_before(tmp_path):
     event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root)
     assert event.outcome == "kept" and (root / "policies" / "policy-v2.md").exists()
     assert "C9. Ask one open question first." in (root / "policies" / "policy-v2.md").read_text()
+
+
+# ---------- finish_round files measurements only under the bytes they were measured on ----------
+
+BASE_SHA = sha256_text(POLICY.read_text())
+REPLACED_BASE = POLICY.read_text().replace("C4. Keep replies short.", "C4. Say whatever comes to mind.")
+
+
+def test_policy_changed_is_the_parent_of_candidate_changed():
+    from puddles.round import CandidateChanged, PolicyChanged
+
+    assert issubclass(CandidateChanged, PolicyChanged) and issubclass(PolicyChanged, RuntimeError)
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_finish_round_refuses_a_replaced_base_and_writes_nothing(tmp_path, decision, replay_on):
+    from puddles.round import PolicyChanged, finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=sha256_text(candidate_text()),
+                                                   base_sha256=BASE_SHA, decision=decision)
+    result.base_policy_path.write_text(REPLACED_BASE)
+    before, memory, log = files_under(root), FakeMemory(), DecisionLog(root)
+    with pytest.raises(PolicyChanged, match="before-scores"):
+        finish_round(result, outcome, log, memory, root, start_policy=result.base_policy_path if replay_on else None)
+    assert files_under(root) == before and log.events() == []
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_finish_round_files_base_sha256_from_its_one_tied_reading(tmp_path, decision):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=sha256_text(candidate_text()),
+                                                   base_sha256=BASE_SHA, decision=decision)
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, start_policy=result.base_policy_path)
+    assert event.policy.base_sha256 == BASE_SHA and event.outcome == decision
+    assert replay.check(DecisionLog(root), root, result.base_policy_path)
+
+
+def test_finish_round_refuses_before_writing_a_round_the_replay_check_would_refuse(tmp_path):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    start = tmp_path / "start" / "policy-v1.md"  # a starting policy that is not the base the round ran on
+    start.parent.mkdir()
+    start.write_text(REPLACED_BASE)
+    before, log = files_under(root), DecisionLog(root)
+    with pytest.raises(replay.ReplayError, match="starts from"):
+        finish_round(result, outcome, log, FakeMemory(), root, start_policy=start)
+    assert files_under(root) == before and log.events() == []  # no policy, no .meta.json, no record, no event
+
+
+def test_finish_round_refuses_a_round_already_in_the_log_before_writing(tmp_path):
+    from puddles.decision_log import DecisionLogError
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision="reverted")
+    log = DecisionLog(root)
+    finish_round(result, outcome, log, FakeMemory(), root)
+    events, before = log.events(), files_under(root)
+    kept = outcome.model_copy(update={"decision": "kept", "policy_in_force": "policy-v2"})
+    with pytest.raises(DecisionLogError, match="already"):
+        finish_round(result, kept, log, FakeMemory(), root)  # round 1 again, now as a keep
+    assert log.events() == events and files_under(root) == before
+
+
+def test_finish_round_refuses_a_changed_record_file_before_writing(tmp_path):
+    from puddles.round import RecordChanged, finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    (root / result.refs["edit"].path).write_text("{}")
+    before, log = files_under(root), DecisionLog(root)
+    with pytest.raises(RecordChanged, match="edit"):
+        finish_round(result, outcome, log, FakeMemory(), root)
+    assert files_under(root) == before and log.events() == []
+
+
+def test_finish_round_with_the_stand_in_writes_the_same_meta_as_before(tmp_path):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)  # base_sha256 None too
+    log = DecisionLog(root)
+    event = finish_round(result, outcome, log, FakeMemory(), root, start_policy=result.base_policy_path)
+    meta_file = root / "policies" / "policy-v2.meta.json"
+    written = meta_file.read_bytes()
+    replay.write_meta(root, log.rounds(), result.base_policy_path, "policy-v2")  # what the old code wrote
+    assert meta_file.read_bytes() == written and event.outcome == "kept"
+    assert (root / result.refs["outcome"].path).exists()
+
+
+def test_make_gate_sets_base_sha256_on_every_call(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    the_gate = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)
+    kept = round_result(deps, current, candidate)
+    assert the_gate(kept).decision == "kept" and kept.base_sha256 == BASE_SHA
+
+    deps.noise_measured = False
+    reverted_ = round_result(deps, current, candidate)
+    assert the_gate(reverted_).decision == "reverted" and reverted_.base_sha256 == BASE_SHA
+
+    (deps.root / "scores" / "current.json").unlink()
+    deps.user_client = FakeClient(user_failing_on("two mugs"))
+    untested = round_result(deps, current, candidate)
+    untested.base_sha256 = "stale"
+    assert the_gate(untested).decision == "reverted" and untested.base_sha256 is None
