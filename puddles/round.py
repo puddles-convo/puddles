@@ -51,12 +51,22 @@ class RoundResult:
     refs: dict[str, RecordRef] = field(default_factory=dict)
 
 
-def run_agents(round_: int, conversations: list[ScoredConversation], policy_path: Path,
-               log: DecisionLog, memory: Memory, llm: LLM, search: Callable[[str], list[dict]],
-               root: Path) -> RoundResult:
+def policy_in_force(root: Path, fallback: Path) -> Path:
+    """The newest promoted policy file, for the stage-0 graph runner, which keeps no replay yet.
+    scripts/run_round.py takes the policy in force from the log instead (`prepare_round`)."""
+    promoted = sorted((root / "policies").glob("policy-v*.md"), key=lambda p: p.stat().st_mtime)
+    promoted = [p for p in promoted if "candidate" not in p.name]
+    return promoted[-1] if promoted else fallback
+
+
+NO_EVIDENCE_REASON = "No trustworthy source was found for this pattern."
+
+
+def run_critic(round_: int, conversations: list[ScoredConversation], policy_path: Path,
+               log: DecisionLog, memory: Memory, llm: LLM, root: Path) -> RoundResult:
+    """Step 4. A new result, outcome no_pattern; with the pattern set if the critic found one."""
     policy_text = policy_path.read_text()
     result = RoundResult(round=round_, outcome="no_pattern", base_policy_path=policy_path)
-
     c_in = critic.build_input(round_, policy_text, conversations, log, memory, root)
     c_out = critic.run(c_in, llm, log)
     pattern = critic.to_record(c_out, c_in, log)
@@ -67,7 +77,14 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     statuses = [p.status for p in log.earlier_patterns() if p.id == pattern.pattern_id and p.status]
     result.status_before = statuses[0] if statuses else "open"
     result.refs["pattern"] = save_record(pattern, round_, root)
+    return result
 
+
+def run_researcher(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM,
+                   search: Callable[[str], list[dict]], root: Path) -> RoundResult:
+    """Step 5. Sets the research note; with no sources the outcome becomes no_evidence."""
+    assert result.pattern is not None
+    pattern, round_ = result.pattern, result.round
     r_in = researcher.build_input(pattern, log, memory, root)
     r_out, searches = researcher.run(r_in, llm, search, log)
     research = researcher.to_record(r_out, pattern, round_)
@@ -75,9 +92,16 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     result.research = research
     result.refs["research"] = save_record(research, round_, root)
     if not research.sources:
-        result.outcome, result.reason = "no_evidence", "No trustworthy source was found for this pattern."
-        return result
+        result.outcome, result.reason = "no_evidence", NO_EVIDENCE_REASON
+    return result
 
+
+def run_proposer(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM,
+                 root: Path) -> RoundResult:
+    """Step 6. Writes the candidate policy; the outcome becomes candidate."""
+    assert result.pattern is not None and result.research is not None
+    pattern, research, round_ = result.pattern, result.research, result.round
+    policy_text = result.base_policy_path.read_text()
     p_in = proposer.build_input(policy_text, pattern, research, log, memory, root)
     policy = parse_policy(policy_text)
     p_out = proposer.run(p_in, policy.version, policy, log, llm)
@@ -85,6 +109,18 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     result.edit, result.candidate_path, result.outcome = edit, candidate, "candidate"
     result.refs["edit"] = save_record(edit, round_, root)
     return result
+
+
+def run_agents(round_: int, conversations: list[ScoredConversation], policy_path: Path,
+               log: DecisionLog, memory: Memory, llm: LLM, search: Callable[[str], list[dict]],
+               root: Path) -> RoundResult:
+    result = run_critic(round_, conversations, policy_path, log, memory, llm, root)
+    if result.pattern is None:
+        return result
+    run_researcher(result, log, memory, llm, search, root)
+    if result.outcome == "no_evidence":
+        return result
+    return run_proposer(result, log, memory, llm, root)
 
 
 def stand_in_gate(result: RoundResult, decision: Literal["kept", "reverted"]) -> GateOutcome:
@@ -168,11 +204,12 @@ def prepare_round(log: DecisionLog, memory: Memory, root: Path, start_policy: Pa
 
 
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
-                 root: Path, start_policy: Path) -> RoundEvent:
+                 root: Path, start_policy: Optional[Path] = None) -> RoundEvent:
     """Log the round, copy its records into memory, then run the replay check.
 
     A promoted policy is written just before the round event; prepare_round removes it if a
-    crash comes between the two.
+    crash comes between the two. Without `start_policy` (the stage-0 graph runner) no .meta.json
+    is written and no replay check runs.
     """
     base_text = result.base_policy_path.read_text()
     base_version = parse_policy(base_text).version
@@ -203,14 +240,16 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     if promoted:
         version, text = promoted
         replay.policy_path(root, version).write_text(text)
-        replay.write_meta(root, log.rounds() + [event], start_policy, version)
+        if start_policy is not None:
+            replay.write_meta(root, log.rounds() + [event], start_policy, version)
     log.append(event)
     for kind, model in MODELS.items():
         if kind in result.refs:
             record = load_record(result.refs[kind], model, root)
             assert record is not None, f"{kind} record changed on disk"
             copy_to_memory(record, result.refs[kind], result.round, memory, log, root)
-    replay.check(log, root, start_policy)
+    if start_policy is not None:
+        replay.check(log, root, start_policy)
     return event
 
 

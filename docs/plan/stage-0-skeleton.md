@@ -4,6 +4,8 @@
 
 Issue: [#30](https://github.com/puddles-convo/puddles/issues/30).
 
+**Status: built on 14 November.** The contract with the exact names and signatures is [docs/specs/graph.md](../specs/graph.md); build on that file, not on this one. The round has one more short path than the diagram below shows: when no conversation finished, or the judge scored none, it goes from `judge` straight to `finish`. `run_round` checks the policy file before it touches the memory or the log.
+
 ## Goal
 
 One training round runs as a LangGraph graph, from conversations to the log entry, with an MLflow trace of every step. Agents that do not exist yet are dummies. Nothing calls a real model.
@@ -41,18 +43,18 @@ On the three short paths the gate has not run, so `finish` calls `finish_round(r
 
 ## Checklist
 
-- [ ] Add `langgraph` and `mlflow` to `pyproject.toml` and `requirements.txt`.
-- [ ] Split `puddles.round.run_agents` into three functions, one per agent, at its two early returns. Keep `run_agents` as a wrapper that calls the three, so `tests/test_memory_wiring.py` passes unchanged.
-- [ ] `puddles/graph.py`: `build_round_graph(deps)` returns the compiled graph. `deps` carries the two chat clients, the structured model, the search function, the memory, the log and the root folder, so tests can pass fakes.
-- [ ] `converse` loads the policy with `loop.policy.load_policy(path)` and passes `out_path=root / "conversations" / "round-NN-train.jsonl"`, so the conversations are saved. The gate's own conversations get a different file and different IDs in stage 2. `run_batch` writes the failures file beside it. The agents read the same policy file as text and parse it with `puddles.policy.parse_policy`.
-- [ ] Each agent node catches `puddles.llm.AgentFailed` and follows the table in the [plan README](README.md#when-an-agents-answer-fails-twice). A failed researcher leaves `result.research` empty, and a failed proposer leaves `result.edit` empty, so the routing below tests for both. `stand_in_gate` asserts that an edit exists; never send it a round without one.
-- [ ] Before the graph starts, call `memory.ensure_training_audience()` and then `puddles.round.retry_pending(log, memory, root)`, as `scripts/run_round.py` does.
-- [ ] `puddles/tracing.py`: `setup()` sets the tracking address from `MLFLOW_TRACKING_URI` (default `sqlite:///runs/mlflow.db`) and calls `mlflow.langchain.autolog()` and `mlflow.openai.autolog()`.
-- [ ] `TracedClient` in `puddles/tracing.py`: wraps any `ChatClient` and opens one span per `complete()` call. `loop.llm` uses plain HTTP, so MLflow's automatic OpenAI tracing does not see those calls.
-- [ ] One MLflow run per round: the policy version as a parameter, `event.outcome` as a tag, conversations run and failed as metrics.
-- [ ] `scripts/run_graph_round.py --fake --root runs/dev`: one round with every fake, no keys.
-- [ ] The same script without `--fake` takes `--policy`, `--scenarios` and `--max-turns`, and builds the real clients from the environment. Stage 3 uses it.
-- [ ] `tests/test_graph.py`, listed below.
+- [x] Add `langgraph` and `mlflow` to `pyproject.toml` and `requirements.txt`.
+- [x] Split `puddles.round.run_agents` into three functions, one per agent, at its two early returns. Keep `run_agents` as a wrapper that calls the three, so `tests/test_memory_wiring.py` passes unchanged.
+- [x] `puddles/graph.py`: `build_round_graph(deps)` returns the compiled graph. `deps` carries the two chat clients, the structured model, the search function, the memory, the log and the root folder, so tests can pass fakes.
+- [x] `converse` loads the policy with `loop.policy.load_policy(path)` and passes `out_path=root / "conversations" / "round-NN-train.jsonl"`, so the conversations are saved. The gate's own conversations get a different file and different IDs in stage 2. `run_batch` writes the failures file beside it. The agents read the same policy file as text and parse it with `puddles.policy.parse_policy`.
+- [x] Each agent node catches `puddles.llm.AgentFailed` and follows the table in the [plan README](README.md#when-an-agents-answer-fails-twice). A failed researcher leaves `result.research` empty, and a failed proposer leaves `result.edit` empty, so the routing below tests for both. `stand_in_gate` asserts that an edit exists; never send it a round without one.
+- [x] Before the graph starts, call `memory.ensure_training_audience()` and then `puddles.round.retry_pending(log, memory, root)`, as `scripts/run_round.py` does.
+- [x] `puddles/tracing.py`: `setup()` sets the tracking address from `MLFLOW_TRACKING_URI` (default `sqlite:///runs/mlflow.db`) and calls `mlflow.langchain.autolog()` and `mlflow.openai.autolog()`.
+- [x] `TracedClient` in `puddles/tracing.py`: wraps any `ChatClient` and opens one span per `complete()` call. `loop.llm` uses plain HTTP, so MLflow's automatic OpenAI tracing does not see those calls.
+- [x] One MLflow run per round: the policy version as a parameter, `event.outcome` as a tag, conversations run and failed as metrics.
+- [x] `scripts/run_graph_round.py --fake --root runs/dev`: one round with every fake, no keys.
+- [x] The same script without `--fake` takes `--policy`, `--scenarios` and `--max-turns`, and builds the real clients from the environment. Stage 3 uses it.
+- [x] `tests/test_graph.py`, listed below.
 
 ## Tests that must pass
 

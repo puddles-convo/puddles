@@ -30,10 +30,11 @@ This plan was reviewed against the code by a second model on 14 November and cor
 | Gatekeeper and safety cases | | Not built (issues #5, #20) |
 | Where each rule came from (`policies/<version>.meta.json`) | | Not built. The format `PolicyMeta` exists; nothing writes it. |
 | ESConv loader | | Not built (issue #2). `fixtures/scenarios.jsonl` has 5 hand-written scenarios. |
-| Graph, tracing, loop command | | Not built (stages 0, 1, 6) |
+| One round as a graph, with MLflow tracing | `puddles/graph.py`, `puddles/tracing.py`, `scripts/run_graph_round.py`; contract in [docs/specs/graph.md](../specs/graph.md) | Built, tested offline. `python -m scripts.run_graph_round --fake --root runs/dev` runs with no keys. The judge and the gate in it are stand-ins. |
+| Token counts, the loop command | | Not built (stages 1, 6) |
 | Crisis checker, release step, note-taker, storage for a person's notes | | Not built (stage 4) |
 
-`python -m pytest` runs 409 tests offline and skips one that needs `PAST_API_KEY`.
+The suite runs 521 tests offline and skips one that needs `PAST_API_KEY`. It takes about three minutes; the exact command is in [docs/specs/graph.md](../specs/graph.md). If `PYTHONPATH` is set in your shell, unset it first.
 
 ### Two packages, three overlaps
 
