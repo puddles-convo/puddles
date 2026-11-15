@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from puddles.eval.calibrate import PanelLike, check_frozen
+from puddles.eval.calibrate import JudgeLike, check_frozen
 from puddles.eval.data import download
 from puddles.eval.helper import OpenAICompatibleHelper
-from puddles.eval.judge import JudgePanel, PanelConfig
+from puddles.eval.judge import judge_from_env
 from puddles.eval.safety import OpenAIYesNo, Reply, YesNoLLM, check_assertions
 from puddles.eval.vera import run_vera
 from puddles.llm import AgentFailed
@@ -68,7 +68,7 @@ def _category_assertions(category: str) -> tuple[list[Assertion], list[Assertion
 
 
 def _run_case(case: ExternalCase, system: str, reply_fn: Reply, asker: YesNoLLM,
-              panel: Optional[PanelLike]) -> dict:
+              judge: Optional[JudgeLike]) -> dict:
     detail = {"case_id": case.case_id, "category": case.category, "passed": False,
               "reason": "", "empathy": None, "relevance": None, "quality_failed": False}
     try:
@@ -83,14 +83,14 @@ def _run_case(case: ExternalCase, system: str, reply_fn: Reply, asker: YesNoLLM,
     failures = check_assertions(case.opener, reply, must, must_not, asker)
     detail["passed"] = not failures
     detail["reason"] = "; ".join(failures)
-    if panel is not None:
+    if judge is not None:
         record = ConversationRecord(
             id=f"conv-{system}-{case.case_id}", written_by="external-eval",
             created_at=datetime.now(timezone.utc), source="simulated",
             policy_version=system,
             turns=[Turn(speaker="user", text=case.opener), Turn(speaker="helper", text=reply)])
         try:
-            score = panel.score(record).score
+            score = judge.score(record).score
             detail["empathy"] = score.empathy
             detail["relevance"] = score.relevance
         except AgentFailed as e:
@@ -118,7 +118,7 @@ def _rows(system: str, cases: list[dict]) -> list[dict]:
     return rows
 
 
-def run_counselbench(system: str, reply: Reply, asker: YesNoLLM, panel: Optional[PanelLike] = None,
+def run_counselbench(system: str, reply: Reply, asker: YesNoLLM, judge: Optional[JudgeLike] = None,
                      cases: Optional[list[ExternalCase]] = None, limit: Optional[int] = None,
                      workers: int = 4) -> tuple[list[dict], list[dict]]:
     cases = load_counselbench_adv() if cases is None else cases
@@ -131,7 +131,7 @@ def run_counselbench(system: str, reply: Reply, asker: YesNoLLM, panel: Optional
                 kept.append(case)
         cases = kept
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        details = list(pool.map(lambda case: _run_case(case, system, reply, asker, panel), cases))
+        details = list(pool.map(lambda case: _run_case(case, system, reply, asker, judge), cases))
     return _rows(system, details), details
 
 
@@ -160,18 +160,20 @@ def main() -> None:
 
     reply = OpenAICompatibleHelper.from_env(policy)
     asker = OpenAIYesNo.from_env()
-    panel = None
+    judge = None
     judge_version = None
+    judge_kind = None
     if not args.no_quality:
-        panel = JudgePanel.from_config(PanelConfig.from_env())
-        check_frozen(panel)
-        judge_version = panel.version
+        judge = judge_from_env()
+        check_frozen(judge)
+        judge_version = judge.version
+        judge_kind = judge.kind
 
-    rows, cases = run_counselbench(args.system, reply, asker, panel=panel,
+    rows, cases = run_counselbench(args.system, reply, asker, judge=judge,
                                    limit=args.limit, workers=args.workers)
     (args.output / "counselbench.json").write_text(json.dumps({
         "run": {"system": args.system, "policy_sha256": hashlib.sha256(policy.encode()).hexdigest(),
-                "cbadv_revision": CBADV_REVISION, "judge_version": judge_version,
+                "cbadv_revision": CBADV_REVISION, "judge_kind": judge_kind, "judge_version": judge_version,
                 "safety_model": asker.model, "helper_model": reply.model, "limit": args.limit},
         "rows": rows, "cases": cases}, ensure_ascii=False, indent=2) + "\n")
 

@@ -55,6 +55,8 @@ def _conv(index, ratings=None, speakers=("usr", "sys"), strategies=(None,)):
 
 
 class FakePanel:
+    kind = "panel"
+
     def __init__(self, results, config=None):
         self.config = config or PanelConfig(judges=["model-a", "model-b", "model-c"], astra="model-astra")
         self.version = "judge-v1-test"
@@ -205,9 +207,10 @@ def test_freeze_and_check(tmp_path, monkeypatch):
     frozen = freeze(val_report, path)
     assert frozen.frozen and path.is_file()
     assert check_frozen(panel, path).judge_version == "judge-v1-test"
-    assert check_frozen("judge-v1-test", path).frozen
+    other = FakePanel({})
+    other.version = "judge-v1-other"
     with pytest.raises(ValueError, match="judge-v1-test"):
-        check_frozen("judge-v1-other", path)
+        check_frozen(other, path)
     with pytest.raises(ValueError, match="not frozen"):
         check_frozen(panel, tmp_path / "missing.json")
 
@@ -219,3 +222,43 @@ def test_report_json_has_no_turn_or_situation_text(monkeypatch):
     report, details = calibrate("validation", panel)
     blob = report.model_dump_json() + str(details)
     assert "SITUATION-SECRET" not in blob and "turn 0" not in blob and "turn 1" not in blob
+
+
+def test_calibrate_fallback_judge(monkeypatch, tmp_path):
+    from puddles.eval.judge import FallbackConfig
+
+    class FakeFallback:
+        kind = "fallback"
+        config = FallbackConfig(model="m-fb")
+        version = "judge-fallback-v1-deadbeef"
+
+        def __init__(self, results):
+            self.results = results
+
+        def score(self, record):
+            out = self.results[record.id]
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+    convs = [_conv(0), _conv(1)]
+    _use(monkeypatch, convs)
+    judge = FakeFallback({c.record.id: _result(c.record.id, empathy=c.ratings.empathy) for c in convs})
+    report, details = calibrate("validation", judge)
+    assert report.judge_kind == "fallback"
+    assert report.judge_config == judge.config
+    assert set(report.sources) == {"fallback"}
+    assert report.sources["fallback"].model == "m-fb"
+    assert report.agreement["empathy"] == report.sources["fallback"].empathy
+    assert report.agreement["empathy"].mean_abs_error == 0
+
+    from puddles.eval.calibrate import frozen_path
+    assert frozen_path("panel").name == "frozen.json"
+    assert frozen_path("fallback").name == "frozen-fallback.json"
+    path = tmp_path / "frozen-fallback.json"
+    frozen = freeze(report, path)
+    assert frozen.frozen and path.is_file()
+    assert check_frozen(judge, path).judge_version == "judge-fallback-v1-deadbeef"
+    panel = FakePanel({})
+    with pytest.raises(ValueError, match="judge-fallback-v1-deadbeef"):
+        check_frozen(panel, path)  # the panel's version is not the fallback's

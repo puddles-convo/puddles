@@ -67,8 +67,11 @@ def render_conversation(turns: list[Turn]) -> str:
     return "<conversation>\n" + "\n".join(lines) + "\n</conversation>"
 
 
+TINKER_BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+
+
 class Usage(BaseModel):
-    stage: Literal["initial", "final", "astra"]
+    stage: Literal["initial", "final", "astra", "single"]
     judge: str
     model: str
     prompt_tokens: int
@@ -102,6 +105,51 @@ class OpenAIJudgeLLM:
         parsed = resp.choices[0].message.parsed
         if parsed is None:
             raise AgentFailed("model refused or returned no JudgeOutput")
+        usage = resp.usage
+        return parsed, (usage.prompt_tokens if usage else 0), (usage.completion_tokens if usage else 0)
+
+
+def extract_json(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.endswith("```"):
+            text = text[:-3]
+        return text.strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start:end + 1]
+    return text
+
+
+class TinkerJudgeLLM:
+    """A judge on a large open model served by Tinker's OpenAI-compatible endpoint.
+
+    Structured output is not documented, so the text reply is parsed as JSON
+    and validated by code.
+    """
+
+    def __init__(self, model: str, temperature: Optional[float] = 0.0,
+                 base_url: str = TINKER_BASE_URL, api_key: Optional[str] = None, client=None):
+        if client is None:
+            from openai import OpenAI
+
+            api_key = api_key or os.environ.get("TINKER_API_KEY")
+            if not api_key:
+                raise ValueError("TINKER_API_KEY is not set")
+            client = OpenAI(base_url=base_url, api_key=api_key)
+        self.model = model
+        self.temperature = temperature
+        self.client = client
+
+    def judge(self, system: str, user: str) -> tuple[JudgeOutput, int, int]:
+        extra = {"temperature": self.temperature} if self.temperature is not None else {}
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **extra,
+        )
+        parsed = JudgeOutput.model_validate_json(extract_json(resp.choices[0].message.content or ""))
         usage = resp.usage
         return parsed, (usage.prompt_tokens if usage else 0), (usage.completion_tokens if usage else 0)
 
@@ -148,6 +196,35 @@ def judge_version(config: PanelConfig) -> str:
     return "judge-v1-" + hashlib.sha256(payload.encode()).hexdigest()[:8]
 
 
+class FallbackConfig(Strict):
+    model: str
+    temperature: Optional[float] = 0.0
+    base_url: str = TINKER_BASE_URL
+
+    @model_validator(mode="after")
+    def _check(self) -> "FallbackConfig":
+        if not self.model.strip():
+            raise ValueError("fallback judge model name must be non-empty")
+        return self
+
+    @classmethod
+    def from_env(cls) -> "FallbackConfig":
+        model = os.environ.get("PUDDLES_FALLBACK_JUDGE_MODEL")
+        if not model:
+            raise ValueError("PUDDLES_FALLBACK_JUDGE_MODEL is not set")
+        temperature = os.environ.get("PUDDLES_JUDGE_TEMPERATURE", "0").strip()
+        return cls(model=model.strip(), temperature=None if temperature.lower() == "none" else float(temperature),
+                   base_url=os.environ.get("PUDDLES_TINKER_BASE_URL") or TINKER_BASE_URL)
+
+
+def fallback_judge_version(config: FallbackConfig) -> str:
+    payload = json.dumps(
+        [JUDGE_SYSTEM, JudgeOutput.model_json_schema(), "tinker", config.model, config.temperature],
+        sort_keys=True,
+    )
+    return "judge-fallback-v1-" + hashlib.sha256(payload.encode()).hexdigest()[:8]
+
+
 class PanelVerdict(BaseModel):
     judge: str
     model: str
@@ -165,7 +242,64 @@ class JudgeFailed(AgentFailed):
     pass
 
 
+def judge_checks(helper_count: int):
+    def check(out: JudgeOutput) -> list[str]:
+        problems = []
+        if len(out.strategies) != helper_count:
+            problems.append(
+                f"strategies must have exactly {helper_count} labels, one per helper turn, "
+                f"got {len(out.strategies)}"
+            )
+        problems += [f"unknown strategy label {label!r}" for label in out.strategies
+                     if label not in STRATEGIES]
+        if not out.note.strip():
+            problems.append("note is empty")
+        return problems
+
+    return check
+
+
+def checked_judgement(llm: JudgeLLM, stage: Literal["initial", "final", "astra", "single"], label: str,
+                      system: str, user: str, helper_count: int, record_id: str,
+                      usage: list[Usage]) -> JudgeOutput:
+    def produce(feedback: str) -> JudgeOutput:
+        out, prompt_tokens, completion_tokens = llm.judge(system, user + feedback)
+        usage.append(Usage(stage=stage, judge=label, model=llm.model,
+                           prompt_tokens=prompt_tokens, completion_tokens=completion_tokens))
+        logger.info("judge call conversation=%s stage=%s judge=%s model=%s prompt_tokens=%d completion_tokens=%d",
+                    record_id, stage, label, llm.model, prompt_tokens, completion_tokens)
+        return out
+
+    try:
+        return call_checked(produce, judge_checks(helper_count), f"{stage} judgement by judge {label}")
+    except AgentFailed as e:
+        raise JudgeFailed(f"{stage} judgement by judge {label} ({llm.model}) failed: {e}") from e
+
+
+def _helper_count(record: ConversationRecord) -> int:
+    return sum(1 for turn in record.turns if turn.speaker == "helper")
+
+
+def _score_record(record: ConversationRecord, version: str, out: JudgeOutput) -> ScoreRecord:
+    return ScoreRecord(
+        id=f"score-{record.id}",
+        written_by="judge",
+        created_at=datetime.now(timezone.utc),
+        parent_ids=[record.id],
+        conversation_id=record.id,
+        judge_version=version,
+        empathy=out.empathy,
+        relevance=out.relevance,
+        emotion_before=out.emotion_before,
+        emotion_after=out.emotion_after,
+        strategies=out.strategies,
+        note=out.note,
+    )
+
+
 class JudgePanel:
+    kind = "panel"
+
     def __init__(self, config: PanelConfig, judges: list[JudgeLLM], astra: JudgeLLM):
         if len(judges) != 3:
             raise ValueError(f"JudgePanel needs exactly 3 judges, got {len(judges)}")
@@ -182,48 +316,17 @@ class JudgePanel:
     def version(self) -> str:
         return judge_version(self.config)
 
-    def _check(self, helper_count: int):
-        def check(out: JudgeOutput) -> list[str]:
-            problems = []
-            if len(out.strategies) != helper_count:
-                problems.append(
-                    f"strategies must have exactly {helper_count} labels, one per helper turn, "
-                    f"got {len(out.strategies)}"
-                )
-            problems += [f"unknown strategy label {label!r}" for label in out.strategies
-                         if label not in STRATEGIES]
-            if not out.note.strip():
-                problems.append("note is empty")
-            return problems
-
-        return check
-
-    def _scored(self, llm: JudgeLLM, stage: Literal["initial", "final", "astra"], label: str, system: str, user: str,
-                helper_count: int, record_id: str, usage: list[Usage]) -> JudgeOutput:
-        def produce(feedback: str) -> JudgeOutput:
-            out, prompt_tokens, completion_tokens = llm.judge(system, user + feedback)
-            usage.append(Usage(stage=stage, judge=label, model=llm.model,
-                               prompt_tokens=prompt_tokens, completion_tokens=completion_tokens))
-            logger.info("judge call conversation=%s stage=%s judge=%s model=%s prompt_tokens=%d completion_tokens=%d",
-                        record_id, stage, label, llm.model, prompt_tokens, completion_tokens)
-            return out
-
-        try:
-            return call_checked(produce, self._check(helper_count), f"{stage} judgement by judge {label}")
-        except AgentFailed as e:
-            raise JudgeFailed(f"{stage} judgement by judge {label} ({llm.model}) failed: {e}") from e
-
     def _judge_one(self, index: int, llm: JudgeLLM, conversation: str, helper_count: int,
                    record_id: str) -> tuple[PanelVerdict, list[Usage]]:
         label = "ABC"[index]
         usage: list[Usage] = []
-        initial = self._scored(llm, "initial", label, JUDGE_SYSTEM, conversation, helper_count, record_id, usage)
+        initial = checked_judgement(llm, "initial", label, JUDGE_SYSTEM, conversation, helper_count, record_id, usage)
         review = REVIEW_TEMPLATE.format(conversation=conversation, initial=initial.model_dump_json(indent=2))
-        final = self._scored(llm, "final", label, JUDGE_SYSTEM, review, helper_count, record_id, usage)
+        final = checked_judgement(llm, "final", label, JUDGE_SYSTEM, review, helper_count, record_id, usage)
         return PanelVerdict(judge=label, model=llm.model, initial=initial, final=final), usage
 
     def score(self, record: ConversationRecord) -> JudgeResult:
-        helper_count = sum(1 for turn in record.turns if turn.speaker == "helper")
+        helper_count = _helper_count(record)
         if helper_count == 0:
             raise ValueError(f"{record.id}: conversation has no helper turns")
         conversation = render_conversation(record.turns)
@@ -238,21 +341,44 @@ class JudgePanel:
             for verdict in verdicts
         )
         astra_usage: list[Usage] = []
-        out = self._scored(self.astra, "astra", "astra", ASTRA_SYSTEM, conversation + "\n\n" + judgements,
+        out = checked_judgement(self.astra, "astra", "astra", ASTRA_SYSTEM, conversation + "\n\n" + judgements,
                            helper_count, record.id, astra_usage)
         usage += astra_usage
-        score = ScoreRecord(
-            id=f"score-{record.id}",
-            written_by="judge",
-            created_at=datetime.now(timezone.utc),
-            parent_ids=[record.id],
-            conversation_id=record.id,
-            judge_version=self.version,
-            empathy=out.empathy,
-            relevance=out.relevance,
-            emotion_before=out.emotion_before,
-            emotion_after=out.emotion_after,
-            strategies=out.strategies,
-            note=out.note,
-        )
+        score = _score_record(record, self.version, out)
         return JudgeResult(score=score, verdicts=verdicts, usage=usage)
+
+
+class SingleJudge:
+    """One judge step, no panel and no Astra: the fallback judge on Tinker."""
+
+    kind = "fallback"
+
+    def __init__(self, config: FallbackConfig, llm: JudgeLLM):
+        self.config = config
+        self.llm = llm
+
+    @classmethod
+    def from_config(cls, config: FallbackConfig) -> "SingleJudge":
+        return cls(config, TinkerJudgeLLM(config.model, config.temperature, base_url=config.base_url))
+
+    @property
+    def version(self) -> str:
+        return fallback_judge_version(self.config)
+
+    def score(self, record: ConversationRecord) -> JudgeResult:
+        helper_count = _helper_count(record)
+        if helper_count == 0:
+            raise ValueError(f"{record.id}: conversation has no helper turns")
+        usage: list[Usage] = []
+        out = checked_judgement(self.llm, "single", "fallback", JUDGE_SYSTEM,
+                                render_conversation(record.turns), helper_count, record.id, usage)
+        return JudgeResult(score=_score_record(record, self.version, out), verdicts=[], usage=usage)
+
+
+def judge_from_env():
+    kind = os.environ.get("PUDDLES_JUDGE", "panel")
+    if kind == "panel":
+        return JudgePanel.from_config(PanelConfig.from_env())
+    if kind == "fallback":
+        return SingleJudge.from_config(FallbackConfig.from_env())
+    raise ValueError(f"unknown PUDDLES_JUDGE {kind!r}; expected 'panel' or 'fallback'")

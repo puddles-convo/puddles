@@ -11,7 +11,7 @@ from typing import Literal, Optional, Protocol
 from pydantic import BaseModel
 
 from puddles.eval.data import ESCONV_REVISION, RealConversation, SeekerRatings, load_esconv
-from puddles.eval.judge import JudgePanel, JudgeResult, PanelConfig
+from puddles.eval.judge import FallbackConfig, JudgeResult, PanelConfig, judge_from_env
 from puddles.llm import AgentFailed
 from schemas import ConversationRecord, JudgeOutput
 
@@ -21,8 +21,9 @@ REPO = Path(__file__).resolve().parents[2]
 FROZEN_PATH = REPO / "calibration" / "frozen.json"
 
 
-class PanelLike(Protocol):
-    config: PanelConfig
+class JudgeLike(Protocol):
+    kind: Literal["panel", "fallback"]
+    config: "PanelConfig | FallbackConfig"
 
     @property
     def version(self) -> str: ...
@@ -150,7 +151,8 @@ def _source_agreement(model: str, rows: list[Row]) -> SourceAgreement:
 
 class CalibrationReport(BaseModel):
     judge_version: str
-    panel: PanelConfig
+    judge_kind: Literal["panel", "fallback"]
+    judge_config: "PanelConfig | FallbackConfig"
     split: Literal["train", "validation"]
     esconv_revision: str
     seed: int
@@ -164,7 +166,7 @@ class CalibrationReport(BaseModel):
     created_at: datetime
 
 
-def calibrate(split: Literal["train", "validation"], panel: PanelLike,
+def calibrate(split: Literal["train", "validation"], judge: JudgeLike,
               n: Optional[int] = None, seed: int = 0, workers: int = 2,
               ) -> tuple[CalibrationReport, list[dict]]:
     if split not in ("train", "validation"):
@@ -181,7 +183,7 @@ def calibrate(split: Literal["train", "validation"], panel: PanelLike,
 
     def run(conv: RealConversation) -> tuple[str, Optional[JudgeResult]]:
         try:
-            return conv.record.id, panel.score(conv.record)
+            return conv.record.id, judge.score(conv.record)
         except AgentFailed as e:
             logger.warning("scoring failed for %s: %s", conv.record.id, e)
             return conv.record.id, None
@@ -197,22 +199,32 @@ def calibrate(split: Literal["train", "validation"], panel: PanelLike,
 
     sources: dict[str, SourceAgreement] = {}
     if scored:
-        rows: dict[str, list[Row]] = {
-            "astra": [], "A/initial": [], "A/final": [],
-            "B/initial": [], "B/final": [], "C/initial": [], "C/final": [],
-        }
+        if judge.kind == "fallback":
+            rows: dict[str, list[Row]] = {"fallback": []}
+            models: dict[str, str] = {}
+        else:
+            rows = {"astra": [], "A/initial": [], "A/final": [],
+                    "B/initial": [], "B/final": [], "C/initial": [], "C/final": []}
+            any_result = next(iter(scored.values()))[1]
+            models = {f"{v.judge}/initial": v.model for v in any_result.verdicts}
+            models.update({f"{v.judge}/final": v.model for v in any_result.verdicts})
         for conv, result in scored.values():
-            esconv_strategies = conv.strategies
-            rows["astra"].append((_score_to_output(result), conv.ratings, esconv_strategies))
-            for verdict in result.verdicts:
-                rows[f"{verdict.judge}/initial"].append((verdict.initial, conv.ratings, esconv_strategies))
-                rows[f"{verdict.judge}/final"].append((verdict.final, conv.ratings, esconv_strategies))
-        any_result = next(iter(scored.values()))[1]
-        models = {f"{v.judge}/initial": v.model for v in any_result.verdicts}
-        models.update({f"{v.judge}/final": v.model for v in any_result.verdicts})
+            if judge.kind == "fallback":
+                rows["fallback"].append((_score_to_output(result), conv.ratings, conv.strategies))
+            else:
+                rows["astra"].append((_score_to_output(result), conv.ratings, conv.strategies))
+                for verdict in result.verdicts:
+                    rows[f"{verdict.judge}/initial"].append((verdict.initial, conv.ratings, conv.strategies))
+                    rows[f"{verdict.judge}/final"].append((verdict.final, conv.ratings, conv.strategies))
         for key, source_rows in rows.items():
-            model = panel.config.astra if key == "astra" else models.get(key, "")
+            if key == "astra" and isinstance(judge.config, PanelConfig):
+                model = judge.config.astra
+            elif key == "fallback" and isinstance(judge.config, FallbackConfig):
+                model = judge.config.model
+            else:
+                model = models.get(key, "")
             sources[key] = _source_agreement(model, source_rows)
+    primary = "fallback" if judge.kind == "fallback" else "astra"
 
     usage: dict[str, dict[str, int]] = {}
     for _, result in scored.values():
@@ -222,10 +234,11 @@ def calibrate(split: Literal["train", "validation"], panel: PanelLike,
             totals["prompt_tokens"] += entry.prompt_tokens
             totals["completion_tokens"] += entry.completion_tokens
 
-    astra = sources.get("astra")
+    primary_source = sources.get(primary)
     report = CalibrationReport(
-        judge_version=panel.version,
-        panel=panel.config,
+        judge_version=judge.version,
+        judge_kind=judge.kind,
+        judge_config=judge.config,
         split=split,
         esconv_revision=ESCONV_REVISION,
         seed=seed,
@@ -233,8 +246,8 @@ def calibrate(split: Literal["train", "validation"], panel: PanelLike,
         n=len(scored),
         failed=failed,
         agreement={
-            "empathy": astra.empathy if astra else DimAgreement(n=0),
-            "relevance": astra.relevance if astra else DimAgreement(n=0),
+            "empathy": primary_source.empathy if primary_source else DimAgreement(n=0),
+            "relevance": primary_source.relevance if primary_source else DimAgreement(n=0),
         },
         sources=sources,
         usage=usage,
@@ -261,24 +274,27 @@ def _score_to_output(result: JudgeResult) -> JudgeOutput:
                        emotion_after=score.emotion_after, strategies=score.strategies, note=score.note)
 
 
-def freeze(report: CalibrationReport, path: Path = FROZEN_PATH) -> CalibrationReport:
+def frozen_path(kind: str) -> Path:
+    return FROZEN_PATH.parent / ("frozen-fallback.json" if kind == "fallback" else "frozen.json")
+
+
+def freeze(report: CalibrationReport, path: Optional[Path] = None) -> CalibrationReport:
     if report.split != "validation":
         raise ValueError(f"only a validation calibration can be frozen, got split {report.split!r}")
     frozen = report.model_copy(update={"frozen": True})
-    path = Path(path)
+    path = Path(path) if path is not None else frozen_path(report.judge_kind)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frozen.model_dump_json(indent=2))
     return frozen
 
 
-def check_frozen(panel_or_version, path: Path = FROZEN_PATH) -> CalibrationReport:
-    path = Path(path)
+def check_frozen(judge, path: Optional[Path] = None) -> CalibrationReport:
+    path = Path(path) if path is not None else frozen_path(judge.kind)
     if not path.is_file():
         raise ValueError("judge is not frozen; run calibration on validation with --freeze")
     report = CalibrationReport.model_validate(json.loads(path.read_text()))
-    version = panel_or_version if isinstance(panel_or_version, str) else panel_or_version.version
-    if report.judge_version != version:
-        raise ValueError(f"judge is frozen at {report.judge_version} but the panel is {version}; recalibrate")
+    if report.judge_version != judge.version:
+        raise ValueError(f"judge is frozen at {report.judge_version} but the judge is {judge.version}; recalibrate")
     return report
 
 
@@ -300,8 +316,8 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    panel = JudgePanel.from_config(PanelConfig.from_env())
-    report, details = calibrate(args.split, panel, n=args.n, seed=args.seed, workers=args.workers)
+    judge = judge_from_env()
+    report, details = calibrate(args.split, judge, n=args.n, seed=args.seed, workers=args.workers)
     if args.freeze:
         report = freeze(report)
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -309,13 +325,13 @@ def main() -> None:
     details_path = args.details or args.output.with_suffix(".details.jsonl")
     details_path.parent.mkdir(parents=True, exist_ok=True)
     details_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in details))
-    astra = report.agreement
+    source = "fallback" if judge.kind == "fallback" else "astra"
     print(f"scored {report.n} conversations, {len(report.failed)} failed")
     for dim in ("empathy", "relevance"):
-        a = astra[dim]
+        a = report.agreement[dim]
         spearman_text = f"{a.spearman:.3f}" if a.spearman is not None else "n/a"
         mae_text = f"{a.mean_abs_error:.3f}" if a.mean_abs_error is not None else "n/a"
-        print(f"astra {dim}: spearman={spearman_text} mae={mae_text} (n={a.n})")
+        print(f"{source} {dim}: spearman={spearman_text} mae={mae_text} (n={a.n})")
 
 
 if __name__ == "__main__":

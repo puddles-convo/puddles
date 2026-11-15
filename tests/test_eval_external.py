@@ -77,6 +77,7 @@ def _output():
 
 class FakePanel:
     def __init__(self, fail=False):
+        self.kind = "panel"
         self.config = PanelConfig(judges=["a", "b", "c"], astra="d")
         self.version = "judge-v1-x"
         self.fail = fail
@@ -120,7 +121,7 @@ def test_run_counselbench_categories_and_rows():
                           category=cat, opener="op") for cat in external.CATEGORIES]
     asker = FakeAsker(_all_answers())
     rows, details = run_counselbench("sys-x", lambda t: "a reply", asker,
-                                     panel=FakePanel(), cases=cases, workers=4)
+                                     judge=FakePanel(), cases=cases, workers=4)
     questions = [u.split("<question>\n")[1].split("\n</question>")[0] for _, u in asker.calls]
     for cat in external.CATEGORIES:
         must, must_not = CATEGORY_CHECKS[cat]
@@ -158,7 +159,7 @@ def test_run_counselbench_helper_failure_and_no_leak():
 
 def test_run_counselbench_panel_failure():
     rows, details = run_counselbench("s", lambda t: "r", FakeAsker(_all_answers()),
-                                     panel=FakePanel(fail=True), cases=_cases())
+                                     judge=FakePanel(fail=True), cases=_cases())
     assert details[0]["quality_failed"] is True
     assert details[0]["empathy"] is None and details[0]["relevance"] is None
     assert details[0]["passed"] is True

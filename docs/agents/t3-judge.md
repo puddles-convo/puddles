@@ -94,6 +94,14 @@ Return JSON with exactly these fields: empathy, relevance, emotion_before, emoti
 
 Astra's user message is the conversation followed by the three final judgements, labelled Judge A, B and C. It is not told which model gave which.
 
+### Fallback judge
+
+A second judge for when OpenAI credits run low: one large open model on Tinker, with the same system message and output format as a panel judge, and no re-check or Astra step. Set `PUDDLES_JUDGE=fallback`, `PUDDLES_FALLBACK_JUDGE_MODEL` and `TINKER_API_KEY`; the default, `PUDDLES_JUDGE=panel`, is the panel. Its version starts `judge-fallback-v1-`, and it is calibrated and frozen separately (`calibration/frozen-fallback.json`).
+
+Tinker's OpenAI-compatible endpoint does not document structured output, so the reply is parsed as JSON and validated by code; an invalid reply is retried once like any other judge step.
+
+Scores from the two judges are not interchangeable. If the loop switches judges, re-score the current policy with the new judge before comparing anything, and record the switch in the decision log.
+
 ## 2. Where the input goes in the prompt
 
 | Place in the prompt | Filled with | Comes from |
