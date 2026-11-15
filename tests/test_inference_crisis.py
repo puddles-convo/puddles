@@ -99,6 +99,21 @@ def same(step: Callable[[str, list], str]) -> FakeClient:
     return FakeClient(step)
 
 
+def threads_started_by(fn: Callable[[], object]) -> tuple[object, list[threading.Thread]]:
+    """Run fn and return its result with the threads it started (a turn's checker and helper threads)."""
+    before = set(threading.enumerate())
+    result = fn()
+    return result, [t for t in threading.enumerate() if t not in before]
+
+
+def join_all(threads: list[threading.Thread], timeout: float = 2.0) -> None:
+    """Wait, with a bound, until every thread has finished, so what they did can be asserted on."""
+    until = time.monotonic() + timeout
+    for t in threads:
+        t.join(max(0.0, until - time.monotonic()))
+    assert not any(t.is_alive() for t in threads), "a turn's thread did not finish in time"
+
+
 def make_session(checker: FakeClient, helper: Optional[FakeClient] = None, **kw) -> Session:
     kw.setdefault("deadline_s", SHORT)
     kw.setdefault("helper_wait_s", 2.0)
@@ -295,11 +310,11 @@ def test_7_late_none_from_turn_3_does_not_release_turn_4(gates):
                                     held(gate, "none | - | late answer", returned), boom))
     run_turn(session, PLAIN)
     run_turn(session, PLAIN)
-    third = run_turn(session, PLAIN)
+    third, threads = threads_started_by(lambda: run_turn(session, PLAIN))
     assert third.check_status == "late" and third.reply.text == HOLDING
     gate.set()                                   # turn 3's checker now answers `none`, too late
     assert returned.wait(2)
-    time.sleep(0.02)
+    join_all(threads)                            # its late answer has reached the closed slot
     assert session.lines[2].check_status == "late" and session.lines[2].checked is None
     assert session.failed_checks == 1
     fourth = run_turn(session, PLAIN)
@@ -378,7 +393,10 @@ def test_checker_and_helper_start_together():
 def test_helper_is_never_given_the_check_or_keyword():
     helper = same(line(DRAFT))
     session = make_session(same(line("crisis | self | secret reason words")), helper, user_notes=("likes tea",))
-    run_turn(session, keyword_text())
+    # With a keyword the turn does not wait for the helper; wait for its thread here before reading its calls.
+    _, threads = threads_started_by(lambda: run_turn(session, keyword_text()))
+    join_all(threads)
+    assert helper.calls                          # the helper did run, so the comparison below is not empty
     reference = same(line(DRAFT))
     helper_reply(reference, POLICY, [Turn(speaker="user", text=keyword_text())], session_id="sess-test", turn=1,
                  user_notes=["likes tea"])
