@@ -5,10 +5,13 @@
 
 --gate kept or --gate reverted is a stand-in that decides so. --gate real runs the gatekeeper in
 puddles/gate.py; it promotes nothing unless --noise-measured says --noise is a measured figure.
+Without --gate, the gate is reverted with --fake and real without it.
 
 --fake uses scripted chat clients, a scripted model, a fake search and in-process memory: no keys,
 no network. Without it the clients come from HELPER_*, SIMUSER_*, OPENAI_API_KEY,
-PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY, and the judge from puddles.eval.judge.judge_from_env.
+PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY, the judge from puddles.eval.judge.judge_from_env,
+and for --gate real the safety check's model from PUDDLES_SAFETY_MODEL or PUDDLES_JUDGE_ASTRA
+(puddles/gate_join.py).
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ from loop.run_batch import _fake_helper, _fake_user
 from puddles import gate as real_gate
 from puddles import tracing
 from puddles.decision_log import DecisionLog
-from puddles.graph import RoundDeps, check_policy_file, run_round
+from puddles.graph import RoundDeps, check_policy_file, round_meter, run_round
 from puddles.judging import Judge, MeteredJudge
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import FakeMemory, Memory, PastError, now
@@ -49,8 +52,6 @@ from schemas import (
 T = TypeVar("T", bound=BaseModel)
 
 FAKE_URL = "https://counselling.example.org/skills/{slug}"
-REAL_GATE_NOT_JOINED = ("--gate real needs the real judge and safety check, which are joined in a later piece; "
-                        "use --fake --gate real, or --gate kept or reverted")
 
 
 @dataclass
@@ -138,8 +139,9 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--scenarios", default="fixtures/scenarios.jsonl")
     p.add_argument("--max-turns", type=int, default=10)
     p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--gate", choices=["kept", "reverted", "real"], default="reverted",
-                   help="kept or reverted: what the stand-in gate decides. real: the gatekeeper")
+    p.add_argument("--gate", choices=["kept", "reverted", "real"], default=None,
+                   help="kept or reverted: what the stand-in gate decides. real: the gatekeeper. "
+                        "Default: reverted with --fake, real without it")
     p.add_argument("--validation", default=None,
                    help="the scenarios the gate tests on, all of them; default: the --scenarios file")
     p.add_argument("--noise", type=float, default=0.0, help="the run-to-run noise in quality")
@@ -148,14 +150,14 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--token-cap", type=int, default=TOKEN_CAP, help="the most tokens a policy may have")
     p.add_argument("--fake", action="store_true", help="scripted clients, model, search and memory")
     p.add_argument("--mlflow", default=None, help="MLflow tracking address")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.gate is None:
+        args.gate = "reverted" if args.fake else "real"
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
-    if args.gate == "real" and not args.fake:
-        _print_error(REAL_GATE_NOT_JOINED)
-        return 2
     root = Path(args.root)
     current_file = None
     try:
@@ -177,6 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         llm: LLM
         memory: Memory
         judge_panel: Judge
+        asker = None  # the real safety check's yes-or-no client; None with --fake
         if args.fake:
             helper_client, user_client = FakeClient(_fake_helper), FakeClient(_fake_user)
             llm, search, memory = FakeLLM(), fake_search, FakeMemory()
@@ -195,6 +198,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             # Looked up on the module now, so a test can replace it there. A missing variable is a ValueError.
             judge_panel = eval_judge.judge_from_env()
+            if args.gate == "real":
+                from puddles.eval import safety as eval_safety
+
+                # Built here, so a missing PUDDLES_SAFETY_MODEL (a ValueError) stops the run before any write.
+                asker = eval_safety.OpenAIYesNo.from_env()
     except (ConfigError, PolicyError, OSError, UnicodeDecodeError, ValidationError, ValueError,
             AgentFailed, PastError, OpenAIError) as exc:
         detail = str(exc)
@@ -209,11 +217,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     gate: Callable[[RoundResult], GateOutcome] = stand_in
     if decision == "real":
-        gate_deps = real_gate.GateDeps(
-            helper_client=tracing.TracedClient(helper_client, "helper"),
-            user_client=tracing.TracedClient(user_client, "simulated_user"), judge=MeteredJudge(judge_panel),
-            safety=fake_safety, root=root, scenarios=validation, noise_measured=args.noise_measured,
-            max_turns=args.max_turns, seed=args.seed)
+        traced_helper = tracing.TracedClient(helper_client, "helper")
+        traced_user = tracing.TracedClient(user_client, "simulated_user")
+        if asker is None:  # --fake
+            gate_deps = real_gate.GateDeps(
+                helper_client=traced_helper, user_client=traced_user, judge=MeteredJudge(judge_panel),
+                safety=fake_safety, root=root, scenarios=validation, noise_measured=args.noise_measured,
+                max_turns=args.max_turns, seed=args.seed)
+        else:
+            from puddles.gate_join import real_gate_deps
+
+            gate_deps = real_gate_deps(
+                helper_client=traced_helper, user_client=traced_user, judge=judge_panel, root=root,
+                scenarios=validation, noise_measured=args.noise_measured, max_turns=args.max_turns,
+                seed=args.seed, asker=asker)
         gate = real_gate.make_gate(gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
                                    noise=args.noise, token_cap=args.token_cap)
 
@@ -222,6 +239,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                      memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy),
                      judge_panel=judge_panel)
     try:
+        if asker is not None:
+            from puddles.gate_join import safety_models
+
+            # The graph's own price check knows nothing of the safety model, so it is checked here first.
+            round_meter(deps).prices.check(safety_models(asker))
         state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
                           seed=args.seed)
     except ConfigError as exc:  # a model or the Exa search has no price in the run's config file
