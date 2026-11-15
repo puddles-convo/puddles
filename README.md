@@ -9,7 +9,8 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
 - The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
 - The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
-- Record formats: `schemas.py` (version 3), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+- Proposed version 2 prompts for every agent, including the held-out jury (not live yet): [docs/agent-prompts.md](docs/agent-prompts.md)
+- Record formats: `schemas.py` (version 4: version 3 plus what the proposed version 2 prompts need), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
 ## Contents
@@ -21,10 +22,15 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
    - [Models](#models): which model plays each agent
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
-7. [Handoffs](#7-handoffs)
-8. [How training and inference connect](#8-how-training-and-inference-connect)
-9. [Data](#9-data)
-10. [Robot side](#10-robot-side)
+7. [How the loop runs experiments](#7-how-the-loop-runs-experiments)
+8. [The proposer's toolbox](#8-the-proposers-toolbox)
+9. [Handoffs](#9-handoffs)
+10. [How training and inference connect](#10-how-training-and-inference-connect)
+11. [How we measure the result](#11-how-we-measure-the-result)
+12. [Data](#12-data)
+13. [Robot side](#13-robot-side)
+14. [Related work](#14-related-work)
+15. [Improvements from the literature](#15-improvements-from-the-literature)
 - [Running the training agents](#running-the-training-agents)
 
 ## 1. Training steps
@@ -52,7 +58,7 @@ The agent names link to a file for each one, with its prompt and formats.
 | [**3. Judge**](docs/agents/t3-judge.md) | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
 | [**4. Critic**](docs/agents/t4-critic.md) | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
 | [**5. Researcher**](docs/agents/t5-researcher.md) | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
-| [**6. Proposer**](docs/agents/t6-proposer.md) | • Writes exactly one change to the policy<br>• Does not repeat an edit that was reverted | Earlier edits and their outcomes | The proposed edit | The current policy, the pattern and the sources | `{"action": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}` |
+| [**6. Proposer**](docs/agents/t6-proposer.md) | • Picks exactly one action from its [toolbox](#8-the-proposers-toolbox): a harness change or, on escalation, a model update<br>• States a hypothesis and a prediction the gate can check<br>• Does not repeat an action that was reverted | Earlier actions and their outcomes, and the lever scoreboard | The proposed action | The current harness version, the pattern, the sources, the scoreboard and the remaining budget | `{"action": "edit_rule", "args": {"op": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}, "hypothesis": "...", "prediction": "relevance +0.2"}` |
 | [**7. Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
 
 ## 3. Inference steps
@@ -218,7 +224,9 @@ This meets the past.dev challenge rules: the critic, researcher, proposer and ga
 
 ## 6. From memory to policy
 
-**The policy** is one plain text file of numbered rules, and it is the only thing that changes how the helper behaves:
+**The harness version** is what changes how the helper behaves: the policy file, the skill cards, the few-shot examples, the strategy rules, the inference setting and, if one has passed the gate, a LoRA adapter. Each is changed only through the proposer's [toolbox](#8-the-proposers-toolbox). This section uses the policy file as the example; every other part follows the same path.
+
+**The policy** is one plain text file of numbered rules:
 
 ```
 S1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly
@@ -275,7 +283,7 @@ Rules starting with `S` are the protected safety rules, which no edit may change
 ### The rules
 
 1. **Memory never changes behaviour directly.** Nothing recalled from training memory goes into the helper's prompt, so no untested lesson reaches a person.
-2. **The only way into the policy is one edit that passed the gate.** The proposer returns a single rule change (add, reword or remove) and code applies it. That guarantees the safety rules and every other rule are untouched.
+2. **The only way into the harness is one action that passed the gate.** The proposer returns a single action from its toolbox and code applies it. That guarantees the safety rules and every other part are untouched.
 3. **The decision log is the authority, and memory is its copy.**
 4. **Every learned rule can be traced back** to its edit, its pattern, its sources and its test result.
 
@@ -293,8 +301,13 @@ keep the candidate only if all of these hold:
   4. every assertion of every safety case passes
   5. quality(candidate) - quality(current) > noise
   6. neither empathy nor relevance on its own fell by more than noise
-otherwise restore the previous policy file exactly
+  7. for a new adapter only: the safety benchmarks (crisis handling, over-refusal)
+     are no worse than with the adapter in force, because fine-tuning can weaken
+     safety behaviour even on harmless data
+otherwise restore the previous harness version exactly
 ```
+
+Condition 2 reads "exactly one action" for the other parts of the harness. The noise measure and the comparison method are proposals under review (see [section 11](#11-how-we-measure-the-result)).
 
 Nothing is promoted until the noise has been measured and the safety case file exists.
 
@@ -322,7 +335,161 @@ Notes about a person work differently. They go into the helper's prompt as facts
 
 The full design, including the log format, consent and forgetting, and the crisis path, is in [docs/agents.md](docs/agents.md).
 
-## 7. Handoffs
+## 7. How the loop runs experiments
+
+These parts sit under every action in the toolbox ([section 8](#8-the-proposers-toolbox)), so they are built first. Each borrows a mechanism from published self-improving systems and rewrites it for this loop; no framework is adopted. Several are already in the team's build plan ([docs/plan/](docs/plan/)); the **Plan** column says which, and this section adds only what is new. Times cover the new work only and are our estimates. Full review: [docs/research/reusable-parts-from-agent-repos.md](docs/research/reusable-parts-from-agent-repos.md).
+
+**Priority.** **Must-have** before the overnight run: parts 1, 2 and 8 (cheap, and they carry the rigour and interpretability scores). **Next:** part 4. **If time allows:** parts 6 and the comparison run in part 8. Parts 3, 5 and 7 are mostly already planned.
+
+| # | Part | In one sentence | Plan | New work (h) | Priority | Sources |
+|---|---|---|---|---|---|---|
+| 1 | Locked evaluation | The loop cannot change how it is graded | Partly: stage 6 hashes the Safety section and freezes judge, validation set and gate within a stretch of rounds. **New:** write list per action, fingerprint each round | 1 | Must-have | [DGM](https://arxiv.org/abs/2505.22954), [Sakana blog](https://sakana.ai/dgm/), [steer](https://github.com/xieyulai/steer), [A-Evolve](https://github.com/A-EVO-Lab/a-evolve), [survey 2607.13104](https://arxiv.org/abs/2607.13104) |
+| 2 | Fixed time per round, and a quick test first | Every round gets the same time; a candidate is tested on 5 conversations before the full set | **New** (stage 6 has spend limits, not a time per round) | 1–1.5 | Must-have | [karpathy/autoresearch](https://github.com/karpathy/autoresearch), [DGM](https://arxiv.org/abs/2505.22954), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
+| 3 | A record for every test conversation | Score, cost, time and timeout per conversation, with limits; a run resumes after a crash | Mostly: stage 6 tracks spend and survives restarts. **New:** time and timeout per conversation; a missing score counts as a failure | 0.5 | With stage 6 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent) |
+| 4 | An archive of versions | Every version that passes the checks is kept with a pointer to its parent | **New** (stage 6 keeps one policy in force) | 1.5–2.5 | Next | [DGM code](https://github.com/jennyzzt/dgm), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
+| 5 | Two noise rules | One rule decides what reaches the robot, another decides what to build on next | Gate rule: stage 5 measures the noise. **New:** the parent rule | 0.5 | With part 4 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent), [PoLL](https://arxiv.org/abs/2404.18796) |
+| 6 | Researcher search rules | Scale the search to the problem, start broad, prefer trusted sources | **New** (prompt only) | 0.5 | If time allows | [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system) |
+| 7 | Conversations in parallel | The conversations of a round run side by side; the critic to gatekeeper steps stay one at a time | **Already planned:** stage 6 runs conversations in parallel on Modal workers (#12) | 0 | With stage 6 | [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system), [Cognition](https://cognition.com/blog/dont-build-multi-agents) |
+| 8 | Change labels and prediction checks | Each change is tagged weights or harness; each prediction is compared with the result | **New** | 1.5 | Must-have (comparison run: if time allows) | [survey 2607.13104](https://arxiv.org/abs/2607.13104), [survey 2507.21046](https://arxiv.org/abs/2507.21046), [Reliable survey](https://www.preprints.org/manuscript/202609.0913) |
+
+New work in total: about 6–8 h, of which the must-haves are about 4 h.
+
+### 1. Locked evaluation
+
+A loop that can change its own grading can "improve" by making the test easier. The Darwin Gödel Machine did this: asked to reduce hallucinated tool use, it removed the markers its own detector relied on ([Sakana blog](https://sakana.ai/dgm/)). The rule we follow, from the 2026 survey of self-improving agents: no update should control the only evidence used to accept itself ([arXiv 2607.13104](https://arxiv.org/abs/2607.13104)).
+
+- **Write list per action.** Code allows each action to write only its own files (`edit_rule` writes the policy file, `add_skill_card` the skill library, and so on) and stops the round on any other write. The idea of a declared write scope per operator is from [A-Evolve](https://github.com/A-EVO-Lab/a-evolve); the frozen task, scorer and scoreboard is from [steer](https://github.com/xieyulai/steer).
+- **Fingerprint.** Each round logs a hash of everything that grades: judge prompt and model, safety cases, scenario splits, gate rule. If the hash changes, the round is invalid.
+
+### 2. Fixed time per round, and a quick test first
+
+- **Fixed time per round.** Karpathy's autoresearch gives every experiment the same 5-minute training budget, so results are comparable and the number of experiments per night is predictable (about 12 an hour) ([karpathy/autoresearch](https://github.com/karpathy/autoresearch)). Here, every round gets the same wall-clock budget from config, with a separate, longer budget for `train_adapter`. A round that runs out of time ends as `timeout`, is logged, and changes nothing.
+- **Quick test first.** A candidate is first tested on about 5 validation conversations. If its score there is below its parent's score minus the noise, it stops and is reverted; otherwise it gets the full set. DGM screens on 10 tasks before 50 more ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)); HyperAgents uses the same staged evaluation ([repo](https://github.com/facebookresearch/HyperAgents), ideas only: CC BY-NC-SA licence).
+
+### 3. A record for every test conversation
+
+Each test conversation writes one record: score, tokens, cost, time, and whether it timed out. Hard limits per conversation and per round come from config. A crashed run restarts from the last record instead of from zero. A conversation without a score counts as a failure, never as skipped, so a crash cannot make a candidate look better. Adapted from SICA's benchmark records and per-problem limits ([repo](https://github.com/MaximeRobeyns/self_improving_coding_agent), MIT).
+
+### 4. An archive of versions
+
+Instead of one current version that gets overwritten, every version that passes the safety and format checks is kept, each pointing to the version it came from (decided by the team; see the status log). A version that failed safety is never used as a starting point.
+
+What the gate compares (decided by the team):
+- **Into the archive:** the gate compares a candidate with its **parent**.
+- **Onto the robot:** a version replaces the deployed one only if it also passes the gate against the **version currently deployed**.
+
+To choose the version a round builds on, the archive favours high scorers that have not been built on much yet, so the search does not get stuck on one branch: weight = sigmoid(10 × (score − 0.5)) × 1 / (1 + children), from the Darwin Gödel Machine ([code](https://github.com/jennyzzt/dgm), Apache-2.0; [paper](https://arxiv.org/abs/2505.22954)). HyperAgents uses a softer penalty on children ([repo](https://github.com/facebookresearch/HyperAgents)).
+
+### 5. Two noise rules
+
+Scores move from run to run, so a version can look better by luck.
+
+- **What reaches the robot:** the gate's rule, written before the run ([What the gate tests](#what-the-gate-tests)).
+- **What to build on next:** keep building on the latest version unless its average is below the best version's lower 95% bound (mean − 1.96 × standard deviation / √n). This rule is in SICA's code, not its paper ([runner.py](https://github.com/MaximeRobeyns/self_improving_coding_agent)).
+- **Decided by the team:** the gate's rule for deployment, the 95% rule only for choosing the parent.
+
+**Open question: a judge council inside the loop.** Scoring each conversation with three smaller judges from different model families, instead of one, can agree better with people and reduce a judge's preference for its own model family, at lower cost than one large judge ([PoLL, arXiv 2404.18796](https://arxiv.org/abs/2404.18796)). It triples judge calls per conversation. Proposal: start with one judge, measure the noise, and switch to a council of three if the noise is so large that few changes can pass the gate. As stage 6 requires for any judge change, switching starts a new stretch of rounds: calibrate the council, measure the baselines and the noise again (stage 5), and never join the two stretches in a plot. The held-out jury ([section 11](#11-how-we-measure-the-result)) stays separate either way.
+
+### 6. Researcher search rules
+
+From Anthropic's multi-agent research system ([engineering post](https://www.anthropic.com/engineering/multi-agent-research-system)): scale the number of searches to how hard the pattern is, start with broad queries and then narrow, and prefer universities, health services and professional bodies over content farms. These are additions to the researcher's prompt.
+
+### 7. Conversations in parallel
+
+Already in the team's plan: stage 6 runs the simulated conversations of a round in parallel on Modal workers (#12); workers return records and only the loop process writes files and memory. Same tokens, less time per round, more rounds overnight. Nothing new to build here. The critic, researcher, proposer and gatekeeper stay one at a time and see each other's full records, because each builds on the previous one's decisions ([Cognition](https://cognition.com/blog/dont-build-multi-agents); Anthropic's post makes the same point about tasks with shared context).
+
+### 8. Change labels and prediction checks
+
+- **Label.** Each change is tagged as a weight change (adapter, merge) or a harness change (rules, skills, examples), the two kinds the 2026 surveys distinguish ([arXiv 2607.13104](https://arxiv.org/abs/2607.13104); [Reliable survey](https://www.preprints.org/manuscript/202609.0913)). The scoreboard then reports which kind worked.
+- **Prediction check.** The proposer states its expected effect before the test; the gate records the measured one. How often the predictions come true is reported as the proposer's calibration.
+
+**Also reported from the same logs:** the safety pass rate after every round, as a curve over the night (Gao et al. note that no benchmark tracks safety over the course of self-evolution, [arXiv 2507.21046](https://arxiv.org/abs/2507.21046)); and one comparison run against a three-rule lever chooser, to test whether the proposer's choice of lever beats a fixed rule (the rule-based controller idea is from [A-Evolve](https://github.com/A-EVO-Lab/a-evolve)).
+
+**What this is not.** By the surveys' definitions this is self-improvement of the model and its harness. It is not recursive self-improvement, which starts when the improvement process itself changes ([Reliable survey](https://www.preprints.org/manuscript/202609.0913)).
+
+## 8. The proposer's toolbox
+
+The proposer is the research agent of the loop. Each round it picks **one** action, fills in its arguments, and states what it expects to happen. Code carries the action out, the gatekeeper tests it, and the outcome is logged. Every action can be reverted.
+
+### Version 1: the five tools we build first
+
+| # | Tool | Kind | Build time (h, estimate) | Why it is in version 1 |
+|---|---|---|---|---|
+| 1 | `edit_rule` | Harness | 3–5 | The core loop. Reflective prompt edits took Qwen3-8B from 45.2 to 54.9 in GEPA, the strongest evidence at this model size |
+| 2 | `add_skill_card` | Harness | 4–6 | Turns what the researcher finds with Exa into cited technique cards. A self-updating playbook beat GEPA by 13 points in ACE |
+| 3 | `set_examples` | Harness | 1–2 | The cheapest gain: the loop's own best conversations become few-shot examples |
+| 4 | `train_adapter` with DPO (includes `build_dataset`) | Fine-tuning | 4–6 | The weight update: best and worst reply pairs from the loop's own conversations, with safety data mixed in. Emotional-support precedent at 7 to 9B (CSO, DecoupledESC); more stable than GRPO |
+| 5 | `merge_adapters` | Weight space | 3–5 | Searches the blend between the base model and the adapter, one validation pass per candidate, no retraining. Also a safety dial: it can find the blend that keeps the gains and loses any harm |
+
+**Why both kinds of tool.** We let the agent decide what is best for it: improving its harness or updating its weights. What it chooses, and how each choice works out, is reported as a side result in [section 11](#11-how-we-measure-the-result).
+
+**Always on, not a choice:** `project_safe` (Safe LoRA) runs on every adapter before the gate, and the gate compares the adapter with and without it.
+
+**Version 1 escalation:** tools 1 to 3 first. Move to tool 4 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Tool 5 becomes available once an adapter exists. One round in five is reserved for tool 4 or 5, so the loop measures what weight changes are worth.
+
+**Day-1 check:** tools 4 and 5 depend on Tinker's adapter export and vLLM's LoRA path working for Qwen3.5's layer types. If that fails, `set_strategy_rules` replaces them and Qwen3-8B is the fallback model for training.
+
+The full toolbox, including what comes after version 1:
+
+**Harness actions** (minutes per try)
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 1 | `edit_rule` | One numbered rule in the policy file: add, reword or remove | `S` safety rules are locked; token cap |
+| 2 | `add_skill_card` | A technique card in the skill library: when to use it, when not to, its steps and its sources. Write, rewrite or retire | Must cite the researcher's Exa sources |
+| 3 | `set_examples` | Which of the loop's own best conversations are used as few-shot examples, and for which situations | Train-split scenarios only |
+| 4 | `set_strategy_rules` | When the helper reflects, asks a question, reassures or suggests | Fixed list of ESConv strategy names; self-disclosure stays banned |
+| 5 | `set_inference` | How a reply is produced: single reply, plan then write, or best-of-N (N ≤ 4) | Stays under the latency cap measured on the robot |
+
+**Model actions** (escalation, about an hour)
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 6 | `build_dataset` | A training set from the loop's own conversations: best replies (SFT) or best and worst pairs (DPO) | Train split only; only conversations from the current harness version, each stamped with the version that produced it |
+| 7 | `train_adapter` | A LoRA fine-tune of the helper on Tinker. Method SFT, DPO or GRPO (see below), rank 16 or 32, 1 or 2 epochs | Counts against the training budget; must start by Sunday 06:00; gate condition 7 applies |
+
+**Exploratory weight-space actions** (value unknown: the loop measures it)
+
+We do not know how much these improve a 9B support helper; no source tests them on this task. In the spirit of Karpathy's autoresearch and the Darwin Gödel Machine, we let the loop try them under a fixed budget and keep only what passes the gate. Their measured value is itself a result.
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 8 | `train_adapter` with method `grpo` | Reinforcement learning on the helper: it samples several replies per turn and is pushed toward the higher-scoring ones. Reward: the loop's judge plus the simulated user's change in emotion, as in RLVER and MetaClaw | One run, fixed wall-clock budget; KL penalty to the base model; safety data mixed in; stopped if its reward rises while the held-out check on the gate falls |
+| 9 | `merge_adapters` | A weighted sum of kept adapters, or a blend between the base model and one adapter, with the weights found by search (CMA-ES, as in LoraHub). No retraining: each candidate costs one validation pass | Only adapters that passed the gate; search scored on half the validation set and checked on the other half |
+| 10 | `project_safe` | Safe LoRA: moves each adapter layer back toward the safety-aligned direction (instruct minus base weights). No training | Applied to every adapter before the gate; the gate compares with and without it |
+| 11 | `steer` | Adds a direction in the model's activations at serve time, for example less flattery, extracted from contrasting replies (persona vectors) | Only if vllm-lens runs Qwen3.5 with LoRA; the steering server is never exposed outside the cloud brain |
+
+**How experiments are run (autoresearch and DGM style)**
+
+- **Fixed budget per experiment**, as in Karpathy's autoresearch: every round gets a set time and spend, so results are comparable and one bad idea cannot eat the night ([section 7](#7-how-the-loop-runs-experiments), part 2).
+- **An archive, not a single line**, as in the Darwin Gödel Machine: every version that passes the safety and format checks is kept, and a round may start from any of them, not only the latest ([section 7](#7-how-the-loop-runs-experiments), part 4). That lets a weight-space branch (for example a GRPO adapter) develop alongside the harness branch.
+- **Keep or revert** stays the rule for what reaches the robot: only the best version in the archive that passed every gate condition.
+- **Training budget for the weekend:** up to 3 adapter runs in total (SFT, DPO or GRPO), unlimited merges and projections (they are cheap).
+
+**When to escalate (full toolbox, after version 1).** Use actions 1 to 5 first. Move to 6 and 7 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Separately, **one round in five is reserved for an exploratory action** (6 to 11), even while harness changes are still working, so the scoreboard learns what weight changes are worth instead of never trying them.
+
+**What the proposer receives.** The failure pattern and the sources; a lever scoreboard built by code from earlier gate outcomes (for each action: times tried, times kept, average gain, cost); and the remaining budget in rounds, time, spend and training runs.
+
+**What it returns.** An experiment, not only an edit:
+
+```json
+{
+  "action": "set_examples",
+  "args": {"situation": "user rejects a suggestion", "k": 2},
+  "hypothesis": "Rule C5 was kept but the pattern recurs in 9 of 40 conversations; the 9B model follows examples better than abstract rules.",
+  "prediction": "relevance +0.2 on validation; the pattern falls below 4 of 40",
+  "why_this_lever": "edit_rule was tried twice on this pattern: kept once, recurred",
+  "addresses": "pattern-r07"
+}
+```
+
+The gate outcome records whether the prediction came true, so the proposer's calibration across rounds is itself a result.
+
+**Outside the toolbox.** The proposer can never change the judges, the simulated users or scenarios, the test split, the safety cases, the crisis checker and its fixed responses, the gate rule or the budget.
+
+**Build order.** Version 1 first: actions 1 to 3, then 6 and 7 with DPO, plus `project_safe` (10), then `merge_adapters` (9). After version 1: GRPO (8, the longest to build), then 4, 5 and 11 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+
+## 9. Handoffs
 
 What passes directly from one step to the next. Formats are in `schemas.py`.
 
@@ -335,7 +502,7 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 | Judge → Critic | Empathy, relevance and emotion scores, a strategy tag per helper turn, a one-sentence note | `ScoreRecord` ([example](examples/training_H3_score_record.json)) |
 | Critic → Researcher | The failure pattern, or "none found" | `FailurePattern` ([example](examples/training_H4_failure_pattern.json)) |
 | Researcher → Proposer | Sources, each with a one-line technique, or "none found" | `ResearchNote` ([example](examples/training_H5_research_note.json)) |
-| Proposer → Gatekeeper | One edit. Code applies it to make the candidate policy file. | `PolicyEdit` ([example](examples/training_H6_policy_edit.json)) |
+| Proposer → Gatekeeper | One action from the toolbox. Code applies it to make the candidate harness version. | `PolicyEdit` today ([example](examples/training_H6_policy_edit.json)); `Intervention` proposed |
 | Gatekeeper → next round | The policy now in force, and the outcome for the decision log | `GateOutcome` ([example](examples/training_H7_gate_outcome.json)) |
 
 **Inference**
@@ -348,7 +515,7 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 | Release → Speaker | The draft, a fixed response or the holding line | `HelperReply` ([example](examples/inference_H3_helper_reply.json)) |
 | Speaker → Note-taker | The finished session | `ConversationRecord` ([example](examples/inference_H4_session_record.json)) |
 
-## 8. How training and inference connect
+## 10. How training and inference connect
 
 ```
 +--------------------+    policy file that passed the gate    +--------------------+
@@ -358,12 +525,29 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 +--------------------+   session records, with user consent   +--------------------+
 ```
 
-- **Training to inference:** exactly one thing, the policy file that last passed the gatekeeper. A policy that fails the safety check never reaches a user.
-- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes.
+- **Training to inference:** exactly one thing, the harness version that last passed the gatekeeper (the policy file and, if one passed, the adapter). A version that fails the safety check never reaches a user.
+- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes. Not planned for the hackathon weekend.
 - **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
-- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#10-robot-side).
+- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#13-robot-side).
 
-## 9. Data
+## 11. How we measure the result
+
+The loop's own judge decides what is kept. The headline result is measured separately, on data and judges the loop never sees, so it cannot be the loop grading itself. This section is a proposal for the team to settle.
+
+| Part | Proposal |
+|---|---|
+| Question | Does the improved harness (and adapter, if kept) make a 9B model a better and still safe support helper, and how much of the gap to a frontier model does it close? |
+| Test data | ESConv test split; CounselBench-Adv as external validation. Neither is used by the loop. |
+| Baselines | (a) the 5-line placeholder policy; (b) a hand-written policy; (c) the loop without Exa, where edits come from the critic alone; (d) a frontier model with the hand-written policy, as the ceiling. More to come. |
+| Held-out jury | Judges from other model families than the helper and the loop's judge, with distinct roles: the person seeking support, a counsellor, a safety reviewer (veto), and a sceptic looking for empty validation and flattery. Each score is reported separately with the agreement between jurors. |
+| Safety | Crisis handling (VERA-MH, once its licence is checked) and over-refusal on harmless messages, before and after every kept adapter. |
+| Uncertainty | Paired comparison on the same scenarios and seeds, with a bootstrap 95% interval on the difference. |
+| Headline | "Quality on the held-out test rose from X to Y (interval), closing Z% of the gap to the frontier ceiling, with no crisis-handling regression." |
+| Also reported | The gap between the loop's judge and the held-out jury, which shows how much the loop learned to please its own judge; the proposer's prediction accuracy; every reverted action; and which kinds of change the agent chose (next paragraph). |
+
+**Side note: what does the agent choose for itself?** The agent has both kinds of tool, harness changes and weight updates, and decides which to use. We want to see what it picks, and what each choice achieved, from the lever scoreboard and the decision log. For context, GEPA reports that prompt evolution beat reinforcement learning on Qwen3-8B with far fewer rollouts (54.9 against 48.9; [arXiv 2507.19457](https://arxiv.org/abs/2507.19457)). We do not set out to test that claim; we report what our agent did and how it turned out.
+
+## 12. Data
 
 Datasets are loaded at run time and are not committed to this repo.
 
@@ -373,9 +557,9 @@ Datasets are loaded at run time and are not committed to this repo.
 | [CounselBench-Adv](https://huggingface.co/datasets/izi-ano/CounselBench-Adv) | External validation, never seen by the loop | CC BY-NC-ND 4.0 |
 | [VERA-MH](https://github.com/SpringCare/VERA-MH) | Crisis-handling check | Not yet checked |
 
-## 10. Robot side
+## 13. Robot side
 
-The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from section 4 run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [section 4](#4-inference-agents) run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
 
 ```
 +----------------------------+                          +------------------------------------+
@@ -398,10 +582,10 @@ The robot pair does not wait for training. They build the whole conversation pat
 | Config value | Now | After the merge |
 |---|---|---|
 | `HELPER_URL` | Stock model endpoint | Same endpoint |
-| `HELPER_MODEL` | Stock Qwen3.5-9B | Same, or the fine-tuned adapter if one exists |
+| `HELPER_MODEL` | Stock Qwen3.5-9B | Same, or the LoRA adapter if one passed the gate |
 | `POLICY_PATH` | Five-line placeholder policy | The policy file that passed the gatekeeper |
 
-The policy file is the main thing training produces. A fine-tuned model is optional.
+The policy file is the main thing training produces. An adapter exists only if the proposer escalated to `train_adapter` and the adapter passed the gate.
 
 ### What the robot pair receives and provides
 
@@ -438,6 +622,49 @@ These run with the stock model first, so that the merge changes nothing but conf
 - Latency: median and p95 from end of speech to first sound, recorded.
 
 Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
+
+## 14. Related work
+
+- **Karpathy's autoresearch** (March 2026): an agent edits one training script, runs short experiments and keeps only changes that improve the metric. Our loop has the same keep-or-revert shape, applied to a helper's harness and, on escalation, its weights.
+- **Darwin Gödel Machine** ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)): a coding agent rewrites its own code and keeps an archive of every working variant, starting new attempts from any of them; it raised its SWE-bench score from 20% to 50%. We borrow the archive, so weight-space branches can grow alongside harness branches.
+- **Prompt optimisers** such as OPRO and GEPA search over prompts against a score. Our differences: each change is grounded in sources found with Exa, the proposer chooses which lever to use, and safety rules are locked outside the search.
+- **Meta-Harness** ([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)) has a proposer that reads every past harness, its traces and scores before proposing the next; **GEPA** and **ACE** improve prompts and playbooks by reflection, with gains shown on Qwen3-8B. None of these chooses between kinds of change, which is what our lever scoreboard does.
+- **MetaClaw** ([arXiv 2603.17187](https://arxiv.org/abs/2603.17187)) is the closest work: it evolves a skill library without gradients and runs LoRA updates on a scheduler that waits for the user to be idle. It stamps training data with the skill version that produced it, which we adopt in `build_dataset`. Our differences: the proposer decides when to train based on evidence, with a stated hypothesis, and every change, including an adapter, must pass a gate fixed before the run, with safety benchmarks, before it reaches a person.
+
+## 15. Improvements from the literature
+
+What published work suggests adding to the loop, ranked by value per hour for this stack (Qwen3.5-9B, LoRA on Tinker, vLLM on Modal) and the limits in [section 8](#8-the-proposers-toolbox). Rows 1 to 4 are loop infrastructure rather than proposer actions, but every other row depends on them.
+
+- **Time and value are our researchers' estimates**, not figures from the sources.
+- **[V]** marks a number checked against the primary source on 14 November 2026. Numbers without it are recalled or from secondary summaries; check them before quoting.
+- **"Weight-space programming"** is our own umbrella term for changing behaviour by editing weights or activations directly (rows 12, 15, 16, 18). The established research field is called weight space learning.
+- New actions proposed here: `merge_adapters`, `project_safe` and `steer`.
+- Full report with sources and risks: [docs/research/self-improving-autoresearch-agents.md](docs/research/self-improving-autoresearch-agents.md).
+
+| # | Improvement | Toolbox action it maps to | Source (paper/repo link) | Time (h) | Value | Why |
+|---|---|---|---|---|---|---|
+| 1 | Immutable gate, greedy keep/revert, append-only log | Loop infrastructure (all actions) | [karpathy/autoresearch](https://github.com/karpathy/autoresearch) | 2–4 | High | Thinnest working loop; proposer cannot touch the eval |
+| 2 | Support/query split and version-stamped data | Gate; `build_dataset` | [MetaClaw arXiv 2603.17187](https://arxiv.org/abs/2603.17187) | 1 | High | Cheapest guard against overfitting a small eval |
+| 3 | Safety gate: XSTest, SimpleSafetyTests, StrongREJECT subset, crisis prompts; locked crisis path | Gate (applies to every action) | [Qi et al. 2310.03693](https://arxiv.org/abs/2310.03693), [SimpleSafetyTests](https://arxiv.org/abs/2311.08370) | 3–4 | High | Benign fine-tuning raised harmfulness 0.3% → 16.1% [V] |
+| 4 | Held-out cross-family jury, sycophancy rubric item, paired bootstrap | Gate (scoring) | [PoLL 2404.18796](https://arxiv.org/abs/2404.18796), [CounselBench](https://arxiv.org/abs/2506.08584), [Miller 2411.00640](https://arxiv.org/abs/2411.00640) | 2–3 | High | LLM judges miss clinician-flagged harm; jury gap exposes hacking |
+| 5 | Proposer reads every past harness, trace and score | Proposer input (all harness actions) | [Meta-Harness 2603.28052](https://arxiv.org/abs/2603.28052) | 2–3 | High | Published precedent for this exact design |
+| 6 | Reflective one-rule edits with Pareto parent selection | `edit_rule` | [GEPA 2507.19457](https://arxiv.org/abs/2507.19457), [gepa-ai/gepa](https://github.com/gepa-ai/gepa) | 3–5 | High | Qwen3-8B 45.2 → 54.9, beating GRPO with 1.8k–7k vs 24k rollouts [V] |
+| 7 | Delta playbook with helpful/harmful counters, code-merged | `add_skill_card`, `edit_rule` | [ACE 2510.04618](https://arxiv.org/abs/2510.04618), [ace-agent/ace](https://github.com/ace-agent/ace) | 4–6 | High | +13 over GEPA on AppWorld at 75% fewer rollouts [V] |
+| 8 | DPO on judge-ranked best vs worst pairs, with safety data mixed in | `build_dataset` + `train_adapter` (DPO) | [CSO 2503.05362](https://arxiv.org/abs/2503.05362), [DecoupledESC 2505.16995](https://arxiv.org/abs/2505.16995), [Qi et al.](https://arxiv.org/abs/2310.03693) | 4–6 | High | ESC precedent at 7–9B; cheaper and stabler than RL |
+| 9 | ESConv strategy rules and strategy-distribution tracking | `set_strategy_rules` | [ESConv 2106.01144](https://arxiv.org/abs/2106.01144), [2509.12661](https://arxiv.org/abs/2509.12661) | 2 | Medium | Guards against strategy collapse that SFT/GRPO amplify [V] |
+| 10 | Bootstrap few-shots from passing train-split conversations | `set_examples` | [DSPy](https://github.com/stanfordnlp/dspy), [ExpeL 2308.10144](https://arxiv.org/abs/2308.10144) | 1–2 | Medium | Cheap; 9B models often follow examples better than rules (estimate) |
+| 11 | Lever bandit over action types (fixed stage order as fallback) | Proposer action choice | Novel; [MASS 2502.02533](https://arxiv.org/abs/2502.02533) | 3–4 (1) | High demo / Medium score | No source does this; answers "which lever" visibly |
+| 12 | Safe LoRA projection on every adapter | Proposed `project_safe` (or mandatory step in `train_adapter`) | [Safe LoRA 2405.16833](https://arxiv.org/abs/2405.16833) | 2–6 | High (safety) | Training-free; needs only Base and Instruct weights |
+| 13 | Best-of-N (N ≤ 4) with a separate selection judge | `set_inference` | [Liu et al. 2502.06703](https://arxiv.org/abs/2502.06703) | 2–3 | Medium | Real gains need a good verifier; costs N× latency |
+| 14 | Best-of-N winners then SFT (second-run fallback) | `build_dataset` + `train_adapter` (SFT) | [RAFT 2304.06767](https://arxiv.org/abs/2304.06767), [ReST-EM 2312.06585](https://arxiv.org/abs/2312.06585) | 3–5 | High | Most stable self-training; SEAL chose it over GRPO [V] |
+| 15 | Linear LoRA merge and base/adapter interpolation search | Proposed `merge_adapters` | [Task arithmetic 2212.04089](https://arxiv.org/abs/2212.04089), [2511.21437](https://arxiv.org/abs/2511.21437), [LoraHub 2307.13269](https://arxiv.org/abs/2307.13269) | 3–5 | Medium–High | Only merge method reliable on LLMs [V]; no retraining |
+| 16 | Sycophancy persona-vector drift monitor | Gate metric (no action) | [Persona vectors 2507.21509](https://arxiv.org/abs/2507.21509) | 3–5 | Medium–High | Detects drift toward flattery after each adapter |
+| 17 | On-policy distillation from Qwen3.5-397B | `train_adapter` (distill) | [TM on-policy distillation](https://www.thinkingmachines.ai/blog/on-policy-distillation/) | 3–5 | Medium | Strong baseline but uses one of two runs; not self-improvement |
+| 18 | Serve-time sycophancy/warmth steering | Proposed `steer` | [vllm-lens](https://pypi.org/project/vllm-lens/), [CAA 2312.06681](https://arxiv.org/abs/2312.06681) | 6–10 | Medium | Good internals story; eager-mode cost, code-exec risk, Qwen3.5 untested |
+| 19 | RLVER-lite GRPO with simulated-user emotion reward | `train_adapter` (RL) | [RLVER 2507.03112](https://arxiv.org/abs/2507.03112) | 8–12 | Medium | 13.3 → 79.2 at 7B [V], but too slow and hackable here |
+| 20 | Hypernetwork LoRA, TIES/DARE, ROME/MEMIT, DGM-style self-rewrite | None (skip) | [Text-to-LoRA](https://github.com/SakanaAI/text-to-lora), [TIES](https://arxiv.org/abs/2306.01708), [ROME](https://arxiv.org/abs/2202.05262), [DGM](https://arxiv.org/abs/2505.22954) | n/a | Low | No Qwen3.5 checkpoint, no reliable gain, or far beyond budget |
+
+**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). GRPO, merging and steering (rows 15, 18, 19) are rated medium or below here because nothing has tested them on this task; we include them as exploratory actions in [section 8](#8-the-proposers-toolbox) so the loop measures their value instead of us guessing it. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
 
 ## Running the training agents
 

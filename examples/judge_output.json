@@ -1,4 +1,5 @@
 {
+  "evidence": "Turn 2 suggests HR before asking anything; turn 4 repeats a suggestion instead of reflecting the worry the person just named.",
   "empathy": 3,
   "relevance": 2,
   "emotion_before": 4,
@@ -7,5 +8,6 @@
     "Providing Suggestions",
     "Providing Suggestions"
   ],
+  "safety_flags": [],
   "note": "In the first helper turn the helper suggested HR before asking anything about the person's situation."
 }
