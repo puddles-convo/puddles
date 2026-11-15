@@ -180,3 +180,133 @@ def test_a_matching_current_json_of_zeros_is_scored_again(tmp_path):
     assert gate.current_scores(deps, current, IDS) == first
     assert len(deps.judge.calls) - calls == len(IDS)  # scored again: one judge call per scenario
     assert json.loads(path.read_text())["scores"] == first.model_dump()  # and rewritten with measured scores
+
+
+# ---------- quality is never taken from a file or a caller: it is always worked out ----------
+
+def flat_judge():
+    """Baseline and candidate both truly 4 and 4: no gain to find."""
+    from tests.test_gate import Judge
+
+    return Judge(rule=lambda record: (4, 4))
+
+
+@pytest.mark.parametrize("quality", [0.0, -1.0, 1.0, 4.5], ids=["zero", "negative", "in-range-1", "in-range-4.5"])
+def test_a_stored_quality_that_is_not_the_mean_cannot_make_a_gain_through_make_gate(tmp_path, quality):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path, judge=flat_judge())
+    gate.current_scores(deps, current, IDS)  # truly (4, 4, quality 4)
+    path = deps.root / "scores" / "current.json"
+    data = json.loads(path.read_text())
+    data["scores"]["quality"] = quality  # only the quality changed; every identity field still matches
+    path.write_text(json.dumps(data))
+    result = gated_round(deps, current, candidate)
+    calls = len(deps.judge.calls)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    baseline_calls = [c for c in deps.judge.calls[calls:] if c.startswith("conv-r00-current-")]
+    assert len(baseline_calls) == len(IDS)  # the file counted as absent: the policy in force was scored again
+    assert out.decision == "reverted" and out.before.quality == 4.0 == out.after.quality
+    assert "quality rose by 0.00" in out.reason and "from 0" not in out.reason
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
+    assert event.outcome == "reverted" and event.scores.before.quality == 4.0
+    assert not (deps.root / "policies" / "policy-v2.md").exists()
+
+
+@pytest.mark.parametrize("quality", [0.0, -1.0, 1.0, 3.5], ids=["zero", "negative", "in-range-1", "in-range-3.5"])
+def test_current_scores_with_a_quality_that_is_not_the_mean_fail_complete_evidence(tmp_path, quality):
+    deps, current, candidate = setup(tmp_path)
+    inp = gate_input(current, candidate).model_copy(
+        update={"current_scores": Scores(empathy=3, relevance=3, quality=quality)})
+    report = gate.run_gate(inp, deps)
+    out = report.outcome
+    assert out.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert out.reason == f"Reverted on {gate.CHECKS['complete_evidence']}: the policy in force has no measured scores."
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert out.before.quality == 3.0  # the record carries the worked-out quality, not the one given
+    assert deps.safety.calls and len(deps.judge.calls) == len(IDS)  # safety and validation still ran
+
+
+@pytest.mark.parametrize("quality", [None, 3.0, 3.0000000001], ids=["unset", "the-mean", "the-mean-to-9-places"])
+def test_a_quality_that_is_unset_or_the_mean_is_measured_and_worked_out(tmp_path, quality):
+    deps, current, candidate = setup(tmp_path)
+    inp = gate_input(current, candidate).model_copy(
+        update={"current_scores": Scores(empathy=3, relevance=3, quality=quality)})
+    report = gate.run_gate(inp, deps)
+    assert report.outcome.decision == "kept" and report.failed == []
+    assert report.outcome.before.quality == 3.0 == report.log_scores.before.quality
+    assert report.outcome.after.quality == 4.0 == report.log_scores.after.quality
+
+
+def test_score_policys_own_quality_is_the_mean_of_its_two_dimensions(tmp_path):
+    from tests.test_gate import Judge
+
+    table = {sid: (e, r) for sid, (e, r) in zip(IDS, [(5, 1), (4, 2), (3, 3), (2, 5), (1, 4)])}
+    deps, current, _ = setup(tmp_path, judge=Judge(rule=lambda record: table[record.scenario_id]))
+    scores = gate.score_policy(deps, current, IDS, 0, gate.CURRENT_TAG).scores
+    assert scores.quality == (scores.empathy + scores.relevance) / 2
+
+
+# ---------- a conversation with no helper reply measures no policy ----------
+
+def test_max_turns_zero_fails_the_candidates_evidence_and_the_judge_is_never_asked(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    deps.max_turns = 0
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    out = report.outcome
+    assert out.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert gate.NO_HELPER_REPLY in out.reason and f"{len(IDS)} of {len(IDS)} had no helper reply" in out.reason
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert out.after == gate.NOT_MEASURED and report.log_scores is None
+    assert deps.judge.calls == []  # nothing to judge
+    assert (deps.root / "scores" / "round-01-validation.jsonl").read_text() == ""
+
+
+def test_max_turns_zero_through_make_gate_reverts_untested_with_no_model_judging(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    deps.max_turns = 0
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and out.before == out.after == gate.NOT_MEASURED
+    assert "policy in force could not be scored" in out.reason and gate.NO_HELPER_REPLY in out.reason
+    assert "candidate was not tested" in out.reason.lower() and deps.safety.calls == [] and deps.judge.calls == []
+    assert not (deps.root / "scores" / "current.json").exists()
+
+
+def test_one_conversation_without_a_helper_turn_is_unscored_whatever_the_judge_would_say(tmp_path, monkeypatch):
+    real = gate.run_batch
+
+    def drop_one_reply(*args, **kwargs):
+        batch = real(*args, **kwargs)
+        first = batch.records[0]
+        batch.records[0] = first.model_copy(update={"turns": [t for t in first.turns if t.speaker == "user"]})
+        return batch
+
+    monkeypatch.setattr(gate, "run_batch", drop_one_reply)
+    deps, current, candidate = setup(tmp_path)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    first_id = f"conv-r01-val-{IDS[0]}"
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert f"1 of {len(IDS)} had no helper reply ({first_id})" in report.outcome.reason
+    assert first_id not in deps.judge.calls and len(deps.judge.calls) == len(IDS) - 1
+
+
+# ---------- the inputs the gate takes a number from ----------
+
+@pytest.mark.parametrize("noise", [-0.1, float("nan")])
+def test_a_noise_that_was_not_measured_is_refused_and_make_gate_reverts_untested(tmp_path, noise):
+    deps, current, candidate = setup(tmp_path)
+    with pytest.raises(ValueError):
+        gate_input(current, candidate, noise=noise)  # GateInput: noise >= 0, and NaN fails it
+    result = gated_round(deps, current, candidate)
+    adapter = gate.make_gate(deps, validation_scenario_ids=IDS, noise=noise)
+    out = adapter(result)
+    assert out.decision == "reverted" and adapter.last_report.failed == ["complete_evidence"]
+    assert "candidate was not tested" in out.reason.lower() and out.after == gate.NOT_MEASURED
+    assert deps.safety.calls == [] and result.scores is None  # never tested
+
+
+def test_an_infinite_noise_can_only_fail_quality_gain(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    report = gate.run_gate(gate_input(current, candidate, noise=float("inf")), deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["quality_gain"]

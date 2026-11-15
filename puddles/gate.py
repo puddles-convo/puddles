@@ -62,6 +62,7 @@ NOTHING_ELSE_RAN = "Nothing else was run: no conversation, no judge call, no saf
 NOISE_NOTE = "the noise has not been measured, so nothing is promoted"
 NO_SAFETY_CASE = "no safety case was run"
 NO_BASELINE = "the policy in force has no measured scores"
+NO_HELPER_REPLY = "no helper reply"
 
 
 def _safety_passed(safety: Optional[SafetyResult]) -> bool:
@@ -72,8 +73,13 @@ def _safety_passed(safety: Optional[SafetyResult]) -> bool:
 
 
 def _measured(scores: Scores) -> bool:
-    """Scores are 1 to 5, so empathy or relevance outside that range was not measured (NOT_MEASURED is 0)."""
-    return 1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5
+    """Scores are 1 to 5, so empathy or relevance outside that range was not measured (NOT_MEASURED is 0,
+    and NaN fails both comparisons). Quality is never taken from a caller or a file: one that is set and
+    is not the mean of the two dimensions, to 9 decimal places, was not measured either."""
+    if not (1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5):
+        return False
+    mean = (scores.empathy + scores.relevance) / 2
+    return scores.quality is None or round(scores.quality, 9) == round(mean, 9)
 
 
 class GateError(RuntimeError):
@@ -112,6 +118,7 @@ class Evidence:
     scores: Optional[Scores] = None  # set only when every scenario came back with a score
     failed: list[str] = field(default_factory=list)  # scenario IDs whose conversation failed
     unscored: list[str] = field(default_factory=list)  # conversation IDs the judge did not score
+    no_helper_reply: list[str] = field(default_factory=list)  # of those, the ones with no helper turn to judge
 
     @property
     def complete(self) -> bool:
@@ -121,9 +128,12 @@ class Evidence:
         parts = []
         if self.failed:
             parts.append(f"{len(self.failed)} of {self.expected} conversations failed ({', '.join(self.failed)})")
-        if self.unscored:
-            parts.append(f"{len(self.unscored)} of {self.expected} were not scored by the judge "
-                         f"({', '.join(self.unscored)})")
+        judged = [c for c in self.unscored if c not in self.no_helper_reply]
+        if judged:
+            parts.append(f"{len(judged)} of {self.expected} were not scored by the judge ({', '.join(judged)})")
+        if self.no_helper_reply:
+            parts.append(f"{len(self.no_helper_reply)} of {self.expected} had {NO_HELPER_REPLY} "
+                         f"({', '.join(self.no_helper_reply)})")
         return "; ".join(parts) or "the scores are missing"
 
 
@@ -184,8 +194,8 @@ def average(scores: list[ScoreRecord]) -> Scores:
 
 
 def with_quality(scores: Scores) -> Scores:
-    if scores.quality is not None:
-        return scores
+    """The scores with quality worked out as (empathy + relevance) / 2, whatever quality they carried:
+    quality is never taken from a file or a caller (a wrong one is refused by `_measured` first)."""
     return scores.model_copy(update={"quality": (scores.empathy + scores.relevance) / 2})
 
 
@@ -225,7 +235,13 @@ def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int,
                       out_path=root / "conversations" / name)
     scores: list[ScoreRecord] = []
     unscored: list[str] = []
+    no_reply: list[str] = []
     for record in batch.records:
+        if not any(t.speaker == "helper" for t in record.turns):
+            # It measures no policy: there is nothing to judge, so the judge is not asked.
+            unscored.append(record.id)
+            no_reply.append(record.id)
+            continue
         try:
             score = deps.judge.score(record).score
             if not isinstance(score, ScoreRecord) or score.conversation_id != record.id:
@@ -237,9 +253,9 @@ def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int,
     scores_path.parent.mkdir(parents=True, exist_ok=True)
     scores_path.write_text("".join(s.model_dump_json() + "\n" for s in scores), encoding="utf-8")
     evidence = Evidence(expected=len(scenarios), failed=[f.scenario_id for f in batch.failures],
-                        unscored=unscored)
+                        unscored=unscored, no_helper_reply=no_reply)
     if not evidence.failed and not evidence.unscored and len(scores) == len(scenarios):
-        evidence.scores = average(scores)
+        evidence.scores = with_quality(average(scores))  # quality as every comparison works it out
     return evidence
 
 
@@ -284,7 +300,8 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
         if any(data[name] != value for name, value in key.items()):
             return None
         scores = Scores.model_validate(data["scores"])
-        return scores if _measured(scores) else None  # outside 1 to 5: not measured, so scored again
+        # Outside 1 to 5, or a quality that is not the mean of the two: not measured, so scored again.
+        return with_quality(scores) if _measured(scores) else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -561,7 +578,7 @@ def _evaluate(run: _Run) -> GateReport:
 
     # 4. The two score checks. Differences are rounded: the scores are means of whole numbers.
     run.running = "quality_gain"
-    before, after = with_quality(inp.current_scores), evidence.scores
+    before, after = with_quality(inp.current_scores), with_quality(evidence.scores)
     assert before.quality is not None and after.quality is not None
     gain = round(after.quality - before.quality, 9)
     moved = f"quality {'rose' if gain >= 0 else 'fell'} by {_num(abs(gain))}"
