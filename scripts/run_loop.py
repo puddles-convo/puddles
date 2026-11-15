@@ -52,7 +52,7 @@ from puddles.loop import LoopError, check_id_files, judge_models, run_loop, scor
 from puddles.memory import FakeMemory, Memory, PastError
 from puddles.policy import TOKEN_CAP
 from puddles.round import prepare_round, stand_in_gate
-from puddles.usage import Meter, model_name, spend
+from puddles.usage import Meter, metering, model_name, spend
 from schemas import ConversationRecord, RoundEvent, Scenario, ScoreRecord
 
 
@@ -218,6 +218,16 @@ def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter
     return step
 
 
+def _metered(step: Callable[[int], object], meter: Meter) -> Callable[[int], object]:
+    """The weight step with its judge calls in the usage log (under `weights`), so the spend limit sees them."""
+
+    def run(round_: int) -> object:
+        with metering(meter, "weights"):
+            return step(round_)
+
+    return run
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
     if args.gate == "kept" and not args.fake:
@@ -351,6 +361,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             noise=cfg.noise if cfg.noise is not None else 0.0, token_cap=TOKEN_CAP)
 
     weight_step = None
+    if args.weights == "off" and not args.check:
+        from puddles.weights import ledger as adapter_ledger
+
+        try:
+            kept = adapter_ledger.in_force(root)
+        except (OSError, ValueError) as exc:
+            _print_error(f"{type(exc).__name__}: log/adapters.jsonl cannot be read: {exc}")
+            return 2
+        if kept is not None:
+            _print_error(f"{kept.adapter_id} is the adapter in force (log/adapters.jsonl): run with --weights "
+                         "to keep using it; without it the rounds would run on other weights")
+            return 2
     if args.weights != "off":
         try:
             weight_step = _weight_step(args, cfg, deps, gate_deps, meter, helper_client, log, root, start_policy,
@@ -377,7 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         summary = run_loop(
             cfg, log=log, memory=memory, root=root, start_policy=start_policy, scenarios=scenarios, run_one=run_one,
-            after_round=weight_step.after_round if weight_step is not None else None,
+            after_round=_metered(weight_step.after_round, meter) if weight_step is not None else None,
         )
     except ConfigError as exc:
         _print_error(f"{type(exc).__name__}: {exc}")

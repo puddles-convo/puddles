@@ -196,12 +196,12 @@ def test_a_better_adapter_is_kept_put_in_front_and_restored_after_a_restart(tmp_
     event = step.after_round(3)
     assert event.outcome == "kept", event.reason
     assert backend.trained == [("dpo", event.pairs)] and event.pairs > 0
-    assert in_use["name"] == "adapter-01" and event.quality_after > event.quality_before
+    assert in_use["name"] == event.served_as and event.quality_after > event.quality_before
     assert (event.safety_passed, event.safety_total) == (1, 1)
     assert ledger.in_force(root).adapter_id == "adapter-01" and ledger.check(root) == []
     assert not rule_gate.current_path(root).exists()  # rule edits are measured again on the new weights
     in_use.clear()
-    assert step.restore() == "adapter-01" and in_use["name"] == "adapter-01"
+    assert step.restore() == "adapter-01" and in_use["name"] == event.served_as
     (root / event.adapter_dir / "adapter_model.safetensors").write_bytes(b"changed")
     assert ledger.check(root)
     with pytest.raises(ConfigError, match="adapter log check failed"):
@@ -252,3 +252,34 @@ def test_the_fake_driver_runs_a_training_step_after_three_rounds_without_a_keep(
     assert len(events) == 1 and events[0].after_round == 3 and events[0].method == "dpo"
     # the scripted judge gives every reply the same score, so there is nothing to train on
     assert events[0].outcome == "no_data"
+
+
+def test_a_kept_adapter_has_a_name_unique_to_its_bytes(tmp_path):
+    long_reply = "It sounds like this has been weighing on you for a long while now. What feels heaviest today?"
+    root, step, in_use, _ = _setup(tmp_path, long_reply)
+    event = step.after_round(3)
+    assert event.served_as == f"adapter-01-{event.adapter_sha256[:12]}" == in_use["name"]
+
+
+def test_a_failure_after_loading_unloads_the_candidate(tmp_path):
+    root, step, _, _ = _setup(tmp_path, "Okay.")
+    step.validation_ids = ["no-such-scenario"]  # the gate's scoring raises after the adapter is loaded
+    event = step.after_round(3)
+    assert event.outcome == "failed" and step.loader.loaded == []
+
+
+def test_a_restart_without_weights_is_refused_while_an_adapter_is_in_force(tmp_path, capsys):
+    ledger.append(tmp_path, ledger.AdapterEvent(after_round=3, adapter_id="adapter-01", method="dpo", trigger="t",
+                                                base_model="b", policy_version="policy-v1", outcome="kept",
+                                                reason="r"))
+    assert driver.main(["--root", str(tmp_path), "--fake", "--max-rounds", "4"]) == 2
+    assert "adapter in force" in capsys.readouterr().err
+
+
+def test_the_weight_step_is_metered(tmp_path):
+    from puddles.usage import Meter, current
+
+    seen = []
+    run = driver._metered(lambda r: seen.append(current()), Meter(tmp_path))
+    run(3)
+    assert seen[0][1] == "weights" and seen[0][0] is not None
