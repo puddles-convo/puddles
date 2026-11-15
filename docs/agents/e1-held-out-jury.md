@@ -8,7 +8,7 @@
 |  |  |
 |---|---|
 | Receives from | The final test runs: conversations on the held-out test split and CounselBench-Adv |
-| Hands to | The results report ([README section 10](../../README.md#10-how-we-measure-the-result)) |
+| Hands to | The results report ([README section 10](../../README.md#11-how-we-measure-the-result)) |
 | Model | One per juror, each from a model family different from the helper and the loop's judge (for example Claude Opus 5.5 for one juror) |
 | Reads from memory | Nothing |
 | Writes to memory | Nothing |

@@ -260,7 +260,7 @@ Code validates `args` per action before applying anything.
 
 ### Output changes
 
-Version 2 returns an action from the toolbox with `considered`, `args`, `hypothesis` and `prediction`, replacing `ProposerOutput`. The `Intervention` record is proposed in `schemas.py` under issue #1; see the [toolbox](../../README.md#7-the-proposers-toolbox).
+Version 2 returns an action from the toolbox with `considered`, `args`, `hypothesis` and `prediction`, replacing `ProposerOutput`. The `Intervention` record is proposed in `schemas.py` under issue #1; see the [toolbox](../../README.md#8-the-proposers-toolbox).
 
 ---
 
