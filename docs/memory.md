@@ -399,7 +399,7 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 1. **Where a note's sentence is read from.** The index says which notes are live, but their sentences come back from past.dev by a search, and a search may miss one. If it misses the note someone asked to forget, that note stays live. Fix: keep the sentence in the index too. Cost: notes live in two places and past.dev becomes a searchable copy for user memory, as it already is for training memory.
 2. **Where the live-note index is stored.** The design says "kept by the brain" and no more. It needs a named place, a format on disk, and an owner on the robot side.
 3. **Deleting from past.dev.** The memory client has no delete call and no per-person audience. Both are needed for notes, and how fast a deleted entry stops being returned is untested.
-4. **Merging version 3 with `main`.** The five differences in section 9 need to be closed in one direction or the other, and records already written under the old IDs need a rule.
+4. **Records written under version 2.** The code now follows version 3. Runs from before it reuse a pattern's ID for repeat sightings and have no `.meta.json`, so they do not pass the replay check. Start new runs rather than converting them.
 5. **A round with a pattern and sources but no edit.** No outcome means this. Today it is logged as `no_pattern` with the pattern attached. Decide whether to add a fifth outcome (issue #1).
 
 **Affects quality, can wait**
@@ -424,3 +424,4 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 | Policy, the gate, the replay check, consent, the crisis path | [agents.md](agents.md) |
 | Why notes and history lists are bounded, and what other systems do | [research/memory/00-summary.md](research/memory/00-summary.md) |
 | Every format | [`schemas.py`](../schemas.py), with examples in [`examples/`](../examples/) |
+| A short overview of the formats and what to improve | [memory-overview.md](memory-overview.md) |
