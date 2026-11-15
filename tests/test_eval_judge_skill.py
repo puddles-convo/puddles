@@ -43,6 +43,10 @@ GOOD_GUIDE = js.DimensionGuide(raises=["names the feeling", "asks before advisin
                                anchor_5="names this person's feeling accurately", traps=["long polite replies"])
 
 
+GOOD_DISTRESS = js.DistressGuide(anchor_1="calm, talking about small things", anchor_3="worried but coping",
+                                  anchor_5="overwhelmed, says they cannot cope", rules=["judge from the person's words", "a polite goodbye is weak evidence"])
+
+
 class FakeLLM:
     def __init__(self, guides=None):
         self.calls = []
@@ -52,6 +56,8 @@ class FakeLLM:
         self.calls.append((system, user, schema))
         if schema is js.DimensionGuide:
             return self.guides.pop(0) if self.guides else GOOD_GUIDE
+        if schema is js.DistressGuide:
+            return GOOD_DISTRESS
         return js.ExampleReason(reason="Turn 2 reflects the worry, so the person felt heard.")
 
 
@@ -97,7 +103,8 @@ def test_build_renders_the_skill_and_meta_holds_ids_only():
     llm = FakeLLM()
     text, meta = js.build(convs, llm, builder_model="builder-x", per_level=2, example_count=4)
     assert text.startswith("---\nname: grade-support-conversations\n")
-    for heading in ("## Empathy:", "## Relevance:", "## Always", "## Examples", "### Example 1:"):
+    for heading in ("## Empathy:", "## Relevance:", "## Distress at the start", "## Strategy labels", "## Always",
+                    "## Examples", "### Example 1:"):
         assert heading in text
     assert "- **5:** names this person's feeling accurately" in text
     assert "CC BY-NC 4.0" in text
@@ -107,7 +114,8 @@ def test_build_renders_the_skill_and_meta_holds_ids_only():
     assert "secret-user-text" not in dumped
     assert all(sid.startswith("esconv-train-") for d in meta["guideline_sources"].values()
                for ids in d.values() for sid in ids)
-    assert len(llm.calls) == 2 + 4
+    assert "- **Reflection of feelings:**" in text
+    assert len(llm.calls) == 2 + 1 + 4
 
 
 def test_model_prompts_carry_no_scenario_ids():
@@ -133,3 +141,25 @@ def test_write_is_atomic_and_complete(tmp_path):
     assert (tmp_path / "skill" / "SKILL.md").read_text() == "text"
     assert json.loads((tmp_path / "skill" / "skill.meta.json").read_text()) == {"sha256": "x"}
     assert not list((tmp_path / "skill").glob(".*.tmp"))
+
+
+def test_written_skill_renders_on_the_builders_examples_without_model_calls():
+    convs = _dataset()
+    written = js.WrittenSkill(author="by hand", guides={"empathy": GOOD_GUIDE, "relevance": GOOD_GUIDE},
+                              distress=GOOD_DISTRESS, reasons=["r1", "r2", "r3"])
+    text, meta = js.render_written(convs, written, per_level=2, example_count=3)
+    assert "builder_model: by hand" in text and meta["builder_model"] == "by hand"
+    assert text.count("Why: r") == 3
+    with pytest.raises(ValueError, match="reasons"):
+        js.render_written(convs, written.model_copy(update={"reasons": ["only one"]}), per_level=2, example_count=3)
+    with pytest.raises(ValueError, match="training split only"):
+        js.render_written(convs + [_conv(999, 3, 3, split="validation")], written, per_level=2, example_count=3)
+
+
+def test_examples_never_include_a_helper_mentioning_medication():
+    convs = _dataset()
+    best = js.choose_examples(convs, 1, max_words=250)[0]
+    best.record.turns[1] = Turn(speaker="helper", text="try sleeping piles to sleep")
+    assert js.mentions_medication(best)
+    again = js.choose_examples(convs, 1, max_words=250)[0]
+    assert again is not best and not js.mentions_medication(again)

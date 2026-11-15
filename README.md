@@ -149,7 +149,7 @@ Which model plays each agent. These are starting choices and none has been bench
 
 ## How the judges grade (the grading skill)
 
-**Status: the builder is written and tested offline; the skill has not been built yet, and the judges do not read it yet** (that needs a small change in `puddles/eval/judge.py`, agreed with its owner). Build it, check it and freeze the judge with it **before stage 5's real baseline runs**. The skill changes the judge's version, so baselines measured without it would have to be run again.
+**Status: the skill is built** ([`calibration/judge-skill/SKILL.md`](calibration/judge-skill/SKILL.md), about 4,300 tokens). Its text was written by Claude in a Claude Code session from the builder's training-split samples and rendered by the builder (`--from-json calibration/judge-skill/written.json`), because no builder model key was available. **The judges do not read it yet:** that needs a small change in `puddles/eval/judge.py`, agreed with its owner. Build it, check it and freeze the judge with it **before stage 5's real baseline runs**. The skill changes the judge's version, so baselines measured without it would have to be run again.
 
 The loop keeps or reverts a change on small score differences, so the judges must grade consistently and the way real people rated support conversations. Rather than tuning the judge prompt by hand, a module builds a **grading skill**: a short guide with anchors for each score and a few rated examples. Every judge and Astra reads it in their system message, on every conversation, in training and in the final evaluation.
 
@@ -158,7 +158,7 @@ The loop keeps or reverts a change on small score differences, so the judges mus
 | Built by | `python -m puddles.eval.judge_skill`: seeded; without `--yes` it only prints the plan and the estimated cost (7 model calls, about 28,000 prompt tokens). The builder model is `PUDDLES_SKILL_BUILDER_MODEL` and needs a row in the prices table |
 | Built from | **The ESConv training split only.** Conversations are sampled evenly across rating levels, because most ESConv ratings are 5 out of 5 |
 | Never built from | The validation split (the gate and stage 5 grade the loop on it), the test split (final evaluation only), CounselBench-Adv and VERA-MH (outside checks the loop never sees) |
-| What it covers | The judge's existing dimensions: empathy, relevance, distress before and after, strategy labels. What raises or lowers each score, anchors for 1, 3 and 5, known traps, and 4 to 6 examples with the seekers' own ratings |
+| What it covers | Empathy and relevance (what raises or lowers each score, anchors for 1, 3 and 5, traps); distress at the start and end (anchors and rules); definitions of the 8 strategy labels; 5 examples with the seekers' own ratings. Examples never include a helper mentioning medication, and leave out ESConv's strategy labels, which are often wrong |
 | Where it lives | `calibration/judge-skill/SKILL.md`, with `skill.meta.json` listing the ESConv IDs behind every guideline and example |
 | How judges read it | Added after the fixed judge prompt as a `<grading_skill>` block, switched on with `PUDDLES_JUDGE_SKILL` |
 | Version | The skill's hash is part of `judge_version`, so any edit makes the frozen judge refuse to run until it is checked again |

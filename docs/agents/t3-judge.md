@@ -104,7 +104,7 @@ Scores from the two judges are not interchangeable. If the loop switches judges,
 
 ### Grading skill
 
-**Status: the builder (`puddles/eval/judge_skill.py`) is written and tested offline; the skill is not built yet and the judges do not read it yet.** See the README section [How the judges grade](../../README.md#how-the-judges-grade-the-grading-skill).
+**Status: the skill is built (`calibration/judge-skill/SKILL.md`); the judges do not read it yet.** See the README section [How the judges grade](../../README.md#how-the-judges-grade-the-grading-skill).
 
 - **What it is.** A short grading guide, `calibration/judge-skill/SKILL.md`: anchors for 1, 3 and 5 on each dimension, what raises or lowers a score, known traps, and 4 to 6 rated examples.
 - **How it is built.** `python -m puddles.eval.judge_skill` reads the ESConv **training split only**, samples evenly across rating levels, asks a builder model (`PUDDLES_SKILL_BUILDER_MODEL`) to write the guidelines, and picks the examples in code. The ESConv IDs behind every guideline and example are in `skill.meta.json`.
