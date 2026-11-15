@@ -6,7 +6,7 @@ All connections are unintegrated on main and stay dashed even when animated.
 """
 import json
 from pathlib import Path
-from fig2_icons import icon_animations, electric_port_animations
+from fig2_icons import icon_animations
 OUT=Path(__file__).with_name('fig2-inference.json')
 CYAN,BLUE,LAV,CORAL,GOLD,MINT,TEAL='#27DFFF','#4A8DFF','#B67DFF','#FF777D','#FFE65C','#52FFA8','#2FC4C4'
 blocks=[]; edges=[]; anim=[]; icon_ids=[]
@@ -100,16 +100,29 @@ card('scope',1900,2420,'Integration boundary',[
 card('footer',60,2860,'One turn is parallel · memory changes only after the session',[
     'Fixed responses take priority over drafts. Device offline audio is a separate fallback from Release’s offline text.',
     'Snapshot: main e5ea2a8 · crisis-path 78377e4 · notes 23cdbb8 · animation is illustrative target flow.'],MINT,w=2720,h=210)
-# Green electrical activity is strictly port-local, not a network/power route.
-# The cloud Speaker endpoint stays semantic; only its robot-side input lights up.
-for eid,end,direction,phase in [
-    ('audio_in','start',(0,1),0),
-    ('audio_in','end',(0,-1),.32),
-    ('audio_out','end',(-1,0),.16),
-    ('local_play','start',(0,-1),.48),
-    ('local_play','end',(0,1),.8),
-]:
-    anim.extend(electric_port_animations(eid,end,direction,phase))
+# Native neon's pulse primitive runs on these same three audio handoffs.
+# This is illustrative audio-signal activity, NOT physical power/network wiring.
+# Keep every base route dashed: regular edges accept stroke_dashoffset tracks.
+# Two offset pulses leave visible current throughout the indefinitely looping cycle.
+for eid in ('audio_in','audio_out','local_play'):
+    e=next(e for e in edges if e['id']==eid)
+    e['type']='regular_edge'
+    del e['bundle']
+    e['styling']={'source_color':'#18E978','target_color':'#18E978','stroke_width':3.5,'curvature':.65}
+    anim[:]=[a for a in anim if a['id']!=eid+'_flow']
+    for k in range(2):
+        oid=f'electric_{eid}_pulse_{k}'
+        anim.append({'id':oid,'type':'overlay','anchor':{'component':eid,'slot':'midpoint'},
+                     'shape':'pulse','visible':True,
+                     'attrs':{'length':110,'stroke':'#18E978','stroke_width':14,'opacity':1}})
+        anim.append({'id':oid+'_run','type':'track','target':oid,'attribute':'progress',
+                     'duration':1.4,'phase':k*.7,
+                     'keyframes':[{'t':0,'value':0},{'t':1,'value':1}]})
+# Draw the unchanged audio labels above the current, never underneath its glow.
+for eid in ('audio_in','audio_out','local_play'):
+    label=next(a for a in anim if a['id']==eid+'_label')
+    anim.remove(label)
+    anim.append(label)
 blocks_by_id={b['id']:b for b in blocks}
 for bid in ('release','memory'):
     blocks_by_id[bid]['styling']['active_outline']=True

@@ -339,7 +339,7 @@
   "player_initial_motion": true,
   "replay_bytes_equal": true,
   "player_post_replay_motion": true,
-  "svg_sha256": "35a44c3e6b01abc25189f4f0dbe3d8e43d13dfe798d39ecc54302c2a2bc6447d",
+  "svg_sha256": "a814adc3996a4da25036d196171fd26abefc3cce992b854be64fd46b63105702",
   "prior_figure_files_unchanged": true,
   "prior_files_checked": 150,
   "passed": true

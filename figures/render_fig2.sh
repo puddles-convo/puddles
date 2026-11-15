@@ -12,4 +12,5 @@ BIN="${GLASS_DIAGRAMS_BIN:-$HOME/.local/share/glass-diagrams/uv-venv/bin}"
 "$BIN/python" figures/qa_fig2.py > figures/fig2-qa-run.log
 "$BIN/python" figures/fig2_replay_probe.py
 "$BIN/python" figures/qa_fig2_electric.py > figures/fig2-electric-qa-run.log
+"$BIN/python" figures/qa_fig2_readme.py
 "$BIN/validate-diagram" figures/fig2-inference.json --profile static --evidence-dir figures/fig2-validation/static --json > figures/fig2-static.json

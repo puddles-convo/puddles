@@ -997,17 +997,13 @@
  "connections": [
   {
    "id": "audio_in",
-   "type": "spaghetti_edge",
+   "type": "regular_edge",
    "source": "mic.bottom",
    "destination": "listener.top",
-   "bundle": {
-    "strand_count": 1,
-    "spread": 0
-   },
    "styling": {
-    "source_color": "#B67DFF",
-    "target_color": "#B67DFF",
-    "stroke_width": 2.1,
+    "source_color": "#18E978",
+    "target_color": "#18E978",
+    "stroke_width": 3.5,
     "curvature": 0.65
    }
   },
@@ -1125,17 +1121,13 @@
   },
   {
    "id": "audio_out",
-   "type": "spaghetti_edge",
+   "type": "regular_edge",
    "source": "speaker.right",
    "destination": "playback.left",
-   "bundle": {
-    "strand_count": 1,
-    "spread": 0
-   },
    "styling": {
-    "source_color": "#2FC4C4",
-    "target_color": "#2FC4C4",
-    "stroke_width": 2.1,
+    "source_color": "#18E978",
+    "target_color": "#18E978",
+    "stroke_width": 3.5,
     "curvature": 0.65
    }
   },
@@ -1157,17 +1149,13 @@
   },
   {
    "id": "local_play",
-   "type": "spaghetti_edge",
+   "type": "regular_edge",
    "source": "offline.top",
    "destination": "playback.bottom",
-   "bundle": {
-    "strand_count": 1,
-    "spread": 0
-   },
    "styling": {
-    "source_color": "#B67DFF",
-    "target_color": "#B67DFF",
-    "stroke_width": 2.1,
+    "source_color": "#18E978",
+    "target_color": "#18E978",
+    "stroke_width": 3.5,
     "curvature": 0.65
    }
   },
@@ -8846,41 +8834,6 @@
    ]
   },
   {
-   "id": "audio_in_flow",
-   "type": "particle_emitter",
-   "target": "edge_0-path-0",
-   "direction": "forward",
-   "color": "#B67DFF",
-   "speed": 140,
-   "radius": 2.4,
-   "launch_interval": 0.6,
-   "launch_jitter": 0.24,
-   "max_particles": 16,
-   "seed": 54,
-   "shooter_interval": 2.5,
-   "shooter_jitter": 0.6,
-   "shooter_speed_ratio": 4,
-   "shooter_radius_ratio": 2
-  },
-  {
-   "id": "audio_in_label",
-   "type": "overlay",
-   "anchor": {
-    "component": "audio_in",
-    "slot": "midpoint"
-   },
-   "shape": "text",
-   "values": [
-    "audio"
-   ],
-   "visible": true,
-   "attrs": {
-    "font_size": 23,
-    "fill": "#B67DFF",
-    "font_weight": 600
-   }
-  },
-  {
    "id": "text_keyword_dash",
    "type": "track",
    "target": "edge_1-path-0",
@@ -9206,41 +9159,6 @@
      "value": 0
     }
    ]
-  },
-  {
-   "id": "audio_out_flow",
-   "type": "particle_emitter",
-   "target": "edge_8-path-0",
-   "direction": "forward",
-   "color": "#2FC4C4",
-   "speed": 210,
-   "radius": 2.4,
-   "launch_interval": 0.35,
-   "launch_jitter": 0.13999999999999999,
-   "max_particles": 16,
-   "seed": 190,
-   "shooter_interval": 2.5,
-   "shooter_jitter": 0.6,
-   "shooter_speed_ratio": 4,
-   "shooter_radius_ratio": 2
-  },
-  {
-   "id": "audio_out_label",
-   "type": "overlay",
-   "anchor": {
-    "component": "audio_out",
-    "slot": "midpoint"
-   },
-   "shape": "text",
-   "values": [
-    "audio"
-   ],
-   "visible": true,
-   "attrs": {
-    "font_size": 23,
-    "fill": "#2FC4C4",
-    "font_weight": 600
-   }
   },
   {
    "id": "parallel",
@@ -11325,41 +11243,6 @@
      "value": 0
     }
    ]
-  },
-  {
-   "id": "local_play_flow",
-   "type": "particle_emitter",
-   "target": "edge_10-path-0",
-   "direction": "forward",
-   "color": "#B67DFF",
-   "speed": 210,
-   "radius": 2.4,
-   "launch_interval": 0.6,
-   "launch_jitter": 0.24,
-   "max_particles": 16,
-   "seed": 224,
-   "shooter_interval": 2.5,
-   "shooter_jitter": 0.6,
-   "shooter_speed_ratio": 4,
-   "shooter_radius_ratio": 2
-  },
-  {
-   "id": "local_play_label",
-   "type": "overlay",
-   "anchor": {
-    "component": "local_play",
-    "slot": "midpoint"
-   },
-   "shape": "text",
-   "values": [
-    "bypass cloud"
-   ],
-   "visible": true,
-   "attrs": {
-    "font_size": 23,
-    "fill": "#B67DFF",
-    "font_weight": 600
-   }
   },
   {
    "id": "ic_memory_0",
@@ -15000,2239 +14883,262 @@
    }
   },
   {
-   "id": "electric_audio_in_start_sleeve",
+   "id": "electric_audio_in_pulse_0",
    "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
    "anchor": {
     "component": "audio_in",
-    "slot": "start"
+    "slot": "midpoint"
    },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 9,
-    "opacity": 0.22
-   }
-  },
-  {
-   "id": "electric_audio_in_start_sleeve_flicker",
-   "type": "track",
-   "target": "electric_audio_in_start_sleeve",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.04
-    },
-    {
-     "t": 0.12,
-     "value": 0.22
-    },
-    {
-     "t": 0.2,
-     "value": 0.077
-    },
-    {
-     "t": 0.29,
-     "value": 0.209
-    },
-    {
-     "t": 0.43,
-     "value": 0.048
-    },
-    {
-     "t": 0.56,
-     "value": 0.22
-    },
-    {
-     "t": 0.7,
-     "value": 0.11
-    },
-    {
-     "t": 0.85,
-     "value": 0.04
-    },
-    {
-     "t": 1,
-     "value": 0.04
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_start_sleeve_electric",
-   "type": "track",
-   "target": "electric_audio_in_start_sleeve",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_start_current",
-   "type": "overlay",
-   "shape": "polyline",
+   "shape": "pulse",
    "visible": true,
-   "anchor": {
-    "component": "audio_in",
-    "slot": "start"
-   },
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 3.8,
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
     "opacity": 1
    }
   },
   {
-   "id": "electric_audio_in_start_current_flicker",
+   "id": "electric_audio_in_pulse_0_run",
    "type": "track",
-   "target": "electric_audio_in_start_current",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0,
+   "target": "electric_audio_in_pulse_0",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.0,
    "keyframes": [
     {
      "t": 0,
-     "value": 0.18
+     "value": 0
     },
     {
-     "t": 0.12,
+     "t": 1,
      "value": 1
-    },
-    {
-     "t": 0.2,
-     "value": 0.35
-    },
-    {
-     "t": 0.29,
-     "value": 0.95
-    },
-    {
-     "t": 0.43,
-     "value": 0.22
-    },
-    {
-     "t": 0.56,
-     "value": 1
-    },
-    {
-     "t": 0.7,
-     "value": 0.5
-    },
-    {
-     "t": 0.85,
-     "value": 0.18
-    },
-    {
-     "t": 1,
-     "value": 0.18
     }
    ]
   },
   {
-   "id": "electric_audio_in_start_current_electric",
-   "type": "track",
-   "target": "electric_audio_in_start_current",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_start_core",
+   "id": "electric_audio_in_pulse_1",
    "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
    "anchor": {
     "component": "audio_in",
-    "slot": "start"
+    "slot": "midpoint"
    },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#E8FFF3",
-    "stroke_width": 1.2,
-    "opacity": 0.95
-   }
-  },
-  {
-   "id": "electric_audio_in_start_core_flicker",
-   "type": "track",
-   "target": "electric_audio_in_start_core",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.171
-    },
-    {
-     "t": 0.12,
-     "value": 0.95
-    },
-    {
-     "t": 0.2,
-     "value": 0.332
-    },
-    {
-     "t": 0.29,
-     "value": 0.902
-    },
-    {
-     "t": 0.43,
-     "value": 0.209
-    },
-    {
-     "t": 0.56,
-     "value": 0.95
-    },
-    {
-     "t": 0.7,
-     "value": 0.475
-    },
-    {
-     "t": 0.85,
-     "value": 0.171
-    },
-    {
-     "t": 1,
-     "value": 0.171
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_start_core_electric",
-   "type": "track",
-   "target": "electric_audio_in_start_core",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_end_sleeve",
-   "type": "overlay",
-   "shape": "polyline",
+   "shape": "pulse",
    "visible": true,
-   "anchor": {
-    "component": "audio_in",
-    "slot": "end"
-   },
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 9,
-    "opacity": 0.22
-   }
-  },
-  {
-   "id": "electric_audio_in_end_sleeve_flicker",
-   "type": "track",
-   "target": "electric_audio_in_end_sleeve",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.32,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.04
-    },
-    {
-     "t": 0.12,
-     "value": 0.22
-    },
-    {
-     "t": 0.2,
-     "value": 0.077
-    },
-    {
-     "t": 0.29,
-     "value": 0.209
-    },
-    {
-     "t": 0.43,
-     "value": 0.048
-    },
-    {
-     "t": 0.56,
-     "value": 0.22
-    },
-    {
-     "t": 0.7,
-     "value": 0.11
-    },
-    {
-     "t": 0.85,
-     "value": 0.04
-    },
-    {
-     "t": 1,
-     "value": 0.04
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_end_sleeve_electric",
-   "type": "track",
-   "target": "electric_audio_in_end_sleeve",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.32,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_end_current",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "audio_in",
-    "slot": "end"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 3.8,
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
     "opacity": 1
    }
   },
   {
-   "id": "electric_audio_in_end_current_flicker",
+   "id": "electric_audio_in_pulse_1_run",
    "type": "track",
-   "target": "electric_audio_in_end_current",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.32,
+   "target": "electric_audio_in_pulse_1",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.7,
    "keyframes": [
     {
      "t": 0,
-     "value": 0.18
+     "value": 0
     },
     {
-     "t": 0.12,
+     "t": 1,
      "value": 1
-    },
-    {
-     "t": 0.2,
-     "value": 0.35
-    },
-    {
-     "t": 0.29,
-     "value": 0.95
-    },
-    {
-     "t": 0.43,
-     "value": 0.22
-    },
-    {
-     "t": 0.56,
-     "value": 1
-    },
-    {
-     "t": 0.7,
-     "value": 0.5
-    },
-    {
-     "t": 0.85,
-     "value": 0.18
-    },
-    {
-     "t": 1,
-     "value": 0.18
     }
    ]
   },
   {
-   "id": "electric_audio_in_end_current_electric",
-   "type": "track",
-   "target": "electric_audio_in_end_current",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.32,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_end_core",
+   "id": "electric_audio_out_pulse_0",
    "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "audio_in",
-    "slot": "end"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#E8FFF3",
-    "stroke_width": 1.2,
-    "opacity": 0.95
-   }
-  },
-  {
-   "id": "electric_audio_in_end_core_flicker",
-   "type": "track",
-   "target": "electric_audio_in_end_core",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.32,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.171
-    },
-    {
-     "t": 0.12,
-     "value": 0.95
-    },
-    {
-     "t": 0.2,
-     "value": 0.332
-    },
-    {
-     "t": 0.29,
-     "value": 0.902
-    },
-    {
-     "t": 0.43,
-     "value": 0.209
-    },
-    {
-     "t": 0.56,
-     "value": 0.95
-    },
-    {
-     "t": 0.7,
-     "value": 0.475
-    },
-    {
-     "t": 0.85,
-     "value": 0.171
-    },
-    {
-     "t": 1,
-     "value": 0.171
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_in_end_core_electric",
-   "type": "track",
-   "target": "electric_audio_in_end_core",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.32,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_out_end_sleeve",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
    "anchor": {
     "component": "audio_out",
-    "slot": "end"
+    "slot": "midpoint"
    },
+   "shape": "pulse",
+   "visible": true,
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      8
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      -7,
-      0
-     ],
-     [
-      -11,
-      -3
-     ],
-     [
-      -16,
-      3
-     ],
-     [
-      -21,
-      -2
-     ],
-     [
-      -28,
-      0
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 9,
-    "opacity": 0.22
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
+    "opacity": 1
    }
   },
   {
-   "id": "electric_audio_out_end_sleeve_flicker",
+   "id": "electric_audio_out_pulse_0_run",
    "type": "track",
-   "target": "electric_audio_out_end_sleeve",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.16,
+   "target": "electric_audio_out_pulse_0",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.0,
    "keyframes": [
     {
      "t": 0,
-     "value": 0.04
-    },
-    {
-     "t": 0.12,
-     "value": 0.22
-    },
-    {
-     "t": 0.2,
-     "value": 0.077
-    },
-    {
-     "t": 0.29,
-     "value": 0.209
-    },
-    {
-     "t": 0.43,
-     "value": 0.048
-    },
-    {
-     "t": 0.56,
-     "value": 0.22
-    },
-    {
-     "t": 0.7,
-     "value": 0.11
-    },
-    {
-     "t": 0.85,
-     "value": 0.04
+     "value": 0
     },
     {
      "t": 1,
-     "value": 0.04
+     "value": 1
     }
    ]
   },
   {
-   "id": "electric_audio_out_end_sleeve_electric",
-   "type": "track",
-   "target": "electric_audio_out_end_sleeve",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.16,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-4 -16,4 -21,-3 -28,0"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-1 -16,1 -21,0 -28,0"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_out_end_current",
+   "id": "electric_audio_out_pulse_1",
    "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
    "anchor": {
     "component": "audio_out",
-    "slot": "end"
+    "slot": "midpoint"
    },
+   "shape": "pulse",
+   "visible": true,
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      8
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      -7,
-      0
-     ],
-     [
-      -11,
-      -3
-     ],
-     [
-      -16,
-      3
-     ],
-     [
-      -21,
-      -2
-     ],
-     [
-      -28,
-      0
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 3.8,
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
     "opacity": 1
    }
   },
   {
-   "id": "electric_audio_out_end_current_flicker",
+   "id": "electric_audio_out_pulse_1_run",
    "type": "track",
-   "target": "electric_audio_out_end_current",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.16,
+   "target": "electric_audio_out_pulse_1",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.7,
    "keyframes": [
     {
      "t": 0,
-     "value": 0.18
-    },
-    {
-     "t": 0.12,
-     "value": 1
-    },
-    {
-     "t": 0.2,
-     "value": 0.35
-    },
-    {
-     "t": 0.29,
-     "value": 0.95
-    },
-    {
-     "t": 0.43,
-     "value": 0.22
-    },
-    {
-     "t": 0.56,
-     "value": 1
-    },
-    {
-     "t": 0.7,
-     "value": 0.5
-    },
-    {
-     "t": 0.85,
-     "value": 0.18
+     "value": 0
     },
     {
      "t": 1,
-     "value": 0.18
+     "value": 1
     }
    ]
   },
   {
-   "id": "electric_audio_out_end_current_electric",
-   "type": "track",
-   "target": "electric_audio_out_end_current",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.16,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-4 -16,4 -21,-3 -28,0"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-1 -16,1 -21,0 -28,0"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_out_end_core",
+   "id": "electric_local_play_pulse_0",
    "type": "overlay",
-   "shape": "polyline",
+   "anchor": {
+    "component": "local_play",
+    "slot": "midpoint"
+   },
+   "shape": "pulse",
    "visible": true,
+   "attrs": {
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
+    "opacity": 1
+   }
+  },
+  {
+   "id": "electric_local_play_pulse_0_run",
+   "type": "track",
+   "target": "electric_local_play_pulse_0",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.0,
+   "keyframes": [
+    {
+     "t": 0,
+     "value": 0
+    },
+    {
+     "t": 1,
+     "value": 1
+    }
+   ]
+  },
+  {
+   "id": "electric_local_play_pulse_1",
+   "type": "overlay",
+   "anchor": {
+    "component": "local_play",
+    "slot": "midpoint"
+   },
+   "shape": "pulse",
+   "visible": true,
+   "attrs": {
+    "length": 110,
+    "stroke": "#18E978",
+    "stroke_width": 14,
+    "opacity": 1
+   }
+  },
+  {
+   "id": "electric_local_play_pulse_1_run",
+   "type": "track",
+   "target": "electric_local_play_pulse_1",
+   "attribute": "progress",
+   "duration": 1.4,
+   "phase": 0.7,
+   "keyframes": [
+    {
+     "t": 0,
+     "value": 0
+    },
+    {
+     "t": 1,
+     "value": 1
+    }
+   ]
+  },
+  {
+   "id": "audio_in_label",
+   "type": "overlay",
+   "anchor": {
+    "component": "audio_in",
+    "slot": "midpoint"
+   },
+   "shape": "text",
+   "values": [
+    "audio"
+   ],
+   "visible": true,
+   "attrs": {
+    "font_size": 23,
+    "fill": "#B67DFF",
+    "font_weight": 600
+   }
+  },
+  {
+   "id": "audio_out_label",
+   "type": "overlay",
    "anchor": {
     "component": "audio_out",
-    "slot": "end"
+    "slot": "midpoint"
    },
+   "shape": "text",
+   "values": [
+    "audio"
+   ],
+   "visible": true,
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      8
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      -7,
-      0
-     ],
-     [
-      -11,
-      -3
-     ],
-     [
-      -16,
-      3
-     ],
-     [
-      -21,
-      -2
-     ],
-     [
-      -28,
-      0
-     ]
-    ],
-    "stroke": "#E8FFF3",
-    "stroke_width": 1.2,
-    "opacity": 0.95
+    "font_size": 23,
+    "fill": "#2FC4C4",
+    "font_weight": 600
    }
   },
   {
-   "id": "electric_audio_out_end_core_flicker",
-   "type": "track",
-   "target": "electric_audio_out_end_core",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.16,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.171
-    },
-    {
-     "t": 0.12,
-     "value": 0.95
-    },
-    {
-     "t": 0.2,
-     "value": 0.332
-    },
-    {
-     "t": 0.29,
-     "value": 0.902
-    },
-    {
-     "t": 0.43,
-     "value": 0.209
-    },
-    {
-     "t": 0.56,
-     "value": 0.95
-    },
-    {
-     "t": 0.7,
-     "value": 0.475
-    },
-    {
-     "t": 0.85,
-     "value": 0.171
-    },
-    {
-     "t": 1,
-     "value": 0.171
-    }
-   ]
-  },
-  {
-   "id": "electric_audio_out_end_core_electric",
-   "type": "track",
-   "target": "electric_audio_out_end_core",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.16,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-4 -16,4 -21,-3 -28,0"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-1 -16,1 -21,0 -28,0"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-5 -16,5 -21,-4 -28,0"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-2 -16,2 -21,-1 -28,0"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,4 0,8 -4,4 0,0 -7,0 -11,-3 -16,3 -21,-2 -28,0"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_sleeve",
+   "id": "local_play_label",
    "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
    "anchor": {
     "component": "local_play",
-    "slot": "start"
+    "slot": "midpoint"
    },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 9,
-    "opacity": 0.22
-   }
-  },
-  {
-   "id": "electric_local_play_start_sleeve_flicker",
-   "type": "track",
-   "target": "electric_local_play_start_sleeve",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.04
-    },
-    {
-     "t": 0.12,
-     "value": 0.22
-    },
-    {
-     "t": 0.2,
-     "value": 0.077
-    },
-    {
-     "t": 0.29,
-     "value": 0.209
-    },
-    {
-     "t": 0.43,
-     "value": 0.048
-    },
-    {
-     "t": 0.56,
-     "value": 0.22
-    },
-    {
-     "t": 0.7,
-     "value": 0.11
-    },
-    {
-     "t": 0.85,
-     "value": 0.04
-    },
-    {
-     "t": 1,
-     "value": 0.04
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_sleeve_electric",
-   "type": "track",
-   "target": "electric_local_play_start_sleeve",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_current",
-   "type": "overlay",
-   "shape": "polyline",
+   "shape": "text",
+   "values": [
+    "bypass cloud"
+   ],
    "visible": true,
-   "anchor": {
-    "component": "local_play",
-    "slot": "start"
-   },
    "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 3.8,
-    "opacity": 1
+    "font_size": 23,
+    "fill": "#B67DFF",
+    "font_weight": 600
    }
-  },
-  {
-   "id": "electric_local_play_start_current_flicker",
-   "type": "track",
-   "target": "electric_local_play_start_current",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.18
-    },
-    {
-     "t": 0.12,
-     "value": 1
-    },
-    {
-     "t": 0.2,
-     "value": 0.35
-    },
-    {
-     "t": 0.29,
-     "value": 0.95
-    },
-    {
-     "t": 0.43,
-     "value": 0.22
-    },
-    {
-     "t": 0.56,
-     "value": 1
-    },
-    {
-     "t": 0.7,
-     "value": 0.5
-    },
-    {
-     "t": 0.85,
-     "value": 0.18
-    },
-    {
-     "t": 1,
-     "value": 0.18
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_current_electric",
-   "type": "track",
-   "target": "electric_local_play_start_current",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_core",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "local_play",
-    "slot": "start"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      -4,
-      4
-     ],
-     [
-      -8,
-      0
-     ],
-     [
-      -4,
-      -4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      -7
-     ],
-     [
-      3,
-      -11
-     ],
-     [
-      -3,
-      -16
-     ],
-     [
-      2,
-      -21
-     ],
-     [
-      0,
-      -28
-     ]
-    ],
-    "stroke": "#E8FFF3",
-    "stroke_width": 1.2,
-    "opacity": 0.95
-   }
-  },
-  {
-   "id": "electric_local_play_start_core_flicker",
-   "type": "track",
-   "target": "electric_local_play_start_core",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.171
-    },
-    {
-     "t": 0.12,
-     "value": 0.95
-    },
-    {
-     "t": 0.2,
-     "value": 0.332
-    },
-    {
-     "t": 0.29,
-     "value": 0.902
-    },
-    {
-     "t": 0.43,
-     "value": 0.209
-    },
-    {
-     "t": 0.56,
-     "value": 0.95
-    },
-    {
-     "t": 0.7,
-     "value": 0.475
-    },
-    {
-     "t": 0.85,
-     "value": 0.171
-    },
-    {
-     "t": 1,
-     "value": 0.171
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_start_core_electric",
-   "type": "track",
-   "target": "electric_local_play_start_core",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.48,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 4,-11 -4,-16 3,-21 0,-28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 1,-11 -1,-16 0,-21 0,-28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 5,-11 -5,-16 4,-21 0,-28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 2,-11 -2,-16 1,-21 0,-28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 -4,4 -8,0 -4,-4 0,0 0,-7 3,-11 -3,-16 2,-21 0,-28"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_sleeve",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "local_play",
-    "slot": "end"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 9,
-    "opacity": 0.22
-   }
-  },
-  {
-   "id": "electric_local_play_end_sleeve_flicker",
-   "type": "track",
-   "target": "electric_local_play_end_sleeve",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.04
-    },
-    {
-     "t": 0.12,
-     "value": 0.22
-    },
-    {
-     "t": 0.2,
-     "value": 0.077
-    },
-    {
-     "t": 0.29,
-     "value": 0.209
-    },
-    {
-     "t": 0.43,
-     "value": 0.048
-    },
-    {
-     "t": 0.56,
-     "value": 0.22
-    },
-    {
-     "t": 0.7,
-     "value": 0.11
-    },
-    {
-     "t": 0.85,
-     "value": 0.04
-    },
-    {
-     "t": 1,
-     "value": 0.04
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_sleeve_electric",
-   "type": "track",
-   "target": "electric_local_play_end_sleeve",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_current",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "local_play",
-    "slot": "end"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#52FFA8",
-    "stroke_width": 3.8,
-    "opacity": 1
-   }
-  },
-  {
-   "id": "electric_local_play_end_current_flicker",
-   "type": "track",
-   "target": "electric_local_play_end_current",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.18
-    },
-    {
-     "t": 0.12,
-     "value": 1
-    },
-    {
-     "t": 0.2,
-     "value": 0.35
-    },
-    {
-     "t": 0.29,
-     "value": 0.95
-    },
-    {
-     "t": 0.43,
-     "value": 0.22
-    },
-    {
-     "t": 0.56,
-     "value": 1
-    },
-    {
-     "t": 0.7,
-     "value": 0.5
-    },
-    {
-     "t": 0.85,
-     "value": 0.18
-    },
-    {
-     "t": 1,
-     "value": 0.18
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_current_electric",
-   "type": "track",
-   "target": "electric_local_play_end_current",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_core",
-   "type": "overlay",
-   "shape": "polyline",
-   "visible": true,
-   "anchor": {
-    "component": "local_play",
-    "slot": "end"
-   },
-   "attrs": {
-    "points": [
-     [
-      0,
-      0
-     ],
-     [
-      4,
-      -4
-     ],
-     [
-      8,
-      0
-     ],
-     [
-      4,
-      4
-     ],
-     [
-      0,
-      0
-     ],
-     [
-      0,
-      7
-     ],
-     [
-      -3,
-      11
-     ],
-     [
-      3,
-      16
-     ],
-     [
-      -2,
-      21
-     ],
-     [
-      0,
-      28
-     ]
-    ],
-    "stroke": "#E8FFF3",
-    "stroke_width": 1.2,
-    "opacity": 0.95
-   }
-  },
-  {
-   "id": "electric_local_play_end_core_flicker",
-   "type": "track",
-   "target": "electric_local_play_end_core",
-   "attribute": "opacity",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": 0.171
-    },
-    {
-     "t": 0.12,
-     "value": 0.95
-    },
-    {
-     "t": 0.2,
-     "value": 0.332
-    },
-    {
-     "t": 0.29,
-     "value": 0.902
-    },
-    {
-     "t": 0.43,
-     "value": 0.209
-    },
-    {
-     "t": 0.56,
-     "value": 0.95
-    },
-    {
-     "t": 0.7,
-     "value": 0.475
-    },
-    {
-     "t": 0.85,
-     "value": 0.171
-    },
-    {
-     "t": 1,
-     "value": 0.171
-    }
-   ]
-  },
-  {
-   "id": "electric_local_play_end_core_electric",
-   "type": "track",
-   "target": "electric_local_play_end_core",
-   "attribute": "points",
-   "duration": 1.6,
-   "phase": 0.8,
-   "keyframes": [
-    {
-     "t": 0,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 0.12,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.2,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.29,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -4,11 4,16 -3,21 0,28"
-    },
-    {
-     "t": 0.43,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -1,11 1,16 0,21 0,28"
-    },
-    {
-     "t": 0.56,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -5,11 5,16 -4,21 0,28"
-    },
-    {
-     "t": 0.7,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -2,11 2,16 -1,21 0,28"
-    },
-    {
-     "t": 0.85,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    },
-    {
-     "t": 1,
-     "value": "0,0 4,-4 8,0 4,4 0,0 0,7 -3,11 3,16 -2,21 0,28"
-    }
-   ]
   },
   {
    "id": "release_glow",
