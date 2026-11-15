@@ -1,7 +1,7 @@
 """One training round as a LangGraph graph: converse, judge, critic, researcher, proposer, gate, finish.
 
-The contract is docs/specs/graph.md. The judge and gate are stand-ins until stage 2 replaces them
-through `RoundDeps`.
+The contract is docs/specs/graph.md. With `RoundDeps.judge_llm` set the real judge runs; without
+it the stub does. The gate is a stand-in until stage 2 replaces it through `RoundDeps`.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from loop.errors import PolicyError
 from loop.llm import ChatClient
 from loop.policy import Policy, load_policy
 from loop.runner import Failure, run_batch
+from puddles.agents import judge as judge_agent
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import Memory
@@ -64,6 +65,9 @@ class RoundDeps:
     root: Path
     judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
+    judge_llm: Optional[LLM] = None  # set: the real judge runs on this model, and `judge` is not called
+    judge_version: str = ""
+    critic_conversations: int = judge_agent.CRITIC_CONVERSATIONS  # the lowest-scoring n go to the critic
 
 
 class RoundState(TypedDict, total=False):
@@ -75,6 +79,7 @@ class RoundState(TypedDict, total=False):
     records: list[ConversationRecord]
     failures: list[Failure]
     scored: list[ScoredConversation]
+    unscored: list[str]
     result: RoundResult
     gate: Optional[GateOutcome]
     event: RoundEvent
@@ -100,8 +105,16 @@ def build_round_graph(deps: RoundDeps):
 
     def judge(state: RoundState) -> dict:
         records = state.get("records", [])
-        scored = deps.judge(records)
-        update: dict = {"scored": scored}
+        update: dict
+        if deps.judge_llm is None:
+            scored = deps.judge(records)
+            update = {"scored": scored}
+        else:
+            judged = judge_agent.score_conversations(records, deps.judge_llm, deps.judge_version)
+            judge_agent.save_scores(judged.scores, judge_agent.train_scores_path(root, state["round"]))
+            scored = judge_agent.select_for_critic(
+                judge_agent.scored_conversations(records, judged.scores), deps.critic_conversations)
+            update = {"scored": scored, "unscored": judged.unscored}
         if not scored:
             update["result"] = RoundResult(
                 round=state["round"], outcome="no_pattern", base_policy_path=state["policy_path"],
@@ -141,6 +154,7 @@ def build_round_graph(deps: RoundDeps):
         return {"gate": deps.gate(state["result"])}
 
     def finish(state: RoundState) -> dict:
+        state["result"].unscored = list(state.get("unscored", []))
         event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root)
         return {"event": event}
 
@@ -186,5 +200,6 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
                                           "seed": seed, "gate": None})
         mlflow.set_tag("outcome", state["event"].outcome)
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
-                            "conversations_failed": len(state.get("failures", []))})
+                            "conversations_failed": len(state.get("failures", [])),
+                            "conversations_unscored": len(state.get("unscored", []))})
     return state

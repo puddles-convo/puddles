@@ -5,7 +5,7 @@
 
 --fake uses scripted chat clients, a scripted model, a fake search and in-process memory: no keys,
 no network. Without it the clients come from HELPER_*, SIMUSER_*, OPENAI_API_KEY,
-PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY.
+PUDDLES_AGENT_MODEL, PUDDLES_JUDGE_MODEL, EXA_API_KEY and PAST_API_KEY.
 """
 from __future__ import annotations
 
@@ -24,22 +24,30 @@ from loop.llm import ChatClient, FakeClient
 from loop.runner import load_scenarios
 from loop.run_batch import _fake_helper, _fake_user
 from puddles import tracing
+from puddles.agents import judge
 from puddles.decision_log import DecisionLog
 from puddles.graph import RoundDeps, check_policy_file, run_round
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import FakeMemory, Memory, PastError
 from puddles.round import RoundResult, policy_in_force, stand_in_gate
-from schemas import CriticOutput, ProposerOutput, ResearcherOutput
+from schemas import CriticOutput, JudgeOutput, ProposerOutput, ResearcherOutput
 
 T = TypeVar("T", bound=BaseModel)
 
 FAKE_URL = "https://counselling.example.org/skills/{slug}"
+FAKE_JUDGE_VERSION = "judge-fake"
 
 
 class FakeLLM:
     """A scripted model whose answers pass each agent's checks, worked out from the prompt."""
 
     def structured(self, system: str, user: str, schema: type[T]) -> T:
+        if schema is JudgeOutput:
+            helper_turns = len(re.findall(r"^\d+\. helper: ", user, re.M))
+            return schema.model_validate({
+                "empathy": 3, "relevance": 3, "emotion_before": 3, "emotion_after": 3,
+                "strategies": ["Question"] * helper_turns,
+                "note": "Scripted judge: fixed scores, the conversation was not read."})
         if schema is CriticOutput:
             ids = re.findall(r'<conversation id="([^"]+)"', user)
             return schema.model_validate({
@@ -113,10 +121,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         helper_client: ChatClient
         user_client: ChatClient
         llm: LLM
+        judge_llm: LLM
         memory: Memory
         if args.fake:
             helper_client, user_client = FakeClient(_fake_helper), FakeClient(_fake_user)
             llm, search, memory = FakeLLM(), fake_search, FakeMemory()
+            judge_llm, judge_version = llm, FAKE_JUDGE_VERSION
         else:
             from loop.llm import client_from_env
             from puddles import exa
@@ -127,6 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not os.environ.get("EXA_API_KEY"):
                 raise ConfigError("environment variable EXA_API_KEY is not set")
             llm, search, memory = OpenAILLM(), exa.search, PastClient()
+            judge_llm, judge_version = judge.llm_from_env()
     except (ConfigError, PolicyError, OSError, UnicodeDecodeError, ValidationError, ValueError,
             AgentFailed, PastError, OpenAIError) as exc:
         detail = str(exc)
@@ -141,7 +152,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     tracing.setup(tracking_uri=args.mlflow)
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
-                     memory=memory, log=DecisionLog(root), root=root, gate=gate)
+                     memory=memory, log=DecisionLog(root), root=root, gate=gate,
+                     judge_llm=judge_llm, judge_version=judge_version)
     state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
                       seed=args.seed)
     event = state["event"]

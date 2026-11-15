@@ -48,6 +48,7 @@ class RoundResult:
     edit: Optional[PolicyEdit] = None
     candidate_path: Optional[Path] = None
     refs: dict[str, RecordRef] = field(default_factory=dict)
+    unscored: list[str] = field(default_factory=list)  # conversations the judge failed on twice
 
 
 def policy_in_force(root: Path, fallback: Path) -> Path:
@@ -179,6 +180,13 @@ def retry_pending(log: DecisionLog, memory: Memory, root: Path) -> None:
                     copy_to_memory(record, ref, event.round, memory, log, root, attempt=event.attempt + 1)
 
 
+def unscored_note(unscored: list[str]) -> str:
+    """The count of unscored conversations, for the round's log entry."""
+    n = len(unscored)
+    return (f"The judge left {n} conversation{'' if n == 1 else 's'} unscored: "
+            f"{', '.join(unscored)}.")
+
+
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
                  root: Path) -> RoundEvent:
     base_text = result.base_policy_path.read_text()
@@ -199,6 +207,8 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
             policy.new, policy.new_sha256, policy.in_force = candidate.version, sha256_text(text), candidate.version
         else:
             policy.new, policy.new_sha256 = candidate.version, sha256_text(result.candidate_path.read_text())
+    if result.unscored:
+        reason = f"{reason or outcome} {unscored_note(result.unscored)}"
     p = result.pattern
     event = RoundEvent(
         round=result.round, outcome=outcome, records=result.refs, policy=policy, reason=reason or outcome,

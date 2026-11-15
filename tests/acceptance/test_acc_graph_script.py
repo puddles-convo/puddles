@@ -19,6 +19,7 @@ from loop.runner import load_scenarios, scenario_seed
 from puddles import graph, tracing
 from puddles import llm as agent_api
 from puddles import memory as memory_api
+from puddles.agents import judge as judge_api
 from puddles.decision_log import DecisionLog
 from puddles.memory import FakeMemory
 from schemas import ConversationRecord
@@ -36,6 +37,7 @@ def local_mlflow(tmp_path, monkeypatch, repo_root):
         for suffix in ("URL", "MODEL"):
             monkeypatch.delenv(f"{prefix}_{suffix}", raising=False)
     monkeypatch.delenv("PUDDLES_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("PUDDLES_JUDGE_MODEL", raising=False)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     monkeypatch.setenv("DO_NOT_TRACK", "1")
 
@@ -274,9 +276,16 @@ def test_without_fake_constructs_documented_dependencies(tmp_path, capsys, monke
         calls.append("PastClient")
         return memory
 
+    judge_llm = ScriptedLLM()
+
+    def judge_from_env():
+        calls.append("judge")
+        return judge_llm, "judge-acceptance"
+
     def run_round(deps, **kwargs):
         assert deps.helper_client is helper and deps.user_client is user
         assert deps.llm is llm and deps.memory is memory
+        assert deps.judge_llm is judge_llm and deps.judge_version == "judge-acceptance"
         assert deps.search(probe) == expected
         return event_state()
 
@@ -284,10 +293,11 @@ def test_without_fake_constructs_documented_dependencies(tmp_path, capsys, monke
     with patched_script(monkeypatch, [
         (chat_api, "client_from_env", client), (agent_api, "OpenAILLM", agent),
         (exa, "search", search), (memory_api, "PastClient", past),
+        (judge_api, "llm_from_env", judge_from_env),
         (graph, "run_round", run_round),
     ]):
         assert script.main(["--root", str(tmp_path / "root"), "--mlflow", tracking_uri(tmp_path)]) == 0
-    assert sorted(calls) == sorted(["HELPER", "SIMUSER", "OpenAILLM", "PastClient"])
+    assert sorted(calls) == sorted(["HELPER", "SIMUSER", "OpenAILLM", "PastClient", "judge"])
     assert search.calls == [probe]
     assert_printed(capsys, event_state()["event"])
 

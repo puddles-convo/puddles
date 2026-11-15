@@ -26,10 +26,10 @@ This plan was reviewed against the code by a second model on 14 November and cor
 | Critic, researcher, proposer | `puddles/agents/` | Built, tested offline with a scripted model. |
 | past.dev memory for the training agents, record files, decision log, policy edits | `puddles/memory.py`, `records.py`, `decision_log.py`, `policy.py` | Built, tested offline. |
 | Steps 4 to 6 of a round, log entry, copies into memory | `puddles/round.py`, `scripts/run_round.py` | Built. Uses a stand-in gate. |
-| Judge | | Not built (issues #3, #4) |
+| Judge | `puddles/agents/judge.py`, `scripts/calibrate_judge.py` | Built, tested offline. Not calibrated or frozen (issue #4). |
 | Gatekeeper and safety cases | | Not built (issues #5, #20) |
 | Where each rule came from (`policies/<version>.meta.json`) | | Not built. The format `PolicyMeta` exists; nothing writes it. |
-| ESConv loader | | Not built (issue #2). `fixtures/scenarios.jsonl` has 5 hand-written scenarios. |
+| ESConv loader | `puddles/esconv.py` | Built. Downloads at run time; nothing is committed. `fixtures/scenarios.jsonl` has 5 hand-written scenarios. |
 | One round as a graph, with MLflow tracing | `puddles/graph.py`, `puddles/tracing.py`, `scripts/run_graph_round.py`; contract in [docs/specs/graph.md](../specs/graph.md) | Built, tested offline. `python -m scripts.run_graph_round --fake --root runs/dev` runs with no keys. The judge and the gate in it are stand-ins. |
 | Token counts, the loop command | | Not built (stages 1, 6) |
 | Crisis checker, release step, note-taker, storage for a person's notes | | Not built (stage 4) |
@@ -88,10 +88,12 @@ Do not merge the two packages tonight. The graph in stage 0 imports from both.
 | `HELPER_URL`, `HELPER_MODEL`, `HELPER_API_KEY` (optional) | Helper, through `loop.llm.client_from_env("HELPER")` |
 | `SIMUSER_URL`, `SIMUSER_MODEL`, `SIMUSER_API_KEY` (optional) | Simulated user |
 | `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL`, `PUDDLES_AGENT_TEMPERATURE` (optional) | Critic, researcher, proposer |
+| `PUDDLES_JUDGE_MODEL` | Judge. A dated snapshot, not an alias. Always run at temperature 0. |
+| `ESCONV_CACHE` (optional) | Where the ESConv files are kept; default `runs/cache/esconv` |
 | `EXA_API_KEY` | Researcher |
 | `PAST_API_KEY`, `PAST_BASE_URL` (optional) | Memory |
 
-Stages 0 to 2 add `MLFLOW_TRACKING_URI` and a variable for the judge model.
+Stage 0 added `MLFLOW_TRACKING_URI`.
 
 **Use a separate past.dev project for development,** with its own `PAST_API_KEY`. The training audience name `training-agents` is fixed in `puddles/memory.py`, so a second audience in the same project is not an option without a code change.
 

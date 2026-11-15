@@ -12,15 +12,15 @@ Lanes A, C and D do not depend on each other. **Lane B needs lane A's judge and 
 
 Spec: [docs/agents/t3-judge.md](../agents/t3-judge.md).
 
-- [ ] `puddles/agents/judge.py` with the five functions. Input is `JudgeInput` (turns only). Output is `JudgeOutput`. `to_record` makes a `ScoreRecord`; code adds `conversation_id` and `judge_version`.
-- [ ] A second failed answer leaves that conversation unscored. The round counts it; it does not stop.
-- [ ] The training conversations' scores are saved to `<root>/scores/round-NN-train.jsonl`, one `ScoreRecord` per line.
-- [ ] A helper that turns a `ConversationRecord` and its `ScoreRecord` into the `ScoredConversation` the critic takes.
-- [ ] `select_for_critic(scored, n)`: the `n` lowest by (empathy + relevance) / 2, ties broken by conversation ID. The critic's spec says about ten. Today `critic.build_input` passes on whatever it is given, so without this the critic reads every conversation.
-- [ ] The judge model comes from its own variable, with the version pinned and temperature 0.
-- [ ] ESConv loader (#2): scenarios by split, and real conversations with the users' own ratings. Loaded at run time, never committed. The test split needs an explicit argument.
-- [ ] `scripts/calibrate_judge.py`: runs the judge on about 100 real ESConv conversations from the validation split and prints rank correlation and mean absolute error against the users' ratings, for empathy and for relevance. It saves the pairs of scores (conversation ID, judge score, user score; no text) to `runs/calibration/pairs.jsonl`, which the scatter plot in stage 6 reads.
-- [ ] Tune the prompt, re-run, and stop when a change no longer helps. Then freeze: write the `judge_version` and the two agreement numbers into this file.
+- [x] `puddles/agents/judge.py` with the five functions. Input is `JudgeInput` (turns only). Output is `JudgeOutput`. `to_record` makes a `ScoreRecord`; code adds `conversation_id` and `judge_version`.
+- [x] A second failed answer leaves that conversation unscored. The round counts it; it does not stop. `RoundEvent` has no field for the count, so it goes at the end of the event's `reason` ("The judge left 1 conversation unscored: ..."), into the state as `unscored`, and into MLflow as `conversations_unscored`.
+- [x] The training conversations' scores are saved to `<root>/scores/round-NN-train.jsonl`, one `ScoreRecord` per line.
+- [x] A helper that turns a `ConversationRecord` and its `ScoreRecord` into the `ScoredConversation` the critic takes (`judge.to_scored`).
+- [x] `select_for_critic(scored, n)`: the `n` lowest by (empathy + relevance) / 2, ties broken by conversation ID. The critic's spec says about ten. Today `critic.build_input` passes on whatever it is given, so without this the critic reads every conversation.
+- [x] The judge model comes from its own variable, `PUDDLES_JUDGE_MODEL`, with the version pinned and temperature 0. Code cannot tell a pinned name from an alias: set the variable to a dated snapshot. `judge_version` is built from the prompt version, a hash of the system prompt and the model name, so it changes when any of them does.
+- [x] ESConv loader (#2), `puddles/esconv.py`: scenarios by split, and real conversations with the users' own ratings. Loaded at run time into `runs/cache/esconv/`, never committed. The test split needs an explicit argument. About one row in ten has no empathy or relevance rating (21 of the 195 validation rows); those rows give a scenario but no rated conversation.
+- [x] `scripts/calibrate_judge.py` (built and tested offline; **not yet run with a real model**): runs the judge on about 100 real ESConv conversations from the validation split and prints rank correlation and mean absolute error against the users' ratings, for empathy and for relevance. It saves the pairs of scores (conversation ID, judge score, user score; no text) to `runs/calibration/pairs.jsonl`, which the scatter plot in stage 6 reads.
+- [ ] Tune the prompt, re-run, and stop when a change no longer helps. Needs a person and keys. Then freeze: write the `judge_version` and the two agreement numbers into this file.
 
 **Order of fields.** `JudgeOutput` has the scores first and `note` last. Rule 3 in the [plan README](README.md) says explanation first. Moving `note` to the top changes a shared format, so settle it on issue #1 before calibrating, not after.
 

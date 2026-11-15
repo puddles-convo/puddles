@@ -78,6 +78,9 @@ class RoundDeps:
     root: Path
     judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
+    judge_llm: LLM | None = None         # stage 2: set, the real judge runs and `judge` is not called
+    judge_version: str = ""
+    critic_conversations: int = 10       # the lowest-scoring n go to the critic
 
 class RoundState(TypedDict, total=False):
     round: int
@@ -88,6 +91,7 @@ class RoundState(TypedDict, total=False):
     records: list[ConversationRecord]
     failures: list[Failure]            # loop.runner.Failure
     scored: list[ScoredConversation]
+    unscored: list[str]                # stage 2: conversation IDs the judge failed on twice
     result: RoundResult
     gate: GateOutcome | None
     event: RoundEvent
@@ -100,7 +104,7 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
               max_turns: int = 10, seed: int | None = None) -> RoundState
 ```
 
-- `stub_judge` returns one `ScoredConversation` per record, in order: the record's `id` as `conversation_id`, its turns, `empathy=3`, `relevance=3`, and a note that says it is a stub. Stage 2 replaces it through `RoundDeps.judge`.
+- `stub_judge` returns one `ScoredConversation` per record, in order: the record's `id` as `conversation_id`, its turns, `empathy=3`, `relevance=3`, and a note that says it is a stub. Stage 2 replaced it: see "The real judge" below.
 - `stand_in_reverted(result)` is `puddles.round.stand_in_gate(result, "reverted")`. Stage 2 replaces it through `RoundDeps.gate`.
 - `check_policy_file` raises `loop.errors.PolicyError` if the file's bytes contain a carriage return, and otherwise returns `loop.policy.load_policy(path)`, which raises `PolicyError` on a malformed file, including a rule wrapped onto a second line.
 
@@ -123,6 +127,10 @@ START -> converse -> judge --(scored)--> critic --(pattern)--> researcher --(sou
 | `proposer` | `run_proposer`. |
 | `gate` | Sets `gate = deps.gate(result)`. Runs only when `result.edit` is set. A proposer that succeeds always sets it, so the "no edit" path is the path of a proposer that failed twice. |
 | `finish` | Sets `event = puddles.round.finish_round(result, state.get("gate"), deps.log, deps.memory, deps.root)`. |
+
+### The real judge (stage 2)
+
+When `deps.judge_llm` is set, the `judge` node does not call `deps.judge`. It calls `puddles.agents.judge.score_conversations(records, deps.judge_llm, deps.judge_version)`, saves the scores to `<root>/scores/round-NN-train.jsonl` (one `ScoreRecord` per line), and sets `scored` to `select_for_critic(...)`: the `deps.critic_conversations` lowest by (empathy + relevance) / 2, lowest first, ties by conversation ID. It sets `unscored` to the IDs of the conversations the judge failed on twice. `finish` puts that count at the end of `event.reason`, and `run_round` logs the metric `conversations_unscored`. With `deps.judge_llm` left as `None` nothing changes: the stub runs, no scores file is written and `unscored` is not set.
 
 ### When an agent fails twice
 
@@ -177,12 +185,12 @@ python -m scripts.run_graph_round --fake --root runs/dev
 | `--max-turns` | `10` | |
 | `--seed` | none | |
 | `--gate` | `reverted` | `kept` or `reverted`: what the stand-in gate decides |
-| `--fake` | off | Scripted chat clients, a scripted model, a fake search and `FakeMemory`. No keys, no network. |
+| `--fake` | off | Scripted chat clients, a scripted model, a fake search and `FakeMemory`. No keys, no network. The scripted model also answers as the judge, so the real judge code runs. |
 | `--mlflow` | none | Tracking address, passed to `tracing.setup` |
 
 - It calls `tracing.setup`, runs one round with `run_round`, and prints one line: `round N: <outcome>. <reason>`.
 - With `--fake` on a root with no log, the round reaches the gate, so the outcome is `kept` or `reverted` as `--gate` says. The chat clients speak the same scripted lines as `python -m loop.run_batch --fake`. A second `--fake` run on the same root also finishes, as round 2; its outcome may be any of the four.
-- Without `--fake` it builds `loop.llm.client_from_env("HELPER")`, `client_from_env("SIMUSER")`, `puddles.llm.OpenAILLM()`, `puddles.exa.search` and `puddles.memory.PastClient()`. It checks that `EXA_API_KEY` is set before the round starts, because the search would otherwise fail only in the middle of a round; a missing key is missing configuration.
+- Without `--fake` it builds `loop.llm.client_from_env("HELPER")`, `client_from_env("SIMUSER")`, `puddles.llm.OpenAILLM()`, `puddles.exa.search`, `puddles.memory.PastClient()` and, for the judge, `puddles.agents.judge.llm_from_env()`, which needs `PUDDLES_JUDGE_MODEL`. It checks that `EXA_API_KEY` is set before the round starts, because the search would otherwise fail only in the middle of a round; a missing key is missing configuration.
 - Exit code 0 when a round finished, whatever its outcome. Exit code 2, with one line on standard error and nothing in the log, for a policy or scenario file that cannot be read or is malformed, and for missing configuration.
 
 ## 5. Tests
