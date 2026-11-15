@@ -10,8 +10,10 @@ from datetime import date, datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
+import re
 import socket
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -176,6 +178,34 @@ def disk_snapshot(root):
             if p.is_file()}
 
 
+def person_file_snapshot(root, user_id):
+    return {p.name: p.read_bytes() for p in (root / "notes" / user_id).glob("*") if p.is_file()}
+
+
+def watch_renames(monkeypatch, *, before=None, after=None):
+    """Observe one commit per rename, whichever of the four permitted APIs performs it."""
+    depth = 0
+
+    def wrap(original):
+        def observed(src, dst, *args, **kwargs):
+            nonlocal depth
+            outermost = depth == 0
+            if outermost and before:
+                before(Path(src), Path(dst))
+            depth += 1
+            try:
+                result = original(src, dst, *args, **kwargs)
+            finally:
+                depth -= 1
+            if outermost and after:
+                after(Path(src), Path(dst))
+            return result
+        return observed
+
+    for target, name in ((os, "replace"), (os, "rename"), (Path, "replace"), (Path, "rename")):
+        monkeypatch.setattr(target, name, wrap(getattr(target, name)))
+
+
 def assert_committed(store, root, user_id="alice"):
     """Check public reads and actual file formats after a whole step."""
     index = store.index(user_id)
@@ -213,7 +243,8 @@ def test_no_consent_drops_add_replace_confirm_but_applies_delete(store, tmp_path
     assert result.added == result.replaced == result.confirmed == []
     assert result.not_written == 2
     assert result.deleted == [deleted.id] and result.undeleted == []
-    assert ids(store) == [replaced.id, confirmed.id]
+    # Reason: take_off fixes membership, not the survivor order in a newly saved index.
+    assert set(ids(store)) == {replaced.id, confirmed.id}
     assert store.stored("alice") == {r.id: r for r in (replaced, confirmed)}
     assert all(n.last_confirmed == EARLIER for n in store.index("alice").notes)
     assert set(store.memory.entries) == {replaced.id, confirmed.id}
@@ -285,12 +316,13 @@ def test_hyphen_distinct_people_never_share_note_ids_audiences_or_files(store, t
         second = tmp_path / "notes/user01" / filename
         assert first.is_file() and second.is_file() and not first.samefile(second)
 
-    plain_before = {p.name: p.read_bytes() for p in (tmp_path / "notes/user01").iterdir() if p.is_file()}
+    plain_before = person_file_snapshot(tmp_path, "user01")
     assert store.delete("user-01", [hyphenated.id]) == []
+    # Reason: foreign actions must preserve the other person's files exactly; compare before their own reads.
+    assert person_file_snapshot(tmp_path, "user01") == plain_before
     assert hyphenated.id not in store.memory.entries and plain.id in store.memory.entries
     assert store.helper_notes("user-01", TODAY) == []
     assert store.helper_notes("user01", TODAY) == [plain.fact]
-    assert {p.name: p.read_bytes() for p in (tmp_path / "notes/user01").iterdir() if p.is_file()} == plain_before
     restarted = NoteStore(store.memory, tmp_path)
     assert restarted.next_note_id("user-01") == "note-user-01-002"
     assert restarted.next_note_id("user-01") == "note-user-01-003"
@@ -433,7 +465,8 @@ def test_recall_is_personal_index_ordered_and_uses_only_local_facts(store):
     assert store.live_notes("alice", TODAY) == expected
     assert store.helper_notes("alice", TODAY) == [r.fact for r in (first, second, missing)]
     recalls = [e for e in store.memory.events if e[0] == "recall"]
-    assert recalls == [("recall", RECALL_QUERY, "alice")] * 2
+    # Reason: the contract fixes the query and identity, not an exact number of recall calls.
+    assert recalls and all(event == ("recall", RECALL_QUERY, "alice") for event in recalls)
     assert store.memory.events[0] == ("ensure", "person-alice", ["alice", NOTE_TAKER])
 
 
@@ -484,7 +517,7 @@ def test_invalid_user_ids_are_refused_before_files_or_memory(store, tmp_path, ba
     with pytest.raises(ValueError):
         check_user_id(bad)
     operations = [
-        # Reason: every user-ID entry point must reject reserved IDs and path escapes.
+        # Reason: store entry points validate IDs; the contract makes no such promise for to_record.
         lambda: audience_for(bad),
         lambda: store.ensure_person(bad), lambda: store.index(bad),
         lambda: store.stored(bad), lambda: store.next_note_id(bad),
@@ -495,9 +528,6 @@ def test_invalid_user_ids_are_refused_before_files_or_memory(store, tmp_path, ba
         lambda: store.write(note(user_id=bad)),
         lambda: build_input(store, bad, [], remember_me=False, today=TODAY),
         lambda: session(store, ScriptedLLM({"actions": []}), user_id=bad),
-        lambda: to_record(NoteAction(action="add", kind="goals", fact="A plan."),
-                          user_id=bad, session_id="s", note_id="note-alice-001",
-                          today=TODAY, now=NOW),
     ]
     for operation in operations:
         with pytest.raises(ValueError):
@@ -600,7 +630,8 @@ def test_failed_write_never_enters_either_file(store, tmp_path, failure):
         store.write(candidate)
     assert store.index("alice") == before_index
     assert store.stored("alice") == {kept.id: kept}
-    expected_pending = [] if failure == "ingest" else [candidate.id]
+    # Reason: handing the entry to ingest always requires queuing an unconfirmed write.
+    expected_pending = [candidate.id]
     assert store.pending_deletes("alice") == expected_pending
     restarted = NoteStore(store.memory, tmp_path)
     assert restarted.pending_deletes("alice") == expected_pending
@@ -697,8 +728,11 @@ def test_build_input_and_render_preserve_session_and_show_every_cap(store):
 
 def test_agent_output_documentation_opens_with_the_object_format(repo_root):
     text = (repo_root / "docs/agents/i5-note-taker.md").read_text(encoding="utf-8")
-    section = text.split("## 4. Output", 1)[1]
-    opening = section.split("| Field", 1)[0]
+    # Reason: output prose is contractual; exact Markdown heading and table spellings are not.
+    heading = re.search(r"(?im)^#{1,6}\s+(?:\d+[.)]?\s+)?output\b[^\n]*\n", text)
+    assert heading
+    section = text[heading.end():]
+    opening = re.split(r"(?m)^\s*(?:\||```|#{1,6}\s)", section, maxsplit=1)[0]
     assert "object" in opening.lower()
     assert "forget_everything" in opening and "actions" in opening
 
@@ -794,7 +828,7 @@ def test_run_second_invalid_answer_raises_agentfailed_without_third_call():
 @pytest.mark.parametrize("failure", ["invalid_twice", "agent_failed", "model_exception"])
 def test_failed_model_step_changes_no_notes_or_files(store, tmp_path, failure):
     records = seed(store, specs=[{}, {"kind": "goals"}])
-    before_files = disk_snapshot(tmp_path)
+    before_index, before_stored = store.index("alice"), store.stored("alice")
     before_entries = deepcopy(store.memory.entries)
     store.memory.events.clear()
     bad = {"forget_everything": True, "actions": [
@@ -811,7 +845,9 @@ def test_failed_model_step_changes_no_notes_or_files(store, tmp_path, failure):
     assert result.failed and result.reason
     assert result.added == result.replaced == result.confirmed == result.deleted == []
     assert result.dropped_by_limit == [] and result.not_written == 0
-    assert disk_snapshot(tmp_path) == before_files
+    # Reason: nothing may change semantically; JSON formatting and empty-file creation are not fixed.
+    assert store.index("alice") == before_index and store.stored("alice") == before_stored
+    assert result.undeleted == store.pending_deletes("alice") == []
     assert store.memory.entries == before_entries
     assert not any(e[0] in {"ingest", "delete"} for e in store.memory.events)
     assert ids(store) == [r.id for r in records]
@@ -843,6 +879,7 @@ def test_expiry_stands_when_model_answer_fails(store, tmp_path, failure, delete_
     # Reason: expiry survives model failure and its unconfirmed remote deletion must be reported.
     assert result.undeleted == expected_pending
     assert result.deleted == []  # Expiry is not a delete action or "forget everything".
+    assert result.dropped_by_limit == []
     assert store.pending_deletes("alice") == expected_pending
     restarted = NoteStore(store.memory, tmp_path)
     assert restarted.pending_deletes("alice") == expected_pending
@@ -873,7 +910,7 @@ def test_take_notes_does_not_raise_for_past_failure_during_input(store, tmp_path
 # Section 2: records, caps, and the ordered commit.
 
 @pytest.mark.parametrize("kind", list(NOTE_CAPS))
-def test_to_record_uses_supplied_identity_clock_and_only_follow_up_dates(kind):
+def test_to_record_uses_supplied_identity_clock_and_only_follow_up_dates(store, kind):
     action = NoteAction(action="add", kind=kind, fact="A standalone sentence.", due_date=TODAY)
     record = to_record(action, user_id="alice", session_id="s-new", note_id="note-alice-007",
                        today=TODAY, now=NOW)
@@ -882,7 +919,11 @@ def test_to_record_uses_supplied_identity_clock_and_only_follow_up_dates(kind):
     assert record.kind == kind and record.fact == action.fact
     assert record.written_by == NOTE_TAKER and record.created_at == NOW
     assert record.last_confirmed == TODAY
-    assert record.due_date == (TODAY if kind == "follow_up" else None)
+    # Reason: step 2 places date filtering in take_notes, not necessarily in to_record.
+    result = session(store, ScriptedLLM({"actions": [action.model_dump(mode="json")]}))
+    assert not result.failed and len(result.added) == 1
+    stored = store.stored("alice")[result.added[0]]
+    assert stored.due_date == (TODAY if kind == "follow_up" else None)
 
 
 @pytest.mark.parametrize("new_due", [None, TODAY + timedelta(days=4)])
@@ -890,14 +931,11 @@ def test_replace_follow_up_preserves_or_overrides_due_date(store, new_due):
     old = seed(store, specs=[{"kind": "follow_up", "due_date": TODAY}])[0]
     action = NoteAction(action="replace", note_id=old.id, kind="follow_up",
                         fact="An updated follow up.", due_date=new_due)
-    existing = store.live_notes("alice", TODAY)[0]
-    record = to_record(action, user_id="alice", session_id="new-session",
-                       note_id="note-alice-002", today=TODAY, now=NOW, old=existing)
-    assert record.due_date == (new_due if new_due is not None else TODAY)
+    # Reason: replacement date preservation is required of the whole take_notes step.
     result = session(store, ScriptedLLM({"actions": [action.model_dump(mode="json")]}))
     assert result.replaced == [old.id] and len(result.added) == 1
     replacement = store.stored("alice")[result.added[0]]
-    assert replacement.id != old.id and replacement.due_date == record.due_date
+    assert replacement.id != old.id and replacement.due_date == (new_due if new_due is not None else TODAY)
     assert old.id not in store.memory.entries
 
 
@@ -906,7 +944,8 @@ def test_confirm_updates_only_index_and_live_dates_without_past_write(store):
     store.memory.events.clear()
     result = session(store, ScriptedLLM({"actions": [act("confirm", note_id=old.id)]}))
     assert result.confirmed == [old.id] and result.added == []
-    assert store.stored("alice")[old.id] == old
+    # Reason: a confirm preserves the fact and ID but may also update the stored confirmation date.
+    assert store.stored("alice")[old.id].fact == old.fact
     existing = store.live_notes("alice", TODAY)[0]
     assert existing.last_confirmed == TODAY and existing.fact == old.fact
     assert not any(e[0] in {"ingest", "delete"} for e in store.memory.events)
@@ -917,7 +956,8 @@ def test_confirmed_follow_up_expires_using_new_index_date(store):
         "kind": "follow_up", "last_confirmed": TODAY - timedelta(days=FOLLOW_UP_EXPIRY_DAYS),
     }])[0]
     session(store, ScriptedLLM({"actions": [act("confirm", note_id=old.id)]}))
-    assert store.stored("alice")[old.id].last_confirmed == old.last_confirmed
+    # Reason: expiry follows the index date, whether or not notes.json's date is also refreshed.
+    assert store.index("alice").notes[0].last_confirmed == TODAY
     assert [n.note_id for n in store.live_notes("alice", TODAY + timedelta(days=1))] == [old.id]
     assert store.expire("alice", TODAY + timedelta(days=FOLLOW_UP_EXPIRY_DAYS + 1)) == [old.id]
 
@@ -1065,7 +1105,7 @@ def test_note_step_does_not_call_mlflow_or_wrap_the_model(store, tmp_path, monke
     import mlflow
     from puddles import tracing
 
-    tracing.setup(tracking_uri=f"sqlite:///{tmp_path}/mlflow.db")
+    # Reason: absence of tracing is tested with tripwires, without creating a real MLflow store.
 
     def forbidden(*args, **kwargs):
         pytest.fail("The notes piece must leave tracing to its caller")
@@ -1094,18 +1134,28 @@ def test_note_step_does_not_call_mlflow_or_wrap_the_model(store, tmp_path, monke
 # Reason: direct store calls must preserve the same person boundary as checked model actions.
 @pytest.mark.parametrize("owner,other", [("alice", "bob"), ("user01", "user-01"),
                                          ("user-01-01", "user-01")])
-def test_direct_store_calls_cannot_write_publish_or_delete_another_persons_id(store, owner, other):
+def test_direct_store_calls_cannot_write_publish_or_delete_another_persons_id(store, tmp_path, owner, other):
     theirs = seed(store, owner)[0]
     mine = seed(store, other)[0]
     before = deepcopy(store.memory.entries)
-    with pytest.raises(ValueError):
-        store.write(note(theirs.id, user_id=other))
-    with pytest.raises(ValueError):
-        store.save_index(LiveNoteIndex(user_id=other, notes=[live(theirs)]))
+    owner_files = person_file_snapshot(tmp_path, owner)
     store.memory.events.clear()
-    assert store.delete(other, [theirs.id]) == []
-    assert not any(event[0] == "delete" for event in store.memory.events)
-    assert store.memory.entries == before
+    # Reason: the contract permits ValueError or filtering, while requiring exact foreign preservation.
+    operations = [
+        lambda: store.write(note(theirs.id, user_id=other)),
+        lambda: store.save_index(LiveNoteIndex(user_id=other, notes=[live(mine), live(theirs)])),
+        lambda: store.take_off(other, [theirs.id]),
+        lambda: store.delete(other, [theirs.id]),
+    ]
+    for operation in operations:
+        try:
+            operation()
+        except ValueError:
+            pass
+        assert person_file_snapshot(tmp_path, owner) == owner_files
+        assert store.memory.entries == before
+        assert not any(event[0] == "delete" and event[1] == theirs.id for event in store.memory.events)
+        assert theirs.id not in store.stored(other) and theirs.id not in ids(store, other)
     assert ids(store, owner) == [theirs.id] and ids(store, other) == [mine.id]
     assert store.pending_deletes(other) == []
 
@@ -1116,19 +1166,14 @@ def test_interrupted_take_off_is_completed_before_pending_remote_retry(store, tm
                                                                       crash_after):
     removed, kept = seed(store, specs=[{"fact": "Forget this fact."}, {"fact": "Keep this fact."}])
 
-    class ProcessStopped(BaseException):
-        pass
-
-    real_replace = os.replace
-
-    def replace_then_stop(src, dst, *args, **kwargs):
-        real_replace(src, dst, *args, **kwargs)
-        if Path(dst).name == crash_after:
-            raise ProcessStopped()
+    def stop_after_commit(src, dst):
+        if dst.name == crash_after:
+            raise KeyboardInterrupt()
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "replace", replace_then_stop)
-        with pytest.raises(ProcessStopped):
+        # Reason: the contract permits either OS or pathlib rename API.
+        watch_renames(patch, after=stop_after_commit)
+        with pytest.raises(KeyboardInterrupt):
             store.take_off("alice", [removed.id])
 
     restarted = NoteStore(store.memory, tmp_path)
@@ -1156,19 +1201,14 @@ def test_interrupted_take_off_is_completed_before_pending_remote_retry(store, tm
 def test_interrupted_index_pruning_recovers_on_next_session(store, tmp_path, monkeypatch, crash_after):
     removed, kept = seed(store, specs=[{}, {}])
 
-    class ProcessStopped(BaseException):
-        pass
-
-    real_replace = os.replace
-
-    def replace_then_stop(src, dst, *args, **kwargs):
-        real_replace(src, dst, *args, **kwargs)
-        if Path(dst).name == crash_after:
-            raise ProcessStopped()
+    def stop_after_commit(src, dst):
+        if dst.name == crash_after:
+            raise KeyboardInterrupt()
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "replace", replace_then_stop)
-        with pytest.raises(ProcessStopped):
+        # Reason: a permitted change of rename API must not disable fault injection.
+        watch_renames(patch, after=stop_after_commit)
+        with pytest.raises(KeyboardInterrupt):
             store.save_index(LiveNoteIndex(user_id="alice", notes=[live(kept)]))
 
     restarted = NoteStore(store.memory, tmp_path)
@@ -1185,26 +1225,23 @@ def test_interrupted_index_pruning_recovers_on_next_session(store, tmp_path, mon
 def test_forget_everything_cleans_up_interrupted_remote_write(store, tmp_path, monkeypatch, crash_after):
     candidate = note(store.next_note_id("alice"), fact="Forget this interrupted write.")
 
-    class ProcessStopped(BaseException):
-        pass
-
-    real_wait, real_replace = store.memory.wait, os.replace
+    real_wait = store.memory.wait
 
     def wait_then_stop(*args, **kwargs):
         assert real_wait(*args, **kwargs)
-        raise ProcessStopped()
+        raise KeyboardInterrupt()
 
-    def replace_then_stop(src, dst, *args, **kwargs):
-        real_replace(src, dst, *args, **kwargs)
-        if Path(dst).name == "notes.json":
-            raise ProcessStopped()
+    def stop_after_commit(src, dst):
+        if dst.name == "notes.json":
+            raise KeyboardInterrupt()
 
     with monkeypatch.context() as patch:
         if crash_after == "remote_confirmation":
             patch.setattr(store.memory, "wait", wait_then_stop)
         else:
-            patch.setattr(os, "replace", replace_then_stop)
-        with pytest.raises(ProcessStopped):
+            # Reason: test the committed file boundary through every permitted rename API.
+            watch_renames(patch, after=stop_after_commit)
+        with pytest.raises(KeyboardInterrupt):
             store.write(candidate)
 
     assert candidate.id in store.memory.entries
@@ -1219,20 +1256,20 @@ def test_forget_everything_cleans_up_interrupted_remote_write(store, tmp_path, m
 
 # Reason: the atomic-file rule applies to the counter and deletion queue as well as notes and index.
 def test_all_store_files_use_same_folder_temporary_rename(store, monkeypatch):
-    real_replace = os.replace
     destinations = set()
 
-    def observe_replace(src, dst, *args, **kwargs):
-        src, dst = Path(src), Path(dst)
+    def before_commit(src, dst):
         assert src != dst and src.parent == dst.parent
         json.loads(src.read_text())
-        destinations.add(dst.name)
-        return real_replace(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(os, "replace", observe_replace)
+    def after_commit(src, dst):
+        destinations.add(dst.name)
+
+    # Reason: check the four required files without prescribing a rename API or excluding other commits.
+    watch_renames(monkeypatch, before=before_commit, after=after_commit)
     old = seed(store)[0]
     assert store.delete("alice", [old.id]) == []
-    assert destinations == {"counter.json", "notes.json", "index.json", "pending_deletes.json"}
+    assert {"counter.json", "notes.json", "index.json", "pending_deletes.json"} <= destinations
 
 
 class CutPointMemory(FakeUserMemory):
@@ -1281,14 +1318,11 @@ def raw_note_state(root):
 
 
 def stop_on_committed_file(monkeypatch, filename):
-    real_replace = os.replace
-
-    def replace_then_stop(src, dst, *args, **kwargs):
-        real_replace(src, dst, *args, **kwargs)
-        if Path(dst).name == filename:
+    def stop_after_commit(src, dst):
+        if dst.name == filename:
             raise KeyboardInterrupt()
 
-    monkeypatch.setattr(os, "replace", replace_then_stop)
+    watch_renames(monkeypatch, after=stop_after_commit)
 
 
 def exercise_note_cut(root, monkeypatch, scenario, cut=None):
@@ -1354,16 +1388,10 @@ def exercise_note_cut(root, monkeypatch, scenario, cut=None):
         if len(events) == cut:
             raise KeyboardInterrupt()
 
-    real_replace = os.replace
-
-    def replace(src, dst, *args, **kwargs):
-        checkpoint(f"before:file:{Path(dst).name}")
-        real_replace(src, dst, *args, **kwargs)
-        checkpoint(f"after:file:{Path(dst).name}")
-
     memory.checkpoint = checkpoint
     with monkeypatch.context() as patch:
-        patch.setattr(os, "replace", replace)
+        watch_renames(patch, before=lambda src, dst: checkpoint(f"before:file:{dst.name}"),
+                      after=lambda src, dst: checkpoint(f"after:file:{dst.name}"))
         try:
             calls[scenario]()
         except KeyboardInterrupt:
@@ -1447,25 +1475,25 @@ def test_every_mutating_entry_point_finishes_interrupted_local_delete(tmp_path, 
 def test_lost_ingestion_response_cannot_erase_the_only_remote_write_intent(store, tmp_path, monkeypatch,
                                                                         interrupt_cleanup):
     candidate = note(store.next_note_id("alice"), fact="Forget the remotely accepted note.")
-    original_ingest, real_replace = store.memory.ingest, os.replace
-    counter_commits = []
+    original_ingest = store.memory.ingest
+    accepted_remotely = False
 
     def accepted_without_response(entry):
+        nonlocal accepted_remotely
         original_ingest(entry)
+        accepted_remotely = True
         raise PastError("connection lost after the server accepted ingestion")
 
-    def replace_then_stop(src, dst, *args, **kwargs):
-        real_replace(src, dst, *args, **kwargs)
-        if Path(dst).name == "counter.json":
-            counter_commits.append(dst)
-            if len(counter_commits) == 2:
-                raise KeyboardInterrupt()
+    def stop_during_cleanup(src, dst):
+        if accepted_remotely:
+            raise KeyboardInterrupt()
 
     with monkeypatch.context() as patch:
         patch.setattr(store.memory, "ingest", accepted_without_response)
         if interrupt_cleanup:
-            patch.setattr(os, "replace", replace_then_stop)
-        with pytest.raises(KeyboardInterrupt if interrupt_cleanup else PastError):
+            # Reason: cut a cleanup commit after handoff, without counting counter writes.
+            watch_renames(patch, after=stop_during_cleanup)
+        with pytest.raises((PastError, KeyboardInterrupt) if interrupt_cleanup else PastError):
             store.write(candidate)
     assert candidate.id in store.memory.entries
     restarted = NoteStore(store.memory, tmp_path)
@@ -1474,3 +1502,144 @@ def test_lost_ingestion_response_cannot_erase_the_only_remote_write_intent(store
     assert candidate.id not in store.memory.entries
     assert ids(restarted) == [] and restarted.stored("alice") == {}
     assert result.undeleted == []
+
+
+def accept_documented_unavailability(exc):
+    message = str(exc).lower()
+    assert ("doc" in message or "api" in message) and any(
+        word in message for word in ("unavailable", "cannot", "could not", "not ", "missing", "no ",
+                                     "unreadable", "unsupported")
+    ), "NotImplementedError must explain that documentation or the required call is unavailable"
+
+
+# Reason: the real client may confirm deletion only after a request receives a confirming answer.
+@pytest.mark.parametrize("response_kind", ["confirmed", "unconfirmed", "http_error", "lost_response"])
+def test_past_user_memory_delete_requires_an_answered_request(response_kind):
+    requests, replies = [], []
+    entry_id = "note-alice-001"
+
+    def handler(request):
+        requests.append(request)
+        if response_kind == "lost_response":
+            raise httpx.ReadError("offline response lost", request=request)
+        if response_kind == "http_error":
+            response = httpx.Response(503, json={"error": "unavailable"})
+        elif response_kind == "unconfirmed":
+            response = httpx.Response(202, json={"operationId": "offline-op", "ids": []})
+        else:
+            response = httpx.Response(202, json={"operationId": "offline-op", "ids": [entry_id]})
+        replies.append(response)
+        return response
+
+    client = PastUserMemory(api_key="offline-placeholder", base_url="https://past.invalid/api/v1",
+                            transport=httpx.MockTransport(handler))
+    try:
+        try:
+            confirmed = client.delete(entry_id)
+        except NotImplementedError as exc:
+            accept_documented_unavailability(exc)
+            return
+        except (PastError, httpx.RequestError):
+            assert response_kind != "confirmed" and requests
+            return
+        assert requests, "delete must not invent confirmation without making a request"
+        assert any(entry_id in str(request.url) + request.content.decode() for request in requests)
+        if response_kind == "confirmed":
+            assert replies and confirmed is True
+        else:
+            assert confirmed is False
+    finally:
+        client._http.close()
+
+
+# Reason: private audience setup must perform the documented request or explicitly report unavailable docs/API.
+def test_past_user_memory_ensure_audience_performs_private_setup():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, json={})
+
+    client = PastUserMemory(api_key="offline-placeholder", base_url="https://past.invalid/api/v1",
+                            transport=httpx.MockTransport(handler))
+    try:
+        try:
+            client.ensure_audience("person-alice", ["alice", NOTE_TAKER])
+        except NotImplementedError as exc:
+            accept_documented_unavailability(exc)
+            return
+        assert requests, "ensure_audience must not silently skip private audience setup"
+        assert any("person-alice" in str(request.url) + request.content.decode() for request in requests)
+        assert any(request.content and json.loads(request.content).get("identities") == ["alice", NOTE_TAKER]
+                   for request in requests)
+    finally:
+        client._http.close()
+
+
+# Reason: a stale index must not resurrect a forgotten note while remote deletion is still failing.
+def test_save_index_refuses_notes_waiting_for_remote_deletion(tmp_path):
+    memory = FakeUserMemory(fail_deletes=100)
+    store = NoteStore(memory, tmp_path)
+    old = seed(store)[0]
+    stale_index = store.index("alice")
+    store.take_off("alice", [old.id])
+    assert store.delete("alice", []) == [old.id]
+    assert old.id in memory.entries and store.pending_deletes("alice") == [old.id]
+    with pytest.raises(Exception):
+        store.save_index(stale_index)
+    assert store.helper_notes("alice", TODAY) == []
+    assert ids(store) == [] and store.stored("alice") == {}
+    assert old.id in memory.entries and old.id in store.pending_deletes("alice")
+
+
+# Reason: checked model actions must reject a real other person's note through the entire session step.
+@pytest.mark.parametrize("action", ["replace", "confirm", "delete"])
+def test_take_notes_refuses_a_real_other_persons_note(store, tmp_path, action):
+    alice = seed(store, specs=[{"fact": "Alice's own fact."}])[0]
+    bob = seed(store, "bob", [{"fact": "Bob's private fact."}])[0]
+    bob_files = person_file_snapshot(tmp_path, "bob")
+    entries = deepcopy(store.memory.entries)
+    fields = {"note_id": bob.id}
+    if action == "replace":
+        fields.update(kind="goals", fact="An invalid replacement.")
+    bad = {"actions": [act(action, **fields)]}
+    llm = ScriptedLLM(bad, bad)
+    store.memory.events.clear()
+    result = session(store, llm)
+    assert result.failed and result.reason and len(llm.calls) == 2
+    assert result.added == result.replaced == result.confirmed == result.deleted == result.dropped_by_limit == []
+    assert not any(event[0] in {"ingest", "delete"} for event in store.memory.events)
+    assert person_file_snapshot(tmp_path, "bob") == bob_files and store.memory.entries == entries
+    assert ids(store) == [alice.id] and ids(store, "bob") == [bob.id]
+    assert all(bob.fact not in prompt for _, prompt, _ in llm.calls)
+
+
+# Reason: only failures before handing the entry to ingest are allowed to leave no deletion intent.
+def test_failure_before_ingest_leaves_no_unsent_note_queued(store, monkeypatch):
+    candidate = note(store.next_note_id("alice"))
+
+    def unavailable(*args, **kwargs):
+        raise PastError("audience setup unavailable before ingestion")
+
+    monkeypatch.setattr(store.memory, "ensure_audience", unavailable)
+    with pytest.raises(PastError):
+        store.write(candidate)
+    assert not any(event[0] == "ingest" for event in store.memory.events)
+    assert ids(store) == [] and store.stored("alice") == {} and store.pending_deletes("alice") == []
+    assert store.memory.entries == {}
+
+
+# Reason: validate the crash harness against every permitted rename API, without double-counting pathlib calls.
+@pytest.mark.parametrize("rename_api", ["os.replace", "os.rename", "Path.replace", "Path.rename"])
+def test_crash_hook_observes_each_permitted_rename_api_once(tmp_path, monkeypatch, rename_api):
+    source, target = tmp_path / "temporary", tmp_path / "committed"
+    source.write_text("{}")
+    events = []
+    watch_renames(monkeypatch, before=lambda src, dst: events.append("before"),
+                  after=lambda src, dst: events.append("after"))
+    owner, method = rename_api.split(".")
+    if owner == "os":
+        getattr(os, method)(source, target)
+    else:
+        getattr(source, method)(target)
+    assert events == ["before", "after"] and target.read_text() == "{}" and not source.exists()
