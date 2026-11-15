@@ -38,7 +38,7 @@ The crisis checker runs on the helper's model, and a fallback judge may run on a
 
 - [x] `OpenAICompatClient.complete_json(system, messages, schema)`: sends `response_format` with the model's JSON schema, validates the reply with Pydantic, and returns the model.
 - [x] If the server refuses `response_format` (HTTP 400 or 422), fall back to asking for JSON in the prompt, then validate. The client remembers the refusal, so later calls skip the refused request. Either way a reply that fails validation is retried once, then raises.
-- [x] `complete_json` takes a deadline for the whole call, retries included. The crisis checker has 3 seconds in total. *Each request gets the time left as its timeout, and an answer that arrives late is discarded; both raise `DeadlineExceeded`. The timeout is the socket's, so a server that sends its answer a few bytes at a time can run past the deadline before the call notices. The release step in stage 4 must not rely on this alone.*
+- [x] `complete_json` takes a deadline for the whole call, retries included. The crisis checker has 5 seconds in total. *Each request gets the time left as its timeout, and an answer that arrives late is discarded; both raise `DeadlineExceeded`. The timeout is the socket's, so a server that sends its answer a few bytes at a time can run past the deadline before the call notices. The release step in stage 4 must not rely on this alone.*
 - [x] `TracedClient` wraps `complete_json` as well as `complete`, with one span per attempt.
 - [ ] Ask the robot pair which of the two their helper endpoint supports, and write the answer in this file.
 

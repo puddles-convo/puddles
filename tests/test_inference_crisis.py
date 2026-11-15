@@ -1,7 +1,7 @@
 """The crisis path, one turn, and what a session leaves behind (docs/specs/crisis-path.md).
 
 Every keyword, prompt and fixed line is read from Ansh's files through his functions; none is typed here.
-No network, no keys; deadlines are a few hundredths of a second instead of 3 seconds.
+No network, no keys; deadlines are a few hundredths of a second instead of 5 seconds.
 """
 from __future__ import annotations
 
