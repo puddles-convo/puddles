@@ -24,8 +24,8 @@
       ]
     },
     "expect": {
-      "one_of": {"action": ["add", "reword"]},
-      "non_empty": ["rule_text", "summary"],
+      "one_of": {"action": ["add", "reword"], "rule_id": [null, "C1", "C3", "C4", "C5", "C6", "C7", "C8"]},
+      "non_empty": ["rule_id", "rule_text", "summary"],
       "must_mention": ["because", "ask"],
       "must_not_mention": ["\"rule_id\":\"S"]
     },
@@ -58,7 +58,7 @@
     "expect": {
       "one_of": {"action": ["remove", "reword"], "rule_id": ["C15"]},
       "max_chars": {"rule_text": 171},
-      "non_empty": ["rule_text", "summary"],
+      "non_empty": ["rule_id", "rule_text", "summary"],
       "must_mention": ["reflect"]
     },
     "reviewed_by": null
@@ -90,8 +90,8 @@
       ]
     },
     "expect": {
-      "one_of": {"action": ["add", "reword"]},
-      "non_empty": ["rule_text", "summary"],
+      "one_of": {"action": ["add", "reword"], "rule_id": [null, "C1", "C3", "C4", "C5", "C6", "C7", "C8"]},
+      "non_empty": ["rule_id", "rule_text", "summary"],
       "must_mention": ["ask"],
       "must_not_mention": ["\"rule_id\":\"S"]
     },
@@ -126,7 +126,7 @@
     "expect": {
       "one_of": {"action": ["reword", "remove"]},
       "fields": {"rule_id": "C5"},
-      "non_empty": ["rule_text", "summary"],
+      "non_empty": ["rule_id", "rule_text", "summary"],
       "must_mention": ["suggest"]
     },
     "reviewed_by": null
@@ -156,8 +156,8 @@
       ]
     },
     "expect": {
-      "one_of": {"action": ["add", "reword"]},
-      "non_empty": ["rule_text", "summary"],
+      "one_of": {"action": ["add", "reword"], "rule_id": [null, "C1", "C3", "C4", "C5", "C6", "C7", "C8"]},
+      "non_empty": ["rule_id", "rule_text", "summary"],
       "must_mention": ["medic"],
       "must_not_mention": ["\"rule_id\":\"S"]
     },

@@ -37,16 +37,26 @@ class CaseFileError(ValueError):
 
 
 def blank(value: Any) -> bool:
-    """Null, empty or spaces; a list or object is blank when everything in it is blank."""
+    """Null, empty or spaces, all the way down: a list or object is blank when it is empty or anything in it,
+    at any depth, is blank. So one source with a blank url makes the whole `sources` list blank.
+    Numbers and booleans are never blank."""
     if value is None:
         return True
     if isinstance(value, str):
         return not value.strip()
-    if isinstance(value, list):
-        return all(blank(v) for v in value)
-    if isinstance(value, dict):
-        return all(blank(v) for v in value.values())
+    if isinstance(value, (list, dict)):
+        items = value.values() if isinstance(value, dict) else value
+        return not value or any(blank(v) for v in items)
     return False
+
+
+def _not_applied(name: str, values: dict[str, Any], allowed_removal: bool) -> Optional[str]:
+    """Why a non_empty line does not apply to this answer, or None when it does."""
+    if name == "rule_text" and allowed_removal:  # a removal has no replacement text
+        return "not applied to a removal"
+    if name == "rule_id" and values.get("action") == "add":  # ProposerOutput: an addition has no rule ID yet
+        return "not applied to an addition"
+    return None
 
 
 def _vacuous(expect: dict[str, Any]) -> list[str]:
@@ -151,8 +161,8 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
     one_of = expect.get("one_of", {})
     allowed_removal = "remove" in one_of.get("action", []) and values.get("action") == "remove"
     for name in expect.get("non_empty", []):
-        if name == "rule_text" and allowed_removal:  # a removal has no replacement text
-            lines.append((True, f"ok non_empty {name} (not applied to a removal)"))
+        if why := _not_applied(name, values, allowed_removal):
+            lines.append((True, f"ok non_empty {name} ({why})"))
             continue
         met = name in values and not blank(values[name])
         lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))

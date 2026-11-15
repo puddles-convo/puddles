@@ -50,7 +50,8 @@
     },
     "expect": {
       "must_mention": ["conv-hand-001", "conv-hand-002", "conv-hand-003", "first"],
-      "non_empty": ["name", "description"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [3, 4]},
       "fields": {"found": true, "out_of": 4, "same_as_pattern_id": null}
     },
     "reviewed_by": null
@@ -96,8 +97,8 @@
     },
     "expect": {
       "must_mention": ["conv-case-101", "conv-case-102", "conv-case-103", "question"],
-      "non_empty": ["name", "description"],
-      "fields": {"found": true, "seen_in": 3, "out_of": 3}
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "fields": {"found": true, "seen_in": 3, "out_of": 3, "same_as_pattern_id": null}
     },
     "reviewed_by": null
   },
@@ -142,8 +143,8 @@
     },
     "expect": {
       "must_mention": ["conv-hand-001", "conv-hand-002", "first"],
-      "non_empty": ["name", "description"],
-      "fields": {"found": true, "seen_in": 2, "out_of": 3}
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "fields": {"found": true, "seen_in": 2, "out_of": 3, "same_as_pattern_id": null}
     },
     "reviewed_by": null
   },
@@ -190,8 +191,9 @@
     },
     "expect": {
       "must_mention": ["conv-hand-003", "conv-case-131", "conv-case-132", "should"],
-      "non_empty": ["name", "description"],
-      "fields": {"found": true, "out_of": 3}
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [1, 2, 3]},
+      "fields": {"found": true, "out_of": 3, "same_as_pattern_id": null}
     },
     "reviewed_by": null
   },
@@ -254,7 +256,8 @@
     },
     "expect": {
       "must_mention": ["C5", "conv-hand-004", "option"],
-      "non_empty": ["name", "description"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [1, 2, 3]},
       "fields": {"found": true, "same_as_pattern_id": "pattern-r02", "out_of": 3}
     },
     "reviewed_by": null

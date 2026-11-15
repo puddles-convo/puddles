@@ -1,8 +1,10 @@
 """Offline tests for the case files and scripts/try_agent.py (docs/specs/case-files.md, section 3)."""
+import copy
 import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from puddles import llm as llm_module
 from puddles.agents import critic, proposer, researcher
@@ -163,8 +165,8 @@ def test_critic_cases_cover_the_spec():
     repeats = [c for c in cases if c["expect"].get("fields", {}).get("same_as_pattern_id")]
     assert repeats and all(c["expect"]["fields"]["same_as_pattern_id"] in
                            {p["id"] for p in c["input"]["earlier_patterns"]} for c in repeats)
-    for c in cases:  # found true needs a name and description; found false needs a reason
-        needed = {"name", "description"} if c["expect"]["fields"]["found"] else {"reason"}
+    for c in cases:  # found true needs a name, description and examples; found false needs a reason
+        needed = {"name", "description", "example_conversation_ids"} if c["expect"]["fields"]["found"] else {"reason"}
         assert needed <= set(c["expect"].get("non_empty", [])), c["case_id"]
 
 
@@ -175,6 +177,8 @@ def test_researcher_and_proposer_cases_cover_the_spec():
     cases = load("proposer")
     assert any(e["outcome"] == "reverted" and e["pattern_id"] == c["input"]["pattern"]["id"]
                for c in cases for e in c["input"]["earlier_edits"])
+    for c in cases:  # a rewording or removal must name its rule (spec section 1)
+        assert {"rule_id", "rule_text"} <= set(c["expect"]["non_empty"]), c["case_id"]
     for c in cases:  # the flag matches the policy text, as build_input would compute it
         assert c["input"]["at_length_limit"] == at_length_limit(c["input"]["policy_text"]), c["case_id"]
         parse_policy(c["input"]["policy_text"])
@@ -297,7 +301,11 @@ def test_blank_critic_and_researcher_fields_are_empty():
 
 @pytest.mark.parametrize("value, is_blank", [
     (None, True), ("", True), (" \n", True), ([], True), (["", " "], True), ({}, True), ({"a": " ", "b": None}, True),
-    ([{"url": " ", "technique": ""}], True), ("x", False), ([" ", "x"], False), (0, False), (False, False),
+    ([{"url": " ", "technique": ""}], True), ("x", False), (0, False), (False, False),
+    # all the way down: one blank value anywhere makes the whole list or object blank
+    ([" ", "x"], True), (["x", None], True), ({"a": "x", "b": "  "}, True), ([{}], True), ([[]], True),
+    ([{"url": "https://a.org", "title": "T", "technique": " "}], True),
+    ([{"url": "https://a.org", "title": "T", "technique": "Reflect first."}], False), ({"n": 0, "ok": False}, False),
 ])
 def test_blank(value, is_blank):
     assert try_agent.blank(value) is is_blank
@@ -322,6 +330,125 @@ def test_an_expectation_that_cannot_fail_exits_2(expect, tmp_path, capsys):
     err = capsys.readouterr().err
     assert err.strip() and "Traceback" not in err
     assert llm.prompts[CriticOutput] == []  # refused before any call
+
+
+# Third check: the verifier's two defects, then the whole class at once.
+
+@pytest.mark.parametrize("field", ["url", "technique", "title"])
+@pytest.mark.parametrize("text", ["", "   "])
+def test_a_blank_source_field_exits_1_for_every_researcher_case(field, text, capsys):
+    answers = [{**a, "sources": [{**a["sources"][0], field: text}]} for a in RESEARCHER_ANSWERS]
+    assert run("researcher", llm=scripted("researcher", answers), search=FakeSearch({})) == 1
+    out = capsys.readouterr().out
+    assert out.count("EMPTY non_empty sources") == 5 and "0 of 5 cases met their expectations" in out
+
+
+@pytest.mark.parametrize("rule_id", [None, "", "   "])
+@pytest.mark.parametrize("case_id", ["proposer-01", "proposer-03", "proposer-05"])
+def test_a_rewording_without_a_rule_id_exits_1(case_id, rule_id, capsys):
+    n = int(case_id[-1]) - 1
+    bad = {**PROPOSER_ANSWERS[n], "action": "reword", "rule_id": rule_id}
+    assert run("proposer", "--case", case_id, llm=scripted("proposer", [bad])) == 1
+    out = capsys.readouterr().out
+    assert "EMPTY non_empty rule_id" in out and "0 of 1 cases met their expectations" in out
+
+
+def test_an_addition_needs_no_rule_id_but_a_blank_one_is_not_a_rule():
+    case, good = _cases_with_good_answers("proposer")[0]
+    assert misses("proposer", case, good) == []  # rule_id null: "ok non_empty rule_id (not applied to an addition)"
+    assert misses("proposer", case, {**good, "rule_id": "  "}) == ['NOT ONE OF one_of.rule_id "  " in '
+                                                                    '[null, "C1", "C3", "C4", "C5", "C6", "C7", "C8"]']
+
+
+# Every passing answer: the good answer of each case, and each allowed removal (which has no rule_text).
+REMOVALS = {
+    "proposer-02": {"action": "remove", "rule_id": "C15", "summary": "Remove C15; C3 and reflections cover it."},
+    "proposer-04": {"action": "remove", "rule_id": "C5", "summary": "Remove C5, whose wording invites suggestions."},
+}
+PASSING = [(agent, case, good, case["case_id"]) for agent in FILES for case, good in _cases_with_good_answers(agent)]
+PASSING += [("proposer", next(c for c in load("proposer") if c["case_id"] == cid), removal, f"{cid} removal")
+            for cid, removal in REMOVALS.items()]
+
+REMOVED = "removed"
+HOW = {None: "null", "": '""', "   ": '"   "', REMOVED: REMOVED}
+
+_FOUND_TRUE = ["critic-01", "critic-02", "critic-03", "critic-04", "critic-05"]
+_UNUSED_WHEN_NOT_FOUND = ("found is false: critic.check returns before reading it and to_record makes no record, "
+                          "so it is unused; the case needs only a reason")
+# The only leaf mutations of a passing answer that still pass, each with why it is still a good answer.
+# Keyed by (answer, path, replacement). Any other mutation that passes fails the test.
+ALLOWED = {
+    **{(cid, "reason", '"   "'): "found is true: reason is read only when found is false (critic.check, the spec)"
+       for cid in _FOUND_TRUE},
+    ("critic-01", "example_conversation_ids[3]", REMOVED):
+        "conv-hand-004 gives a list, not one suggestion; the case asks for at least the other three, still listed",
+    ("critic-05", "example_conversation_ids[1]", REMOVED):
+        "examples are examples: conv-hand-004, the one the case names, is still there, and seen_in is unchanged",
+    ("critic-05", "example_conversation_ids[2]", REMOVED):
+        "examples are examples: conv-hand-004, the one the case names, is still there, and seen_in is unchanged",
+    **{("critic-06", field, how): _UNUSED_WHEN_NOT_FOUND
+       for field in ("name", "description", "same_as_pattern_id") for how in ('""', '"   "')},
+    ("proposer-02 removal", "rule_text", '""'): "a removal carries no text; empty text is no text",
+    ("proposer-04 removal", "rule_text", '""'): "a removal carries no text; empty text is no text",
+    ("proposer-02 removal", "rule_text", '"   "'):
+        "a removal carries no text and apply() strips it; the agent's check would ask again (see the report)",
+    ("proposer-04 removal", "rule_text", '"   "'):
+        "a removal carries no text and apply() strips it; the agent's check would ask again (see the report)",
+}
+
+
+def _paths(value, path=()):
+    """Every field, every item of every list, and every field of every item, as a path into the answer."""
+    items = value.items() if isinstance(value, dict) else enumerate(value) if isinstance(value, list) else ()
+    for key, child in items:
+        yield path + (key,)
+        yield from _paths(child, path + (key,))
+
+
+def _label(path):
+    return "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in path).lstrip(".")
+
+
+def _mutate(data, path, new):
+    data = copy.deepcopy(data)
+    *parents, last = path
+    target = data
+    for p in parents:
+        target = target[p]
+    if new is REMOVED:
+        del target[last]
+    else:
+        target[last] = new
+    return data
+
+
+def test_no_null_blank_or_missing_leaf_passes_unless_allowed(capsys):
+    """For every passing answer and every leaf, null, "", "   " and removal must each give exit 1, unless the
+    mutation is on the allow-list as still a good answer, in which case it must give exit 0."""
+    used, unexpected = set(), []
+    for agent, case, good, name in PASSING:
+        schema = ANSWERS[agent][0]
+        base = schema.model_validate(good).model_dump(mode="json")  # every field, defaults included
+        assert misses(agent, case, base) == [], name
+        for path in _paths(base):
+            for new in HOW:
+                try:
+                    mutated = schema.model_validate(_mutate(base, path, new))
+                except ValidationError:
+                    continue  # the agent's output model refuses it: the script's call fails and the case is not met
+                if mutated.model_dump(mode="json") == base:
+                    continue  # the same answer (e.g. removing a field that holds its default)
+                key = (name, _label(path), HOW[new])
+                search = FakeSearch({}) if agent == "researcher" else None
+                code = run(agent, "--case", case["case_id"], llm=scripted(agent, [mutated]), search=search)
+                capsys.readouterr()
+                if key in ALLOWED:
+                    used.add(key)
+                    assert code == 0, f"allowed as a good answer but rejected: {key}"
+                elif code != 1:
+                    unexpected.append(key)
+    assert unexpected == [], f"null, blank or missing and still passing: {unexpected}"
+    assert set(ALLOWED) == used, f"allow-list entries never reached: {set(ALLOWED) - used}"
 
 
 # The three expectation kinds added after the first check.
