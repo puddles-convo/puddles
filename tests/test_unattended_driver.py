@@ -358,6 +358,56 @@ def test_a_scored_round_resets_the_nothing_scored_count(tmp_path):
     assert summary.stop_reason == "max_rounds (5)" and not summary.failed
 
 
+def test_an_empty_scores_file_is_nothing_scored_whatever_the_reason_says(tmp_path):
+    def run_one(policy_path, drawn, round_):
+        path = tmp_path / "scores" / f"round-{round_:02d}-train.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        return logged(tmp_path, round_, NOTHING_SCORED_REASON + " The judge left 1 conversation unscored: c1.")
+
+    summary = run(tmp_path, run_one, max_rounds=10)
+    assert len(DecisionLog(tmp_path).rounds()) == 3 and summary.failed
+
+
+def test_a_scores_file_with_a_line_is_scored(tmp_path):
+    def run_one(policy_path, drawn, round_):
+        path = tmp_path / "scores" / f"round-{round_:02d}-train.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"conversation_id": "c"}\n')
+        return logged(tmp_path, round_, NOTHING_SCORED_REASON)
+
+    summary = run(tmp_path, run_one, max_rounds=4)
+    assert summary.stop_reason == "max_rounds (4)" and not summary.failed
+
+
+def test_both_streaks_survive_a_restart(tmp_path):
+    reasons = iter([NOTHING_SCORED_REASON] * 2)
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, lambda p, d, r: logged(tmp_path, r, next(reasons)) if r < 3 else (_ for _ in ()).throw(
+            KeyboardInterrupt), max_rounds=10)
+    calls = []
+    summary = run(tmp_path, lambda p, d, r: calls.append(r) or logged(tmp_path, r, NO_CONVERSATION_REASON),
+                  max_rounds=10)
+    assert calls == [3] and summary.failed and "scored" in summary.stop_reason
+
+    root = tmp_path / "errors"
+    attempts = []
+
+    def failing(p, d, r):
+        attempts.append(r)
+        if len(attempts) == 3:
+            raise KeyboardInterrupt
+        raise ValueError("down")
+
+    with pytest.raises(KeyboardInterrupt):
+        run(root, failing, max_rounds=10)
+    summary = run(root, failing, max_rounds=10)
+    assert attempts == [1, 1, 1, 1] and summary.stop_reason == "3 round errors in a row"
+    # an outcome ends the error streak: the next round's errors start from zero
+    logged(root, 1)
+    assert run(root, lambda p, d, r: logged(root, r), max_rounds=2).stop_reason == "max_rounds (2)"
+
+
 # ---------- 1.8 why it stopped is written down ----------
 
 

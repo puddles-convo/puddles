@@ -28,6 +28,7 @@ from schemas import (
 BASE_URL = os.environ.get("PAST_BASE_URL", "https://api.past.dev/api/v1")
 TRAINING_AUDIENCE = "training-agents"
 TRAINING_IDENTITIES = ["critic", "researcher", "proposer", "gatekeeper"]
+RECALL_QUERY_LIMIT = 1000  # past.dev answers 400 recall-query-too-long above this many characters
 RECORD_ID_RE = re.compile(r"\b(?:pattern|research|edit|gate)-r\d+\b")
 
 ENTRY_TYPES: dict[type, str] = {
@@ -88,7 +89,10 @@ class PastClient:
         return ingestion_id
 
     def ingestion_status(self, ingestion_id: str) -> dict:
-        return self._call("GET", f"/ingest/{ingestion_id}")
+        status = self._call("GET", f"/ingest/{ingestion_id}")
+        if not isinstance(status.get("status"), str):
+            raise PastError(f"GET /ingest/{ingestion_id} returned no status string")
+        return status
 
     def wait(self, ingestion_id: str, timeout_s: float = 60, poll_s: float = 2) -> bool:
         """Poll until the send is completed. False if it is still processing at the deadline."""
@@ -108,7 +112,7 @@ class PastClient:
             time.sleep(poll_s)
 
     def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]:
-        body = {"query": query, "identity": identity, "level": level, "limit": limit}
+        body = {"query": query[:RECALL_QUERY_LIMIT], "identity": identity, "level": level, "limit": limit}
         answer = self._call("POST", "/recall", json=body)
         if "results" not in answer:
             raise PastError("POST /recall returned no results field")
@@ -136,6 +140,7 @@ class FakeMemory:
         return True
 
     def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]:
+        query = query[:RECALL_QUERY_LIMIT]  # as PastClient sends it
         self.recalls.append({"query": query, "identity": identity})
         words = set(re.findall(r"\w+", query.lower()))
         visible = [e for e in self.entries.values()

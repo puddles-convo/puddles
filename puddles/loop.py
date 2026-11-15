@@ -160,9 +160,46 @@ def write_stopped(root: Path, summary: LoopSummary, log: DecisionLog, start_poli
         f"policy in force: {summary.policy_in_force}")
 
 
-def nothing_scored(event: RoundEvent) -> bool:
-    """The round ended with no scored training conversation: the judge node's two reasons."""
-    return event.outcome == "no_pattern" and event.reason in (NO_CONVERSATION_REASON, NOTHING_SCORED_REASON)
+def nothing_scored(event: RoundEvent, root: Path) -> bool:
+    """The round ended with no scored training conversation. Its scores file decides when the round
+    left one (the round's own judge adapter always does); otherwise the reason's opening sentence,
+    which finish_round may follow with the unscored IDs."""
+    if event.outcome != "no_pattern":
+        return False
+    path = Path(root) / SCORES_DIR / f"round-{event.round:02d}-train.jsonl"
+    if path.exists():
+        return not any(line.strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return event.reason.startswith((NO_CONVERSATION_REASON, NOTHING_SCORED_REASON))
+
+
+def nothing_scored_streak(log: DecisionLog, root: Path) -> int:
+    """Rounds in a row, ending at the newest in the log, with no scored training conversation."""
+    streak = 0
+    for event in reversed(log.rounds()):
+        if not nothing_scored(event, root):
+            break
+        streak += 1
+    return streak
+
+
+def round_error_streak(log: DecisionLog, root: Path) -> int:
+    """Round errors since the newest round that ended with an outcome, read from `log/loop.jsonl`.
+
+    A round number advances only with an outcome, so they are the errors for the next round.
+    A line that does not parse (cut short by a kill) is skipped.
+    """
+    path = Path(root) / LOOP_LOG
+    if not path.exists():
+        return 0
+    next_round, count = log.next_round(), 0
+    for text in path.read_text(encoding="utf-8").splitlines():
+        try:
+            line = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(line, dict) and line.get("event") == "round_error" and line.get("round") == next_round:
+            count += 1
+    return count
 
 
 def run_loop(
@@ -182,12 +219,11 @@ def run_loop(
     `max_rounds` counts round events in the log, so a restarted loop keeps the same budget.
     An `Exception` from one round (its `prepare_round` included) costs that round only: a
     `round_error` line goes to `log/loop.jsonl` and the next turn starts as a restart does.
+    The round-error and nothing-scored streaks are read from disk at each turn, so they survive a restart.
     Every stop writes a `stopped` line there (`write_stopped`).
     """
     usage_file = Path(root) / USAGE_PATH
     summary = LoopSummary()
-    errors_in_a_row = 0
-    nothing_scored_in_a_row = 0
     try:
         while True:
             lines = read_usage(usage_file)
@@ -210,11 +246,12 @@ def run_loop(
                 summary.stop_reason = f"{stuck} failed in {FAILURE_STREAK_LIMIT} rounds in a row"
                 summary.failed = True
                 break
-            if errors_in_a_row >= ROUND_ERROR_LIMIT:
+            # Both streaks are read from disk, so a restarted loop carries them on.
+            if round_error_streak(log, root) >= ROUND_ERROR_LIMIT:
                 summary.stop_reason = f"{ROUND_ERROR_LIMIT} round errors in a row"
                 summary.failed = True
                 break
-            if nothing_scored_in_a_row >= NOTHING_SCORED_LIMIT:
+            if nothing_scored_streak(log, root) >= NOTHING_SCORED_LIMIT:
                 summary.stop_reason = f"no training conversation scored in {NOTHING_SCORED_LIMIT} rounds in a row"
                 summary.failed = True
                 break
@@ -224,13 +261,10 @@ def run_loop(
                 drawn = draw_scenarios(scenarios, cfg.conversations_per_round, cfg.seed, round_)
                 event = run_one(policy_path, drawn, round_)
             except Exception as exc:  # KeyboardInterrupt and SystemExit are not Exceptions: they still stop
-                errors_in_a_row += 1
                 error = f"{type(exc).__name__}: {str(exc)[:ERROR_CHARS]}"
                 append_loop_line(root, {"event": "round_error", "round": round_, "error": error, "at": _now()})
                 out(f"round {round_}: error. {error}")
                 continue
-            errors_in_a_row = 0
-            nothing_scored_in_a_row = nothing_scored_in_a_row + 1 if nothing_scored(event) else 0
             summary.rounds.append((event.round, event.outcome))
             spent = _spend(read_usage(usage_file))
             summary.spend_usd = spent

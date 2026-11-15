@@ -7,6 +7,7 @@ import pytest
 from puddles.decision_log import DecisionLog
 from puddles.memory import (
     READS_PATH,
+    RECALL_QUERY_LIMIT,
     TRAINING_AUDIENCE,
     FakeMemory,
     PastClient,
@@ -197,6 +198,41 @@ def test_a_malformed_ingest_answer_is_a_past_error(response):
 def test_a_malformed_recall_answer_is_a_past_error(body):
     with pytest.raises(PastError):
         client(lambda request: httpx.Response(200, json=body)).recall("q", identity="critic")
+
+
+@pytest.mark.parametrize("body", [{}, {"status": None}, {"status": ["completed"]}])
+def test_a_malformed_ingestion_status_is_a_past_error(body):
+    with pytest.raises(PastError):
+        client(lambda request: httpx.Response(200, json=body)).wait("ing_1", timeout_s=5, poll_s=0)
+
+
+def test_a_missing_copy_that_fails_at_a_start_is_not_retried_at_the_same_start(tmp_path):
+    loop = Loop(tmp_path)
+    loop.round("advice-before-understanding")
+    lines = (tmp_path / "log/decisions.jsonl").read_text().splitlines()
+    (tmp_path / "log/decisions.jsonl").write_text("\n".join(lines[:-1]) + "\n")  # gate-r01 copy never logged
+    down = CountingDown()
+    retry_pending(loop.log, down, tmp_path)
+    assert down.ingests == ["gate-r01"]
+    assert loop.log.copy_events()[(1, "gate-r01")].attempt == 1
+
+
+# ---------- 2.6 a recall query is cut to the service's limit ----------
+
+def test_a_long_recall_query_is_cut_before_it_is_sent(tmp_path):
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content)["query"])
+        return httpx.Response(200, json={"results": []})
+
+    long_query = "the judge noted " + "x" * 2000
+    assert client(handler).recall(long_query, identity="critic") == []
+    assert sent == [long_query[:RECALL_QUERY_LIMIT]] and RECALL_QUERY_LIMIT == 1000
+    mem = FakeMemory()
+    recall_records(mem, DecisionLog(tmp_path), long_query, "critic", tmp_path)
+    assert mem.recalls[-1]["query"] == long_query[:1000]
+    assert reads(tmp_path)[-1]["query"] == long_query  # the read log keeps what it logged before
 
 
 def test_a_well_formed_recall_answer_still_passes():

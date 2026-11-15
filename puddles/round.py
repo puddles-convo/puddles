@@ -223,12 +223,13 @@ def retry_pending(log: DecisionLog, memory: Memory, root: Path) -> None:
         from puddles.memory import prepare_training_audience
 
         prepare_training_audience(memory, root)  # the one try of this start needs the audience to exist
+    pending = log.pending_copies()  # taken first: a missing copy that fails now waits for the next start
     for round_, missing in log.missing_copies():
         record = load_record(missing, replay_model(missing.id), root)
         if record is None:
             raise PastError(f"record file for {missing.id} (round {round_}) is missing or changed")
         copy_to_memory(record, missing, round_, memory, log, root)
-    for event in log.pending_copies():
+    for event in pending:
         for kind, model in MODELS.items():
             round_event = next((r for r in log.rounds() if r.round == event.round), None)
             ref = round_event.records.get(kind) if round_event else None
