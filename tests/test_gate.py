@@ -784,13 +784,14 @@ def test_the_fake_script_runs_the_real_gate_and_promotes_nothing(tmp_path, trace
     assert not (root / "policies" / "policy-v2.md").exists()
 
 
-def test_the_real_gate_without_fake_stops_before_anything_is_written(tmp_path, capsys):
+def test_the_real_gate_without_fake_stops_before_anything_is_written(tmp_path, capsys, monkeypatch):
     from scripts.run_graph_round import main
 
+    monkeypatch.delenv("HELPER_URL", raising=False)  # the configuration that is missing
     argv = [a for a in script_args(tmp_path, "--gate", "real") if a != "--fake"]
     assert main(argv) == 2
     err = capsys.readouterr().err
-    assert err.startswith("error: ") and "later piece" in err and err.count("\n") == 1
+    assert err.startswith("error: ") and "HELPER_URL" in err and err.count("\n") == 1
     assert not (tmp_path / "root").exists()
 
 
