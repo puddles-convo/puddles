@@ -1,11 +1,13 @@
 # Inference smoke test with real models (2026-11-15, branch `inference-smoke`)
 
+Checked against the raw evidence by a second model on 15 November; measurements confirmed, wording corrected.
+
 This report covers run 2, which used the team's training settings (`with_env_train.sh`). Run 1, against the wrong endpoint, is summarised at the end.
 
 **Bottom line:** the helper and the crisis checker answer on OpenAI `gpt-6-luna`. Stage 4's exit test passes:
 - a 10-turn everyday conversation, then the crisis message, which got the fixed `self` response with 988;
 - with consent on, the session file and the record round-trip;
-- with consent off, nothing is kept and no trace is written.
+- with consent off, no session directory, no record and no matching MLflow content were found; the only copies of the phrase are the test's own input file and the captured terminal output, where the robot's reply quoted the person. No trace was written.
 
 Three things are still wrong:
 - **D1**, still present: with consent off, the note-taker (`PlainLLM`) fails with HTTP 400. A fix is being built separately.
@@ -31,21 +33,21 @@ Policy: `policies/policy-v2.md` loaded (version `policy-v2`); no fallback to v1 
 | 1A | crisis checker on a harmless message ("I made pasta for dinner tonight…") | PASS | 1177 ms; risk `none`, category `None`; reason "Sharing a positive experience with no indication of safety risk." |
 | 1A | crisis checker on a clear crisis message | PASS | 1272 ms; risk `crisis`, category `self`; reason "Explicit suicidal intent with a plan to die this weekend." |
 | 1A | note-taker: `PlainLLM.from_env()` → `take_notes`, `NoteStore(FakeUserMemory(), tmp)`, `remember_me=True` | **FAIL** (D1, known) | 292 ms; `NotesResult(failed=True, reason='HTTP 400 from https://api.openai.com/v1')`; 0 added |
-| 1C | 11 replies | PASS | 11 `robot:` lines, exit 0 |
+| 1C | 11 replies | PASS | 11 `robot:` lines; exit 0 was seen in the terminal but not retained in a file |
 | 1C | crisis message got the fixed `self` response with 988 | **PASS** | turn 11: keyword matched, checker `crisis`/`self`; reply text is exactly `fixed_responses["self"]` and contains 988; `fixed_handoff_response=True` |
 | 1C | every turn answered in time | **FAIL** (D5) | turn 3: checker `late` at 3046 ms (deadline 3.0 s), so the person got the holding line "Sorry, I lost my thread for a moment. Could you say that again?" even though the helper had a draft ready at 1463 ms |
 | 1C | status line on every turn | PASS | 11 status lines (see the timings table) |
 | 1C | session file `runs/smoke2/c/sessions/smoke2-c1-s1.jsonl` | PASS | 11 lines; all parse as `TurnLine` |
 | 1C | `.record.json` | PASS | parses as `ConversationRecord`; `source=live`; 22 turns |
-| 1C | replies follow the policy's conversation rules | PASS, with notes | see "Reply judgement" |
+| 1C | replies follow the policy's conversation rules | PARTLY | C1 and C4 are not consistently met; the two weakest replies are quoted in "Reply judgement" |
 | 1D-on | traces in `runs/smoke2/mlflow.db` via the MLflow client | PASS | mlflow 3.18.0; `mlflow.search_traces(locations=["0","1"], return_type="list")` → **12 traces** |
-| 1D-on | span names and nesting | PASS | 11 × `turn` (attributes `puddles.session_id`, `puddles.turn`) → `llm:crisis_checker` [CHAT_MODEL, OK] + `llm:helper` [CHAT_MODEL, OK], as expected. Plus 1 × top-level `Completions` [CHAT_MODEL, OK]: the note-taker's call, from OpenAI autologging, carrying no session ID (D4) |
+| 1D-on | span names and nesting | PASS | 11 × `turn` (attributes `puddles.session_id`, `puddles.turn`) → `llm:crisis_checker` [CHAT_MODEL, OK] + `llm:helper` [CHAT_MODEL, OK], as expected. Plus 1 × top-level `Completions` [CHAT_MODEL, OK]: the note-taker's call, from OpenAI autologging, with no structured session identifier to join on (D4) |
 | 1D-on | where trace data lands | **NOTE** (D3) | the experiment's artifact location is `<repo>/mlruns/1`; trace artifacts go there, not next to `runs/smoke2/mlflow.db` |
-| 1D-off | session runs and keeps nothing | PASS | exit 0; 3 replies (helper answering); `kept: nothing`; `runs/smoke2/d` never created |
+| 1D-off | session runs; no session directory, record or matching MLflow content | PASS | 3 replies (helper answering); the run printed `kept: nothing`; `runs/smoke2/d` was never created. The only copies of the phrase are the test's own input file and the captured terminal output, where the robot's reply quoted the person |
 | 1D-off | `zebra lantern 4471` not under `runs/smoke2/d` | PASS | the directory does not exist (`grep -r` rc=2) |
 | 1D-off | phrase not in `runs/smoke2/mlflow.db` | PASS | full `iterdump()` (180,285 chars): no `zebra`, no `4471`; per-cell scan of every column of every table: 0 hits |
 | 1D-off | phrase not in any `mlruns/` | PASS | `grep -rl` over `./mlruns` (the only one in the repo): no match; the trace folder listing is identical before and after |
-| 1D-off | phrase not in captured stdout/stderr apart from the typed lines | PASS, with a note | stderr: 0. stdout: 1, which is the robot's own reply shown on screen ("That's such a wonderfully absurd name—"zebra lantern 4471"…"). The helper quoted the person; this is the live display, not storage. No other file under `runs/smoke2` has it apart from the input file |
+| 1D-off | phrase in captured stdout/stderr apart from the typed lines | PASS, with a note | stderr: 0. Captured stdout (`runs/smoke2/d.stdout`): 1, in the robot's reply, which quoted the person ("That's such a wonderfully absurd name, "zebra lantern 4471"…"). The test harness saved that terminal output to a file; the application itself kept nothing. No other file under `runs/smoke2` has the phrase apart from the input file `messages-d.txt` |
 | 1D-off | trace count did not grow | PASS | 12 before, 12 after (`trace_info` rows and the client count agree) |
 | 1D-off | notes step | **FAIL** (D1, known) | stderr: `notes: the notes step failed; not yet confirmed deleted: none` |
 
@@ -63,15 +65,15 @@ Policy: `policies/policy-v2.md` loaded (version `policy-v2`); no fallback to v1 
 | 8 | none | no | 1345 | 1433 | 1435 | 53 | 1 | helper |
 | 9 | none | no | 1019 | 1292 | 1293 | 39 | 1 | helper |
 | 10 | concern | no | 1592 | 1191 | 1593 | 34 | 1 | helper |
-| 11 | crisis / self | yes | 1477 | – | 1477 | 63 | 2 | fixed `self` |
+| 11 | crisis / self | yes | 1477 | n/a | 1477 | 63 | 2 | fixed `self` |
 | **median** | | | **1210** | **1310** (n=10) | **1435** | | | |
 | **max** | | | **3046** | **1482** | **3046** | | | |
 
-`–`: the helper's answer was not waited for, because a crisis reply never waits for the helper. Run 2's 1D-off turns: checker 1383/1295/1233 ms, total 1383/1295/1233 ms.
+`n/a`: the helper's answer was not waited for, because a crisis reply never waits for the helper. Run 2's 1D-off turns: checker 1383/1295/1233 ms, total 1383/1295/1233 ms.
 
 ## Reply judgement (1C)
 
-The replies mostly follow policy-v2's conversation rules:
+The replies partly follow policy-v2's conversation rules:
 - every helper reply opens by reflecting what the person said (C1);
 - each asks at most one question (C3);
 - none says "you should" (C6);
@@ -79,10 +81,10 @@ The replies mostly follow policy-v2's conversation rules:
 - turn 7 suggests a counsellor or doctor once sleep is affected (C8);
 - turn 10 asks directly about ending their life when the checker said `concern` (in the spirit of S1).
 
-They are not consistently short (C4): 32 to 53 words, three to four sentences, every one longer than the 1A reply.
+They are not consistently short (C4): helper replies run from 32 to 53 words in two to four sentences. The 1A reply has 39 words; turns 1, 5 and 10 are shorter than it, turn 9 equals it, and turns 7 and 8 tie as the longest at 53 words. The fixed lines are outside the helper's control: the `self` response asks two questions, and the holding line in turn 3 does not reflect the person.
 
 The two weakest replies:
-- **Turn 8** (53 words): "With the reorg uncertainty and the strain this is putting on you, it makes sense that you're thinking about other options. Exploring what's out there could feel like a way to regain some control, without having to decide anything right away. What feels most important to you as you think about applying elsewhere?" It is the longest reply and the most generic. Three sentences of padding break C4 ("keep replies short").
+- **Turn 8** (53 words): "With the reorg uncertainty and the strain this is putting on you, it makes sense that you're thinking about other options. Exploring what's out there could feel like a way to regain some control, without having to decide anything right away. What feels most important to you as you think about applying elsewhere?" It ties with turn 7 as the longest reply and is the most generic. Three sentences of padding break C4 ("keep replies short").
 - **Turn 5**: "Being the newest can make you feel exposed when everyone's worried about cuts, but it doesn't mean you're the obvious choice. …" It reassures the person about something it cannot know, which argues with their fear instead of reflecting it (weak C1).
 
 ## Commands run (run 2)
@@ -113,7 +115,7 @@ The two weakest replies:
 
 ## Failures, with the exact errors (run 2)
 
-1. Note-taker through `PlainLLM`, in 1A and in 1D-off: `HTTP 400 from https://api.openai.com/v1`. Run 1 showed the cause: `unsupported_parameter` for `max_tokens` (the model needs `max_completion_tokens`) and `unsupported_value` for temperature 0.0 (only 1 is allowed). That is D1.
+1. Note-taker through `PlainLLM`, in 1A and in 1D-off: `HTTP 400 from https://api.openai.com/v1`. The cause is inferred from the code and the status (a run-1 probe printed the response bodies, but they were not retained): `unsupported_parameter` for `max_tokens` (the model needs `max_completion_tokens`) and `unsupported_value` for temperature 0.0 (only 1 is allowed). That is D1.
 2. 1C turn 3: the check status was `late` (checker 3046 ms against `checker.timeout_seconds` = 3.0), so the holding line was spoken. That is D5.
 3. Harmless: MLflow autologging printed a `PydanticSerializationUnexpectedValue` warning on stderr while serialising the note-taker's parsed output (1C).
 
@@ -121,10 +123,10 @@ The two weakest replies:
 
 | ID | Defect | Under the run-2 settings |
 |---|---|---|
-| D1 | The note-taker used without consent (`PlainLLM.from_env`) sends `max_tokens` and temperature 0.0; `gpt-6-luna` rejects both with HTTP 400, and no env switch changes the parameter name. With `--training no` the notes step always fails, forgetting included. | **Still present** (1A and 1D-off). Fix being built separately |
-| D2 | `OpenAICompatClient` sends urllib's default User-Agent; the Tinker host's Cloudflare rejected it with 403 `error code: 1010`. `LLMError` drops the response body. | **Not seen.** `api.openai.com` accepts the client as it is. Still latent for any Cloudflare-fronted endpoint; the dropped error body still stands |
+| D1 | The note-taker used without consent (`PlainLLM.from_env`) sends `max_tokens` and temperature 0.0; `gpt-6-luna` answers HTTP 400, and that it rejects both is inferred from the code and the status. No env switch changes the parameter name. With `--training no` the notes step always fails, forgetting included. | **Still present** (1A and 1D-off). Fix being built separately |
+| D2 | `OpenAICompatClient` sends urllib's default User-Agent; the Tinker host answered 403 `error code: 1010`, and that Cloudflare blocks that User-Agent is inferred from the code and the status. `LLMError` drops the response body. | **Not seen.** `api.openai.com` accepts the client as it is. Still latent for any Cloudflare-fronted endpoint; the dropped error body still stands |
 | D3 | `tracing.setup` creates the experiment without an artifact location, so trace artifacts go to `<cwd>/mlruns/<exp>`, outside `--root` and away from the `--mlflow` sqlite file. | **Still present.** The new `runs/smoke2/mlflow.db` experiments point at `<repo>/mlruns/1` and `<repo>/mlruns/0` |
-| D4 | The note-taker's trace is a separate top-level `Completions` trace with no session ID, so it cannot be joined to the session's `turn` traces. | **Still present** (1 such trace in run 2) |
+| D4 | The note-taker's trace is a separate top-level `Completions` trace and has no structured session identifier to join on with the session's `turn` traces. | **Still present** (1 such trace in run 2) |
 | D5 (new) | The checker's 3.0 s deadline is close to its real latency on `gpt-6-luna` (median 1210 ms, max 3046 ms), so an ordinary turn can lose its reply to the holding line. | **Present**: 1 of 11 turns in 1C |
 
 Repro commands:
@@ -138,10 +140,10 @@ Also worth a look (not a defect in code): the fixed `self` response asks "Are yo
 ## First run (wrong endpoint)
 
 Run 1 loaded the env file directly, so `HELPER_*` pointed at `Qwen/Qwen3-8B` on `tinker.thinkingmachines.dev`, which is not the endpoint in use.
-- **Helper and checker** failed on every call: `LLMError: HTTP 403` with body `error code: 1010`. Cloudflare blocks the default User-Agent (D2), and past that block every key gets 401 `Unable to validate api-key`.
+- **Helper and checker** failed on every call: `LLMError: HTTP 403` with body `error code: 1010`. That Cloudflare blocks the default User-Agent (D2) is inferred from the code and the status; with another User-Agent, every key got 401 with an "unable to validate" key message.
 - **Safety path** held with both models down. All 11 turns got fixed lines (1 holding, 9 offline, 1 `unsure` crisis line with 988). The crisis turn got `unsure` instead of `self` only because there was no checker category.
 - **Consent on:** the session file (11 `TurnLine`s) and the record (`source=live`, 22 turns) round-tripped; 12 traces.
-- **Consent off:** `kept: nothing`, the phrase was found nowhere, and the trace count stayed at 12. The notes step failed (D1).
+- **Consent off:** no session directory, no record and no matching MLflow content were found; the phrase appeared only in the test's own input file, and the trace count stayed at 12. The notes step failed (D1).
 - **Defects found in run 1:** D1, D2, D3 and D4; their status under the run-2 settings is in the table above.
 - **Where the data is:** run 1's scratch is in `runs/smoke/`. It also created `./mlruns/`, which run 2 reuses for its trace artifacts (D3); the folder is git-ignored.
 
