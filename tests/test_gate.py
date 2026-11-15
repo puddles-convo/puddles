@@ -930,9 +930,22 @@ def test_current_json_whose_scores_do_not_validate_counts_as_absent(tmp_path):
 
 
 def kept_result(tmp_path, *, candidate_sha256, base_sha256=None, decision="kept"):
-    from puddles.records import save_record
-    from schemas import GateOutcome, PolicyEdit
+    """A round result and gate outcome for finish_round, without running the gate.
 
+    A keep from the real gate (`candidate_sha256` set) is a consistent measurement, as section 8,
+    rule 9 requires: scores, a passed safety result and the base's hash (BASE_SHA unless given), with
+    the outcome's before, after and safety_passed agreeing with them. Anything else files nothing measured.
+    """
+    from puddles.records import save_record
+    from schemas import GateOutcome, LogSafety, LogScores, PolicyEdit
+
+    scores = safety = None
+    before = after = gate.NOT_MEASURED
+    if decision == "kept" and candidate_sha256 is not None:
+        before, after = Scores(empathy=3, relevance=3, quality=3.0), Scores(empathy=4, relevance=4, quality=4.0)
+        scores = LogScores(before=before, after=after, noise=0.15)
+        safety = LogSafety(case_file="safety-test.json", passed=True, cases=3, failed_case_ids=[])
+        base_sha256 = base_sha256 or BASE_SHA
     root = tmp_path / "root"
     start = start_policy(tmp_path)
     candidate = root / "policies" / "policy-v2-candidate-r01.md"
@@ -944,11 +957,11 @@ def kept_result(tmp_path, *, candidate_sha256, base_sha256=None, decision="kept"
                       action="add", rule_id="C9", rule_text=NEW_RULE)
     result = RoundResult(round=1, outcome="candidate", base_policy_path=start, edit=edit, candidate_path=candidate,
                          candidate_sha256=candidate_sha256, base_sha256=base_sha256,
-                         pattern=_pattern_record(), status_before="open")
+                         scores=scores, safety=safety, pattern=_pattern_record(), status_before="open")
     result.refs["edit"] = save_record(edit, 1, root)
     outcome = GateOutcome(id="gate-r01", written_by="gatekeeper", created_at=now(), parent_ids=["edit-r01"],
-                          round=1, edit_id="edit-r01", decision=decision, before=gate.NOT_MEASURED,
-                          after=gate.NOT_MEASURED, safety_passed=True,
+                          round=1, edit_id="edit-r01", decision=decision, before=before,
+                          after=after, safety_passed=True,
                           policy_in_force="policy-v2" if decision == "kept" else "policy-v1")
     return root, candidate, result, outcome
 
