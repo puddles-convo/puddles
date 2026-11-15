@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
+from pathlib import Path
 import socket
 
 import pytest
@@ -483,11 +484,20 @@ def test_invalid_user_ids_are_refused_before_files_or_memory(store, tmp_path, ba
     with pytest.raises(ValueError):
         check_user_id(bad)
     operations = [
+        # Reason: every user-ID entry point must reject reserved IDs and path escapes.
+        lambda: audience_for(bad),
         lambda: store.ensure_person(bad), lambda: store.index(bad),
         lambda: store.stored(bad), lambda: store.next_note_id(bad),
         lambda: store.expire(bad, TODAY), lambda: store.live_notes(bad, TODAY),
         lambda: store.helper_notes(bad, TODAY), lambda: store.take_off(bad, []),
         lambda: store.delete(bad, []), lambda: store.pending_deletes(bad),
+        lambda: store.save_index(LiveNoteIndex(user_id=bad)),
+        lambda: store.write(note(user_id=bad)),
+        lambda: build_input(store, bad, [], remember_me=False, today=TODAY),
+        lambda: session(store, ScriptedLLM({"actions": []}), user_id=bad),
+        lambda: to_record(NoteAction(action="add", kind="goals", fact="A plan."),
+                          user_id=bad, session_id="s", note_id="note-alice-001",
+                          today=TODAY, now=NOW),
     ]
     for operation in operations:
         with pytest.raises(ValueError):
@@ -830,6 +840,9 @@ def test_expiry_stands_when_model_answer_fails(store, tmp_path, failure, delete_
     assert ids(store) == [kept.id] and store.stored("alice") == {kept.id: kept}
     assert (expired.id in store.memory.entries) is not delete_confirmed
     expected_pending = [] if delete_confirmed else [expired.id]
+    # Reason: expiry survives model failure and its unconfirmed remote deletion must be reported.
+    assert result.undeleted == expected_pending
+    assert result.deleted == []  # Expiry is not a delete action or "forget everything".
     assert store.pending_deletes("alice") == expected_pending
     restarted = NoteStore(store.memory, tmp_path)
     assert restarted.pending_deletes("alice") == expected_pending
@@ -1076,3 +1089,147 @@ def test_note_step_does_not_call_mlflow_or_wrap_the_model(store, tmp_path, monke
     result = session(store, llm, remember_me=remember_me)
     assert not result.failed and result.deleted == [old.id] and len(llm.calls) == 1
     assert len(result.added) == int(remember_me)
+
+
+# Reason: direct store calls must preserve the same person boundary as checked model actions.
+@pytest.mark.parametrize("owner,other", [("alice", "bob"), ("user01", "user-01"),
+                                         ("user-01-01", "user-01")])
+def test_direct_store_calls_cannot_write_publish_or_delete_another_persons_id(store, owner, other):
+    theirs = seed(store, owner)[0]
+    mine = seed(store, other)[0]
+    before = deepcopy(store.memory.entries)
+    with pytest.raises(ValueError):
+        store.write(note(theirs.id, user_id=other))
+    with pytest.raises(ValueError):
+        store.save_index(LiveNoteIndex(user_id=other, notes=[live(theirs)]))
+    store.memory.events.clear()
+    assert store.delete(other, [theirs.id]) == []
+    assert not any(event[0] == "delete" for event in store.memory.events)
+    assert store.memory.entries == before
+    assert ids(store, owner) == [theirs.id] and ids(store, other) == [mine.id]
+    assert store.pending_deletes(other) == []
+
+
+# Reason: an interrupted local deletion must remain invisible and recoverable before remote retry.
+@pytest.mark.parametrize("crash_after", ["pending_deletes.json", "index.json", "notes.json"])
+def test_interrupted_take_off_is_completed_before_pending_remote_retry(store, tmp_path, monkeypatch,
+                                                                      crash_after):
+    removed, kept = seed(store, specs=[{"fact": "Forget this fact."}, {"fact": "Keep this fact."}])
+
+    class ProcessStopped(BaseException):
+        pass
+
+    real_replace = os.replace
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == crash_after:
+            raise ProcessStopped()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", replace_then_stop)
+        with pytest.raises(ProcessStopped):
+            store.take_off("alice", [removed.id])
+
+    restarted = NoteStore(store.memory, tmp_path)
+    observations = []
+
+    def observe(stage, entry_id):
+        if stage == "delete":
+            observations.append((entry_id, ids(restarted), set(restarted.stored("alice"))))
+
+    store.memory.observe = observe
+    assert restarted.delete("alice", []) == []
+    store.memory.observe = None
+    assert observations
+    assert all(removed.id not in index_ids and removed.id not in stored_ids
+               for _, index_ids, stored_ids in observations)
+    assert ids(restarted) == [kept.id]
+    assert restarted.stored("alice") == {kept.id: kept}
+    assert removed.id not in store.memory.entries
+    assert restarted.helper_notes("alice", TODAY) == [kept.fact]
+    assert_committed(restarted, tmp_path)
+
+
+# Reason: index pruning interrupted between files must still queue and delete the remote orphan.
+@pytest.mark.parametrize("crash_after", ["index.json", "pending_deletes.json", "notes.json"])
+def test_interrupted_index_pruning_recovers_on_next_session(store, tmp_path, monkeypatch, crash_after):
+    removed, kept = seed(store, specs=[{}, {}])
+
+    class ProcessStopped(BaseException):
+        pass
+
+    real_replace = os.replace
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == crash_after:
+            raise ProcessStopped()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", replace_then_stop)
+        with pytest.raises(ProcessStopped):
+            store.save_index(LiveNoteIndex(user_id="alice", notes=[live(kept)]))
+
+    restarted = NoteStore(store.memory, tmp_path)
+    assert restarted.helper_notes("alice", TODAY) == [kept.fact]
+    result = session(restarted, ScriptedLLM({"actions": []}), remember_me=False)
+    assert not result.failed and result.undeleted == []
+    assert restarted.stored("alice") == {kept.id: kept}
+    assert removed.id not in store.memory.entries
+    assert_committed(restarted, tmp_path)
+
+
+# Reason: forgetting everything must also remove a remote write interrupted before index publication.
+@pytest.mark.parametrize("crash_after", ["remote_confirmation", "notes.json"])
+def test_forget_everything_cleans_up_interrupted_remote_write(store, tmp_path, monkeypatch, crash_after):
+    candidate = note(store.next_note_id("alice"), fact="Forget this interrupted write.")
+
+    class ProcessStopped(BaseException):
+        pass
+
+    real_wait, real_replace = store.memory.wait, os.replace
+
+    def wait_then_stop(*args, **kwargs):
+        assert real_wait(*args, **kwargs)
+        raise ProcessStopped()
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == "notes.json":
+            raise ProcessStopped()
+
+    with monkeypatch.context() as patch:
+        if crash_after == "remote_confirmation":
+            patch.setattr(store.memory, "wait", wait_then_stop)
+        else:
+            patch.setattr(os, "replace", replace_then_stop)
+        with pytest.raises(ProcessStopped):
+            store.write(candidate)
+
+    assert candidate.id in store.memory.entries
+    restarted = NoteStore(store.memory, tmp_path)
+    assert restarted.helper_notes("alice", TODAY) == []
+    result = session(restarted, ScriptedLLM({"forget_everything": True}), remember_me=False)
+    assert result.forgot_everything and not result.failed
+    assert ids(restarted) == [] and restarted.stored("alice") == {}
+    assert candidate.id not in store.memory.entries
+    assert result.undeleted == []
+
+
+# Reason: the atomic-file rule applies to the counter and deletion queue as well as notes and index.
+def test_all_store_files_use_same_folder_temporary_rename(store, monkeypatch):
+    real_replace = os.replace
+    destinations = set()
+
+    def observe_replace(src, dst, *args, **kwargs):
+        src, dst = Path(src), Path(dst)
+        assert src != dst and src.parent == dst.parent
+        json.loads(src.read_text())
+        destinations.add(dst.name)
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", observe_replace)
+    old = seed(store)[0]
+    assert store.delete("alice", [old.id]) == []
+    assert destinations == {"counter.json", "notes.json", "index.json", "pending_deletes.json"}
