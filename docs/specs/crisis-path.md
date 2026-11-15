@@ -87,7 +87,7 @@ The text, first rule that applies:
 
 | # | When | Text | `fixed_handoff_response` |
 |---|---|---|---|
-| 1 | `keyword` is not `None` | The fixed response for the category of a counting check that says `crisis`; `unsure` in every other case | true |
+| 1 | `keyword` is not `None` | The fixed response for the category of a counting check that says `crisis`; `unsure` in every other case, including a counting crisis check with no category | true |
 | 2 | The check counts and says `crisis` | The fixed response for its category; `unsure` if it has none | true |
 | 3 | The check counts, says `none` or `concern`, and `draft` is not `None` | `draft.text` | false |
 | 4 | The check counts, says `none` or `concern`, and `draft` is `None` | The holding line | true |
@@ -165,14 +165,16 @@ def end_session(session: Session, now: datetime | None = None) -> Optional[Conve
 2. The turn number is `len(session.lines) + 1`.
 3. The keyword check: `puddles.eval.crisis.keyword_match(text, session.path.keywords)`.
 4. The checker and the helper **start together**, each on its own thread. The checker is `crisis.run`. The helper is `loop.helper.helper_reply(session.helper_client, session.policy, session.turns + [the person's turn], session_id=..., turn=..., user_notes=session.user_notes)`, unchanged. **The helper is never given the risk level, the keyword result or the checker's answer.**
-5. The checker has `session.deadline_s` seconds on the clock (`path.timeout_s` when it is `None`), counted from the moment it was started. If it has not answered by then its status is `late`, and **whatever it returns afterwards is discarded, even `none`**. `CheckFailed` gives its status. Any other exception is `failed`.
-6. The helper's draft is waited for only when it can be used: no keyword match and a check that answered `none` or `concern`. Then it is waited for up to `session.helper_wait_s` seconds from the start of the turn. A helper that raised, or has not answered by then, is a failed helper: `helper_failed` is true and the draft is `None`. In every other case the turn does not wait for the helper: a crisis response, the holding line and the offline line are spoken whether or not the helper answered.
+5. The checker has `session.deadline_s` seconds on the clock (`path.timeout_s` when it is `None`), counted from the moment it was started. If it has not answered by then its status is `late`, and **whatever it returns afterwards is discarded, even `none`**. `CheckFailed` gives its status. Any other exception is `failed`. If the `CheckedMessage` that comes back does not carry this session's ID and this turn's number, the status is `failed` and no `CheckedMessage` is kept: a line marked `answered` always holds the check for that same turn.
+6. The helper's draft is waited for only when it can be used: no keyword match and a check for this session and turn that answered `none` or `concern`. Then it is waited for up to `session.helper_wait_s` seconds from the start of the turn. A helper that raised, or has not answered by then, is a failed helper: `helper_failed` is true and the draft is `None`. In every other case the turn does not wait for the helper, and `helper_failed` says only whether the helper had already raised when the reply was released: a crisis response, the holding line and the offline line are spoken whether or not the helper answered.
 7. `release(...)` decides the reply, with `failed_before=session.failed_checks`. `session.failed_checks` becomes the count it returns.
 8. A `TurnLine` is made and appended to `session.lines`. `session.turns` gets the person's turn and then the released text as the helper's turn.
 9. **If and only if `session.consent_for_training` is true**, the line is appended to the session file with `append_line(session.root, line)`. With consent on and `root` `None`, `run_turn` raises `ValueError` before any model is called.
 10. Returns the `TurnResult`.
 
-`run_turn` raises nothing for a failed model. Whatever the checker and the helper do, it returns a reply.
+`run_turn` raises nothing for a failed model. Whatever the checker and the helper do, it returns a reply. The checker and the helper run on daemon threads; nothing either returns after the turn stopped waiting for it is used, in that turn or a later one, in that session or another.
+
+In `timings_ms`, `helper` is `-1` when the helper had not answered by the time the reply was released: not measured, which is different from 0.
 
 ### Consent
 
@@ -183,7 +185,7 @@ def end_session(session: Session, now: datetime | None = None) -> Optional[Conve
 | No | Yes | The session file and the session record |
 | Yes | Yes | The session file and the session record |
 
-- **With `consent_for_training` false, nothing the person typed is written to disk or traced**: no session file, no record file, no MLflow span, trace or run, no log line that holds their words. The clients are used as they were given, without `TracedClient`.
+- **With `consent_for_training` false, nothing the person typed is written to disk or traced**: no session file, no record file, no MLflow span, trace or run, no log line that holds their words. The same holds for what the models returned and for the text of a model's error, because either can repeat the person's words: with consent off, neither is logged, traced or written. The clients are used as they were given, without `TracedClient`.
 - With `consent_for_training` true, each turn runs inside one MLflow span named `turn`, and the two clients are wrapped in `puddles.tracing.TracedClient`, named `helper` and `crisis_checker`. `run_turn` does not call `tracing.setup`; the caller does.
 - `end_session`: with consent, builds the record with `to_conversation_record` from the lines read back from the session file, writes it to `record_path(...)` as JSON, and returns it. Without consent it writes nothing and returns `None`. A session with no turns returns `None` and writes nothing. In both cases it then clears `session.turns` and `session.lines`.
 
