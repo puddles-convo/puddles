@@ -4,7 +4,7 @@ The existing schemas and training APIs supply files, never the expected report.
 Markdown assertions allow layout choices the contract leaves open.
 """
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -290,7 +290,9 @@ def training_round(tmp_path, scenario_factory):
                 write_json(root / "scores/round-01-gate.json", {
                     "round": 1, "decision": decision, "would_keep": True,
                     "failed": [] if decision == "kept" else ["quality_gain"],
-                    "checks": {"quality_gain": "passed" if decision == "kept" else "failed"},
+                    # Amendment: noise is measured only with an explicit passed marker.
+                    "checks": {"quality_gain": "passed" if decision == "kept" else "failed",
+                               "noise_not_measured": "passed"},
                     "reason": "Offline measured gate.",
                 })
             return outcome
@@ -474,6 +476,8 @@ def test_judge_summary_averages_every_score_instead_of_critic_subset(tmp_path):
         score(record, 5, 4) for record in records[10:12]
     ]
     write_jsonl(tmp_path / "scores/round-03-train.jsonl", all_scores)
+    # Amendment: score membership is defined by the round's conversations file.
+    write_jsonl(tmp_path / "conversations/round-03-train.jsonl", records)
     summary = node_summary("judge", {"round": 3, "records": records}, {
         "scored": [scored(record, 1, 2) for record in records[:10]], "unscored": [records[12].id],
     }, tmp_path)
@@ -619,8 +623,7 @@ def test_every_executed_node_span_has_safe_summary(training_round, decision):
         for span in summary_spans:
             if span.name.startswith("summary:"):
                 assert span.parent_id in by_id and by_id[span.parent_id].name == name
-                report = build_report(root, 1).lower()
-                assert "span" in report, "The fallback must be disclosed in the report"
+                # Amendment: the round report no longer discloses fallback tracing.
             summary = span.attributes[SUMMARY_KEY]
             if isinstance(summary, str):
                 summary = json.loads(summary)
@@ -721,8 +724,8 @@ def test_round_survives_errors_in_every_node_summary(training_round, monkeypatch
     assert build_report(root, 1).startswith("# Round 1: reverted")
 
 
-# Reason: when the node span is inaccessible, the fallback child and report disclosure are both required.
-def test_inaccessible_node_spans_use_disclosed_summary_children(training_round, monkeypatch):
+# Amendment: fallback children remain required, but are not mentioned in the round report.
+def test_inaccessible_node_spans_use_summary_children_without_report_disclosure(training_round, monkeypatch):
     original = mlflow.get_current_active_span
 
     class InaccessibleNode:
@@ -747,11 +750,7 @@ def test_inaccessible_node_spans_use_disclosed_summary_children(training_round, 
         children = [span for span in spans if span.name == f"summary:{node}"]
         assert len(children) == 1 and SUMMARY_KEY in children[0].attributes
         assert by_id[children[0].parent_id].name == node
-    report = build_report(root, 1).lower()
-    # Reason: disclosure wording is not fixed; either child/fallback wording or the span name suffices.
-    assert "span" in report and "summar" in report and any(
-        word in report for word in ("child", "fallback", "summary:")
-    ), "The report must disclose fallback summary spans"
+    assert "summary:" not in build_report(root, 1)
 
 
 # Section 2: numbers must reflect the actual decision and measured evidence.
@@ -1087,6 +1086,8 @@ def test_report_builds_after_stale_scores_from_interrupted_attempt(tmp_path, tra
     report = build_report(root, 1)
     assert report.startswith("# Round 1: no_pattern")
     assert "The gate did not run." in section(report, "Gate")
+    # Amendment: orphan scores must be counted below the table, not silently omitted.
+    assert "1 score(s) in the scores file belong to no conversation of this round" in section(report, "Conversations")
 
 
 def test_stand_in_report_explicitly_says_nothing_was_measured(training_round):
@@ -1145,11 +1146,13 @@ def test_show_round_attaches_to_named_run_using_tracking_address_precedence(tmp_
         uri = f"sqlite:///{tmp_path}/{name}.db"
         client = MlflowClient(tracking_uri=uri)
         experiment = client.create_experiment("puddles", artifact_location=(tmp_path / name).as_uri())
-        target = client.create_run(experiment, tags={"mlflow.runName": "round-07"})
-        other = client.create_run(experiment, tags={"mlflow.runName": "round-08"})
+        # Amendment: matching run names are eligible only with this root's resolved tag.
+        target = client.create_run(experiment, tags={"mlflow.runName": "round-07", "root": str(root.resolve())})
+        other = client.create_run(experiment, tags={"mlflow.runName": "round-08", "root": str(root.resolve())})
         unrelated_experiment = client.create_experiment(
             "unrelated", artifact_location=(tmp_path / f"{name}-unrelated").as_uri())
-        unrelated = client.create_run(unrelated_experiment, tags={"mlflow.runName": "round-07"})
+        unrelated = client.create_run(unrelated_experiment,
+                                      tags={"mlflow.runName": "round-07", "root": str(root.resolve())})
         client.set_terminated(target.info.run_id)
         client.set_terminated(other.info.run_id)
         client.set_terminated(unrelated.info.run_id)
@@ -1199,7 +1202,8 @@ def test_show_round_attachment_failure_still_writes_prints_and_returns_zero(tmp_
         client = MlflowClient(tracking_uri=uri)
         location = blocker.as_uri() if failure == "artifact_directory" else "acceptance-unsupported://artifacts"
         experiment = client.create_experiment("puddles", artifact_location=location)
-        run = client.create_run(experiment, tags={"mlflow.runName": "round-07"})
+        # Amendment: reach the attachment failure using an eligible root-tagged run.
+        run = client.create_run(experiment, tags={"mlflow.runName": "round-07", "root": str(root.resolve())})
         client.set_terminated(run.info.run_id)
     assert show_round.main(["--root", str(root), "--round", "7", "--mlflow", uri]) == 0
     assert_not_attached(capsys.readouterr(), expected)
@@ -1215,7 +1219,9 @@ def test_show_round_uses_most_recent_of_several_matching_runs(tmp_path, capsys):
     client = MlflowClient()
     experiment = client.get_experiment_by_name("puddles")
     runs = [client.create_run(experiment.experiment_id, start_time=stamp,
-                              tags={"mlflow.runName": "round-07"}) for stamp in (1000, 2000, 3000)]
+                              # Amendment: newest selection is among runs of this root only.
+                              tags={"mlflow.runName": "round-07", "root": str(root.resolve())})
+            for stamp in (1000, 2000, 3000)]
     # Start times and creation order agree; ending the oldest last must not select it.
     for index, run in enumerate(reversed(runs)):
         client.set_terminated(run.info.run_id, end_time=4000 + index)
@@ -1276,3 +1282,189 @@ def test_show_round_unreadable_log_returns_two_with_one_stderr_line(tmp_path, ca
     assert len(output.err.strip().splitlines()) == 1 and output.err.strip()
     assert snapshot(root) == before
     assert not (root / "reports/round-07.md").exists()
+
+
+# Reason: the contract joins by conversation ID, without a timestamp freshness heuristic.
+@pytest.mark.parametrize("offset", [-2, -1.001, 0, 2])
+def test_matching_score_is_never_dropped_because_of_clock_offset(tmp_path, offset):
+    _, _, records, _ = archived_round(tmp_path)
+    first = score(records[0], 5, 1).model_copy(update={"created_at": STAMP + timedelta(seconds=offset)})
+    write_jsonl(tmp_path / "scores/round-07-train.jsonl", [first, score(records[1], 4, 2)])
+    before = snapshot(tmp_path)
+    report = build_report(tmp_path, 7)
+    row = row_for(section(report, "Conversations"), records[0].id)
+    assert row[1] and row[2], "A matching conversation's measured scores were discarded"
+    assert float(row[1]) == 5 and float(row[2]) == 1
+    assert "score(s) in the scores file belong to no conversation" not in report
+    summary = node_summary("judge", {"round": 7, "records": records}, {"scored": [], "unscored": []}, tmp_path)
+    assert summary["scored"] == 2
+    assert summary["mean_empathy"] == 4.5 and summary["mean_relevance"] == 1.5
+    assert snapshot(tmp_path) == before
+
+
+# Reason: orphan scores must be counted, excluded from both means, and never joined or exposed as rows.
+def test_orphan_scores_are_counted_without_changing_current_scores(tmp_path):
+    _, _, records, _ = archived_round(tmp_path)
+    orphan = score(conversation(7, "orphan"), 1, 1)
+    write_jsonl(tmp_path / "scores/round-07-train.jsonl", [orphan, score(records[0]), score(records[1], 4, 2)])
+    report = build_report(tmp_path, 7)
+    conversations = section(report, "Conversations")
+    assert "1 score(s) in the scores file belong to no conversation of this round" in conversations
+    assert orphan.conversation_id not in conversations
+    assert float(row_for(conversations, records[0].id)[1]) == 2
+    summary = node_summary("judge", {"round": 7, "records": records}, {"scored": [], "unscored": []}, tmp_path)
+    assert summary["scored"] == 2 and summary["mean_empathy"] == summary["mean_relevance"] == 3
+
+
+# Reason: a supplied noise figure is measured only with the amended contract's explicit passed marker.
+@pytest.mark.parametrize("marker", ["passed", "failed", "not_run", None, "absent", "missing_file"])
+def test_noise_requires_explicit_pass_marker_in_all_three_views(tmp_path, marker):
+    from puddles.round_view import gate_metrics
+
+    event, objects, _, checks = archived_round(tmp_path)
+    path = tmp_path / "scores/round-07-gate.json"
+    if marker == "missing_file":
+        path.unlink()
+    else:
+        checks.pop("noise_not_measured")
+        if marker != "absent":
+            checks["noise_not_measured"] = marker
+        write_json(path, {"round": 7, "decision": "reverted", "checks": checks})
+    result = RoundResult(round=7, outcome="candidate", base_policy_path=tmp_path / "policies/policy-v1.md")
+    result.scores, result.safety = event.scores, event.safety
+    state = {"round": 7, "result": result, "gate": objects["outcome"]}
+    summary = node_summary("gate", state, {"gate": objects["outcome"]}, tmp_path)
+    metrics = gate_metrics(state, tmp_path)
+    assert summary["quality_before"] == metrics["quality_before"] == 2.5
+    assert summary["quality_after"] == metrics["quality_after"] == 4.25
+    assert summary["noise"] == (0.125 if marker == "passed" else None)
+    assert ("noise" in metrics) is (marker == "passed")
+    gate = section(build_report(tmp_path, 7), "Gate")
+    if marker == "passed":
+        has_number(gate, 0.125)
+    elif marker == "missing_file":
+        assert "Stand-in gate: nothing was measured." in gate
+    else:
+        assert "not measured; the figure given was" in gate
+
+
+# Reason: root-tag isolation must reject both newer foreign-root runs and newer untagged legacy runs.
+@pytest.mark.parametrize("matching", [False, True])
+def test_attachment_rejects_foreign_and_untagged_runs(tmp_path, capsys, matching):
+    root = tmp_path / "archive"
+    archived_round(root)
+    expected = build_report(root, 7)
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("puddles")
+    tags = [{"mlflow.runName": "round-07", "root": str((tmp_path / "other").resolve())},
+            {"mlflow.runName": "round-07"}]
+    if matching:
+        tags.insert(0, {"mlflow.runName": "round-07", "root": str(root.resolve())})
+    runs = [client.create_run(experiment.experiment_id, start_time=(i + 1) * 1000, tags=tag)
+            for i, tag in enumerate(tags)]
+    for run in runs:
+        client.set_terminated(run.info.run_id)
+    # Exercise resolution, not just an already canonical absolute spelling.
+    assert show_round.main(["--root", str(root / ".." / root.name), "--round", "7"]) == 0
+    output = capsys.readouterr()
+    if not matching:
+        assert_not_attached(output, expected)
+    for i, run in enumerate(runs):
+        artifacts = client.list_artifacts(run.info.run_id, "reports")
+        assert bool(artifacts) is (matching and i == 0)
+
+
+# Reason: the producer must record the same resolved root identity that report attachment matches.
+def test_round_run_records_resolved_root_tag(training_round):
+    root, _, deps = training_round()
+    deps.root = Path("training")  # the fixture's working directory is this root's parent
+    graph.run_round(deps, policy_path=root / "policies/policy-v1.md", scenarios=[])
+    experiment = mlflow.get_experiment_by_name("puddles")
+    runs = MlflowClient().search_runs([experiment.experiment_id])
+    assert len(runs) == 2
+    assert all(run.data.tags["root"] == str(root.resolve()) for run in runs)
+
+
+# Reason: incomplete or unreadable artifacts must be disclosed without crashes, writes, or leaked turns.
+@pytest.mark.parametrize("kind", ["conversations", "scores", "failures", "gate", "usage", "reads", "record", "policy"])
+@pytest.mark.parametrize("damage", ["cut", "directory", "undecodable"])
+def test_unreadable_artifacts_preserve_report_summary_and_cli(tmp_path, capsys, kind, damage):
+    root = tmp_path / "archive"
+    event, objects, records, _ = archived_round(root, action="reword")
+    paths = {
+        "conversations": root / "conversations/round-07-train.jsonl",
+        "scores": root / "scores/round-07-train.jsonl",
+        "failures": root / "conversations/round-07-train.failures.jsonl",
+        "gate": root / "scores/round-07-gate.json",
+        "usage": root / "log/usage.jsonl", "reads": root / "log/memory_reads.jsonl",
+        "record": root / event.records["pattern"].path, "policy": root / "policies/policy-v1.md",
+    }
+    path = paths[kind]
+    if damage == "directory":
+        path.unlink()
+        path.mkdir()
+    elif damage == "undecodable":
+        path.write_bytes(b"\xff\xfe" + CLIENT_LINE.encode())
+    else:
+        path.write_text('{"user": "' + CLIENT_LINE + '", "helper": "' + HELPER_LINE + '"', encoding="utf-8")
+    before = snapshot(root)
+    result = RoundResult(round=7, outcome="candidate", base_policy_path=root / "policies/policy-v1.md")
+    result.scores, result.safety = event.scores, event.safety
+    state = {"round": 7, "result": result}
+    for node, update in (("judge", {}), ("gate", {"gate": objects["outcome"]}), ("finish", {"event": event})):
+        summary = node_summary(node, state, update, root)
+        assert isinstance(summary, dict)
+        assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
+    report = build_report(root, 7)
+    assert report.startswith("# Round 7: reverted")
+    assert CLIENT_LINE not in report and HELPER_LINE not in report
+    assert any(word in report.lower() for word in ("could not", "cannot", "missing", "not in the root", "left out"))
+    assert snapshot(root) == before
+    assert show_round.main(["--root", str(root), "--round", "7"]) == 0
+    assert report in capsys.readouterr().out
+    assert snapshot(root) == {**before, Path("reports/round-07.md"): report.encode()}
+
+
+# Reason: malformed check values are neither statuses nor conversation text safe to copy into a report.
+@pytest.mark.parametrize("status", [{}, [], None, True, "unknown-status", CLIENT_LINE, HELPER_LINE])
+def test_invalid_gate_check_values_are_unreadable_not_reported_values(tmp_path, status):
+    event, objects, _, _ = archived_round(tmp_path)
+    write_json(tmp_path / "scores/round-07-gate.json", {
+        "round": 7, "decision": "reverted", "checks": {"safety_cases": status},
+    })
+    result = RoundResult(round=7, outcome="candidate", base_policy_path=tmp_path / "policies/policy-v1.md")
+    result.scores, result.safety = event.scores, event.safety
+    report = build_report(tmp_path, 7)
+    assert CLIENT_LINE not in report and HELPER_LINE not in report
+    assert any(word in section(report, "Gate").lower() for word in (
+        "could not", "cannot", "invalid", "not a gate report", "unreadable", "not valid", "left out", "omitted",
+    ))
+    summary = node_summary("gate", {"round": 7, "result": result}, {"gate": objects["outcome"]}, tmp_path)
+    assert summary["failed_checks"] is None
+
+
+# Reason: missing and nonfinite usage numbers must not become zeros, nan/inf values, or a report crash.
+@pytest.mark.parametrize("bad", ["missing", "nan_cost", "infinite_cost", "infinite_tokens"])
+def test_unreadable_usage_numbers_are_never_shown_as_measurements(tmp_path, bad):
+    archived_round(tmp_path)
+    row = {"event": "done", "round": 7, "kind": "model", "agent": "invalid-usage-agent"}
+    unknown = (2, 3, 4)
+    if bad != "missing":
+        row.update(tokens_in=10, tokens_out=5, cost_usd=0.25)
+        field = "tokens_in" if bad == "infinite_tokens" else "cost_usd"
+        row[field] = float("nan") if bad == "nan_cost" else float("inf")
+        unknown = (2,) if field == "tokens_in" else (4,)
+    path = tmp_path / "log/usage.jsonl"
+    with path.open("a") as stream:
+        stream.write(json.dumps(row) + "\n")
+    report = build_report(tmp_path, 7)
+    cost = section(report, "Cost")
+    rows = [cells for cells in table_rows(cost) if "invalid-usage-agent" in cells]
+    for cells in rows:
+        for index in unknown:
+            assert cells[index].lower() in ("", "null", "none", "-", "—", "n/a") or any(
+                word in cells[index].lower() for word in ("not measured", "unmeasured", "unknown", "unreadable", "unavailable")
+            )
+    assert any(word in cost.lower() for word in (
+        "could not", "cannot", "invalid", "missing", "not finite", "nonfinite", "unreadable", "left out", "omitted",
+    ))
