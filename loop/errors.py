@@ -4,6 +4,16 @@
 class LLMError(Exception):
     """A chat model call failed: transport, server or unexpected body."""
 
+    status: int | None = None  # the HTTP status, when the server answered with an error
+
+
+class DeadlineExceeded(LLMError):
+    """The time allowed for a call, retries included, ran out."""
+
+
+class SchemaError(LLMError):
+    """The reply did not match the schema, and neither did the retry."""
+
 
 class ConfigError(Exception):
     """A required setting, such as an environment variable, is missing."""
