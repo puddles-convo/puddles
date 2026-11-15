@@ -26,4 +26,6 @@
 
 **Limits:** C9 cleared the noise by about 0.001; ESConv ratings average 4.5 of 5. Every comparison is between existing human sessions, so none tests the helper following a rule. CounselBench-Adv and VERA-MH are only mapped to rules: scoring them needs the live helper (`puddles.eval.external`). No safety cases ran. The test split and outside sets cannot affect any round. CounselBench-Adv prompts (CC BY-NC-ND) are not copied here.
 
+**Use on the robot:** `policies/policy-v2.md` (+ `.meta.json`) is a copy of this run's output, ready for inference with no training: `python -m scripts.chat --policy policies/policy-v2.md` (`integration` branch). It loads with `loop.policy.load_policy`, the hashes match the `.meta.json`, and it is within the 800-token cap. Until the live gate tests C9, `policy-v1` is the safer choice.
+
 **Files:** `policies/policy-v2.md` + `.meta.json` (policy in force) · `log/decisions.jsonl` · `records/round-NN/` · `held-out.json`

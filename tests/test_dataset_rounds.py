@@ -69,3 +69,15 @@ def test_held_out_reports_kept_rules_and_rule_coverage(tmp_path):
     assert report["esconv_test"]["rules"]["C9"]["breaks"] == [10, 2.5]
     assert report["counselbench_adv"]["apathetic"] == [20, ["C1", "C9"]]
     assert report["vera_mh_si"]["High"] == [25, ["S1"]]
+
+
+def test_shipped_policy_loads_for_inference():
+    from loop.policy import load_policy
+    from puddles.policy import TOKEN_CAP, estimate_tokens
+
+    path = Path(__file__).resolve().parents[1] / "policies" / "policy-v2.md"
+    policy, meta = load_policy(path), json.loads(path.with_suffix(".meta.json").read_text())
+    assert policy.version == meta["policy_version"] == "policy-v2"
+    assert (policy.sha256, policy.safety_sha256) == (meta["policy_sha256"], meta["safety_sha256"])
+    assert policy.safety_sha256 == load_policy(path.with_name("policy-v1.md")).safety_sha256
+    assert estimate_tokens(policy.text) <= TOKEN_CAP
