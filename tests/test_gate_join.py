@@ -1,6 +1,7 @@
 """The gate joined to Ansh's judge and safety check (docs/specs/gate-join.md). All offline.
 
-His `run_safety`, his loader and his `JudgePanel` run for real; only the model calls are scripted.
+His `run_safety`, his loader, his `JudgePanel` and his `SingleJudge` run for real; only the model
+calls are scripted.
 No safety case, question or yes-or-no rule is typed here: the scripted asker and helper read his
 cases through his loader and work out the passing answers from them.
 """
@@ -20,12 +21,12 @@ from loop.runner import load_scenarios
 from puddles import gate, gate_join, tracing
 from puddles.decision_log import DecisionLog
 from puddles.eval import safety as eval_safety
-from puddles.eval.judge import JudgePanel, PanelConfig
+from puddles.eval.judge import FallbackConfig, JudgePanel, PanelConfig, SingleJudge
 from puddles.graph import RoundDeps, run_round
 from puddles.judging import MeteredJudge
 from puddles.memory import FakeMemory
 from puddles.round import RoundResult
-from puddles.usage import Meter, ModelPrice, Prices
+from puddles.usage import Meter, ModelPrice, Prices, metering
 from schemas import CriticOutput, JudgeOutput, ProposerOutput, ResearcherOutput
 from tests.fakes import FakeSearch, ScriptedLLM
 
@@ -36,7 +37,9 @@ IDS = [s.scenario_id for s in SCENARIOS]
 NEW_RULE = "Ask one open question before any suggestion."
 MARK = "What has been the hardest part of it for you?"  # the candidate's helper says this; the judge rewards it
 PANEL = PanelConfig(judges=["fake-judge-a", "fake-judge-b", "fake-judge-c"], astra="fake-astra")
-PRICES = Prices(models={m: ModelPrice(1.0, 2.0) for m in [*PANEL.judges, PANEL.astra]}, exa_search_usd=0.0)
+FALLBACK = FallbackConfig(model="fake-fallback")
+PRICES = Prices(models={m: ModelPrice(1.0, 2.0) for m in [*PANEL.judges, PANEL.astra, FALLBACK.model]},
+                exa_search_usd=0.0)
 URL = "https://counselling.example.ac.uk/skills"
 QUERY = "counselling skills exploring before giving advice"
 
@@ -383,3 +386,106 @@ def test_the_script_without_fake_builds_the_real_gate_on_the_rounds_judge(tmp_pa
     assert isinstance(deps.judge, MeteredJudge) and deps.judge.judge is judge
     assert deps.noise_measured is True and deps.max_turns == 6
     assert checked[0] == ["fake-safety"] and checked[1].judge_panel is judge
+
+
+def test_with_the_fallback_judge_and_no_safety_model_the_line_names_puddles_safety_model(
+        tmp_path, monkeypatch, capsys):
+    from scripts import run_graph_round as script
+
+    real_script_env(monkeypatch, judge_from_env=lambda: SingleJudge(FALLBACK, FakeJudgeLLM(FALLBACK.model)))
+    monkeypatch.setenv("PUDDLES_JUDGE", "fallback")  # and PUDDLES_JUDGE_ASTRA is unset, as it usually is then
+    monkeypatch.setattr(script, "run_round", lambda *a, **k: pytest.fail("the round started"))
+    root = tmp_path / "root"
+    assert script.main(["--root", str(root), "--policy", str(POLICY)]) == 2
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == ["error: ValueError: PUDDLES_SAFETY_MODEL (or PUDDLES_JUDGE_ASTRA) is not set"]
+    assert not captured.out and not root.exists()
+
+
+def test_an_unpriced_safety_model_stops_the_script_before_memory_any_write_or_any_call(tmp_path, monkeypatch, capsys):
+    from scripts import run_graph_round as script
+
+    judge = panel()
+    real_script_env(monkeypatch, judge_from_env=lambda: judge)
+    monkeypatch.setattr(eval_safety.OpenAIYesNo, "from_env", classmethod(lambda cls: Asker()))
+    touched = []
+
+    class Memory(FakeMemory):
+        def __getattribute__(self, name):
+            if not name.startswith("_"):
+                touched.append(name)
+            return super().__getattribute__(name)
+
+    import puddles.memory
+    monkeypatch.setattr(puddles.memory, "PastClient", lambda: Memory())
+    config = tmp_path / "run.toml"  # every model priced but the safety model
+    rows = "".join(f'[prices.models."{m}"]\ninput_usd_per_million = 1\noutput_usd_per_million = 2\n'
+                   for m in [*PANEL.judges, PANEL.astra])
+    config.write_text(f"[prices]\nexa_search_usd = 0\n{rows}[output_limits]\ndefault = 100\n")
+    monkeypatch.setenv("PUDDLES_CONFIG", str(config))
+    root = tmp_path / "root"
+    code = script.main(["--root", str(root), "--policy", str(POLICY), "--mlflow", f"sqlite:///{tmp_path}/m.db"])
+    captured = capsys.readouterr()
+    assert code == 2 and not captured.out
+    [line] = captured.err.splitlines()
+    assert line.startswith("error: MissingPrice: ") and "fake-safety" in line
+    assert not root.exists() and touched == []
+    assert not (tmp_path / "m.db").exists()  # tracing was not even set up
+    assert judge.astra.calls == 0 and not [j for j in judge.judges if j.calls]
+
+
+# ---------- test 7: the judge a real round uses now ----------
+
+def test_the_single_model_judge_keeps_a_clean_candidate_once_per_conversation_with_its_tokens_logged(tmp_path):
+    llm = FakeJudgeLLM(FALLBACK.model)
+    seen = []
+    judge_once = llm.judge
+
+    def judge(system, user):
+        seen.append(MARK in user.split("</conversation>")[0])
+        return judge_once(system, user)
+
+    llm.judge = judge
+    deps, current, candidate = setup(tmp_path, judge=SingleJudge(FALLBACK, llm), noise_measured=True)
+    with metering(Meter(deps.root, PRICES), "gatekeeper"):
+        out, report, _ = gated(deps, current, candidate)
+
+    assert (out.decision, report.failed) == ("kept", [])
+    assert out.before.quality == 3.0 and out.after.quality == 4.0
+    assert seen.count(True) == len(IDS)  # once per validation conversation, no retry
+    assert seen.count(False) == len(IDS)  # and once per conversation of the policy in force
+    lines = [json.loads(x) for x in (deps.root / "log" / "usage.jsonl").read_text().splitlines()]
+    done = [d for d in lines if d["event"] == "done"]
+    assert len(done) == 2 * len(IDS)
+    assert {(d["agent"], d["model"], d["tokens_in"], d["tokens_out"]) for d in done} == {
+        ("gatekeeper", FALLBACK.model, 100, 10)}
+
+
+# ---------- a round the real gate was started on and killed ----------
+
+def test_a_round_killed_inside_the_real_gate_is_simply_run_again(tmp_path, traced):
+    """gate.md section 9 refuses caller-given measurements for such a round; the real gate gives none."""
+    root, start = tmp_path / "root", start_policy(tmp_path)
+    judge = panel()
+    astra = judge.astra
+
+    class Killed:
+        model = astra.model
+
+        def judge(self, system, user):
+            if MARK in user.split("</conversation>")[0]:
+                raise KeyboardInterrupt  # killed while the candidate's validation is judged
+            return astra.judge(system, user)
+
+    judge.astra = Killed()
+    with pytest.raises(KeyboardInterrupt):
+        run_round(round_deps(root, start, judge, Asker()), policy_path=start, scenarios=SCENARIOS)
+    assert (root / "conversations" / "round-01-validation.jsonl").exists()
+    assert (root / "scores" / "round-01-safety.json").exists()
+    assert DecisionLog(root).rounds() == []
+
+    state = run_round(round_deps(root, start, panel(), Asker()), policy_path=start, scenarios=SCENARIOS)
+    event = state["event"]
+    assert event.round == 1 and event.outcome == "kept"
+    assert event.safety.passed is True and event.scores.after.quality == 4.0
+    assert DecisionLog(root).rounds() == [event]

@@ -178,12 +178,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         user_client: ChatClient
         llm: LLM
         memory: Memory
-        judge_panel: Judge
+        judge: Judge  # whatever judge_from_env returns; its kind is not looked at
         asker = None  # the real safety check's yes-or-no client; None with --fake
         if args.fake:
             helper_client, user_client = FakeClient(_fake_helper), FakeClient(_fake_user)
             llm, search, memory = FakeLLM(), fake_search, FakeMemory()
-            judge_panel = FakeJudge()
+            judge = FakeJudge()
         else:
             from loop.llm import client_from_env
             from puddles import exa
@@ -197,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             from puddles.eval import judge as eval_judge
 
             # Looked up on the module now, so a test can replace it there. A missing variable is a ValueError.
-            judge_panel = eval_judge.judge_from_env()
+            judge = eval_judge.judge_from_env()
             if args.gate == "real":
                 from puddles.eval import safety as eval_safety
 
@@ -221,29 +221,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         traced_user = tracing.TracedClient(user_client, "simulated_user")
         if asker is None:  # --fake
             gate_deps = real_gate.GateDeps(
-                helper_client=traced_helper, user_client=traced_user, judge=MeteredJudge(judge_panel),
+                helper_client=traced_helper, user_client=traced_user, judge=MeteredJudge(judge),
                 safety=fake_safety, root=root, scenarios=validation, noise_measured=args.noise_measured,
                 max_turns=args.max_turns, seed=args.seed)
         else:
             from puddles.gate_join import real_gate_deps
 
             gate_deps = real_gate_deps(
-                helper_client=traced_helper, user_client=traced_user, judge=judge_panel, root=root,
+                helper_client=traced_helper, user_client=traced_user, judge=judge, root=root,
                 scenarios=validation, noise_measured=args.noise_measured, max_turns=args.max_turns,
                 seed=args.seed, asker=asker)
         gate = real_gate.make_gate(gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
                                    noise=args.noise, token_cap=args.token_cap)
 
-    tracing.setup(tracking_uri=args.mlflow)
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
                      memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy),
-                     judge_panel=judge_panel)
-    try:
-        if asker is not None:
-            from puddles.gate_join import safety_models
+                     judge_panel=judge)
+    if asker is not None:
+        from puddles.gate_join import safety_models
 
-            # The graph's own price check knows nothing of the safety model, so it is checked here first.
+        # The graph's own price check knows nothing of the safety model, so it is checked here, before
+        # tracing is set up (which prints and writes), before memory and before any model call.
+        try:
             round_meter(deps).prices.check(safety_models(asker))
+        except ConfigError as exc:
+            _print_error(f"{type(exc).__name__}: {exc}")
+            return 2
+    tracing.setup(tracking_uri=args.mlflow)
+    try:
         state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
                           seed=args.seed)
     except ConfigError as exc:  # a model or the Exa search has no price in the run's config file
