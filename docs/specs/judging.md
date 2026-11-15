@@ -60,10 +60,11 @@ class MeteredJudge:
 
 - `score_conversations` calls `judge.score(record)` once for each record, in order. His `score` already asks each judge model again once when an answer fails its checks, and raises when the second answer fails too; so **any exception from `score` is a conversation his judge failed on twice: it is left unscored, with the exception's type and text as the reason, and the rest are still scored.** A result whose `score.conversation_id` is not the record's ID is unscored too. After each successful call it passes the result's `usage` to `record_usage`.
 - `record_usage` writes each entry to the usage log through the stage 1 functions, under the meter and agent that are current (`puddles.usage.current()`): one call per entry with the entry's model and its two token counts, as counts the model reported, not estimates. With no current meter it does nothing. It reads the entries; it does not change his client. A model that has no price is handled the way the stage 1 meter handles it; `record_usage` does not catch that.
+- **What is and is not counted.** The usage of a result that came back is recorded even when the result is then left unscored for a wrong conversation ID: the tokens were spent. A conversation whose `score` raised has no usage to record, because his exception carries none; those tokens are missing from the usage log, and the cost of a round with unscored conversations is understated by that much. This is a stated limit, not something to work around in his client. An exception from `record_usage` itself (a model with no price) is not caught by `score_conversations`: it propagates, because a round whose cost cannot be counted must not go on quietly.
 - `to_scored`: `conversation_id`, `empathy`, `relevance` and `note` from the score, `turns` from the record.
 - `scored_conversations` pairs each score with its record by conversation ID, in the order of the scores. A score with no record raises `ValueError`.
 - `select_for_critic` returns the `n` lowest by `(empathy + relevance) / 2`, lowest first, ties broken by conversation ID in ascending order; all of them, in that order, when there are fewer than `n`. `n` below 1 raises `ValueError`.
-- `save_scores` writes one `ScoreRecord` per line and creates the folder. An empty list writes an empty file.
+- `save_scores` writes one `ScoreRecord` per line and creates the folder. An empty list writes an empty file. A file that is already there is replaced.
 - `judge_models` returns the model names a judge will call, for the price check: for his panel the three judges and Astra (`judge.config.judges` and `judge.config.astra`), for his fallback judge its one model (`judge.config.model`), and an empty list for anything that has no `config`.
 - `MeteredJudge.score` calls the wrapped judge's `score`, passes the result's `usage` to `record_usage`, and returns the result unchanged. An exception passes through. It is what the gate is given, so the gate's judge calls are counted too.
 
@@ -84,7 +85,9 @@ class MeteredJudge:
 
 - Without `--fake`, the judge is `puddles.eval.judge.judge_from_env()`, passed as `judge_panel`. Its `ValueError` for a missing variable is missing configuration: one line on standard error, exit code 2, nothing in the log.
 - With `--fake`, `judge_panel` is a scripted judge defined in the script: it reads no conversation, gives fixed scores, reports no usage, and its `version` is `judge-fake`. So a fake run goes through the same adapter and writes `scores/round-NN-train.jsonl`. If the script already has a scripted judge for `--gate real`, it is the same one.
-- `tests/acceptance/test_acc_graph_script.py` passes as it is.
+- With `--fake --gate real`, the gate's judge is `MeteredJudge` around that same scripted judge, so the gate's scoring goes through the same judge as the round and is counted under the agent `gatekeeper`.
+- The script reaches the factory as `puddles.eval.judge.judge_from_env`, looked up when `main` runs, so a test can replace it there.
+- `tests/acceptance/test_acc_graph_script.py` passes as it is, with one exception. `test_without_fake_constructs_documented_dependencies` runs real mode with every constructor replaced and no judge configuration; real mode now needs a judge, so its author adds `puddles.eval.judge.judge_from_env` to the constructors it replaces and checks the judge reaches `RoundDeps.judge_panel`. Nothing else in that file changes.
 
 ## 5. Tests
 
