@@ -5,6 +5,8 @@ through `RoundDeps`.
 """
 from __future__ import annotations
 
+import inspect
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, TypedDict
@@ -49,10 +51,22 @@ NOTHING_SCORED_REASON = "The judge scored no conversation."
 STUB_NOTE = "Stub judge: fixed scores, the conversation was not read."
 
 
-def stub_judge(records: list[ConversationRecord]) -> list[ScoredConversation]:
+def stub_judge(records: list[ConversationRecord], round_: int = 0) -> list[ScoredConversation]:
     """Fixed scores for every record, in order. Stage 2 replaces it."""
     return [ScoredConversation(conversation_id=r.id, empathy=3, relevance=3, note=STUB_NOTE,
                                turns=list(r.turns)) for r in records]
+
+
+def _call_judge(judge: Callable, records: list[ConversationRecord], round_: int) -> list[ScoredConversation]:
+    """Call `deps.judge` with the round number when it takes one (the overnight loop's judge),
+    and without it otherwise (the stage-2 contract the acceptance tests use)."""
+    try:
+        params = [p for p in inspect.signature(judge).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)]
+    except (TypeError, ValueError):
+        params = []
+    takes_round = len(params) >= 2 or any(p.kind is p.VAR_POSITIONAL for p in params)
+    return judge(records, round_) if takes_round else judge(records)
 
 
 def stand_in_reverted(result: RoundResult) -> GateOutcome:
@@ -75,14 +89,16 @@ class RoundDeps:
     memory: Memory
     log: DecisionLog
     root: Path
-    judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
+    # Takes the records, or the records and the round number (the overnight loop's judge does).
+    judge: Callable[..., list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
     usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
     # Set: the starting policy gets its .meta.json, a promoted one gets its own, and the replay check runs.
     start_policy: Optional[Path] = None
     # Set: the judge node runs this judge through puddles.judging and `judge` is not called.
     judge_panel: Optional[Judge] = None
-    critic_conversations: int = CRITIC_CONVERSATIONS
+    # How many of the lowest-scoring conversations the critic reads; None: every scored conversation.
+    critic_conversations: Optional[int] = CRITIC_CONVERSATIONS
 
 
 class RoundState(TypedDict, total=False):
@@ -139,11 +155,13 @@ def build_round_graph(deps: RoundDeps):
         unscored: list[str] = []
         with metering(meter, "judge"):
             if deps.judge_panel is None:
-                scored = deps.judge(records)
+                scored = _call_judge(deps.judge, records, state["round"])
             else:
                 run = score_conversations(deps.judge_panel, records)
                 save_scores(run.scores, train_scores_path(root, state["round"]))
-                scored = select_for_critic(scored_conversations(records, run.scores), deps.critic_conversations)
+                scored = scored_conversations(records, run.scores)
+                if deps.critic_conversations is not None:
+                    scored = select_for_critic(scored, deps.critic_conversations)
                 unscored = run.unscored
         update: dict = {"scored": scored, "unscored": unscored}
         if not scored:
@@ -154,9 +172,12 @@ def build_round_graph(deps: RoundDeps):
         return update
 
     def critic(state: RoundState) -> dict:
+        conversations = state["scored"]
+        if deps.critic_conversations is not None:
+            conversations = select_for_critic(conversations, deps.critic_conversations)
         try:
             with metering(meter, "critic"):
-                result = run_critic(state["round"], state["scored"], state["policy_path"], deps.log,
+                result = run_critic(state["round"], conversations, state["policy_path"], deps.log,
                                     deps.memory, llm, root)
         except AgentFailed as exc:
             result = RoundResult(round=state["round"], outcome="no_pattern",

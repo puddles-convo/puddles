@@ -50,11 +50,16 @@ class DecisionLog:
         if not self.path.exists():
             return []
         out: list[Event] = []
-        for line in self.path.read_text().splitlines():
-            if line.strip():
+        for number, line in enumerate(self.path.read_text().splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
                 data = json.loads(line)
-                out.append(RoundEvent.model_validate(data) if data["event"] == "round"
-                           else MemoryCopyEvent.model_validate(data))
+            except ValueError as exc:
+                raise DecisionLogError(
+                    f"{self.path}:{number} is not valid JSON; the log was cut short") from exc
+            out.append(RoundEvent.model_validate(data) if data["event"] == "round"
+                       else MemoryCopyEvent.model_validate(data))
         return out
 
     def rounds(self) -> list[RoundEvent]:

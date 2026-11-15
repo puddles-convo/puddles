@@ -6,3 +6,5 @@ runs/
 mlruns/
 .venv/
 cache/
+uv.lock
+mlflow.db
