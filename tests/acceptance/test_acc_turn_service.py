@@ -751,17 +751,21 @@ def test_enabled_framework_documentation_routes_are_not_an_auth_bypass(make_serv
 
 
 @pytest.mark.parametrize("route", ["/missing", "/sessions/s1/unknown"])
-def test_unknown_paths_return_the_sanitized_not_found_body(route, make_service):
+@pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}, AUTH],
+                         ids=["no-token", "wrong-token", "valid-token"])
+def test_unknown_paths_return_the_sanitized_not_found_body(route, headers, make_service):
     h = make_service()
-    assert_error(h.client.get(route, headers=AUTH), 404, "not_found")
+    assert_error(h.client.get(route, headers=headers), 404, "not_found")
     assert h.made == [] and h.service.live() == []
 
 
 @pytest.mark.parametrize("method,route", [("POST", "/health"), ("GET", "/sessions"),
     ("GET", "/sessions/s1/turns"), ("DELETE", "/sessions/s1/end")])
-def test_wrong_methods_return_the_sanitized_method_not_allowed_body(method, route, make_service):
+@pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}, AUTH],
+                         ids=["no-token", "wrong-token", "valid-token"])
+def test_wrong_methods_return_the_sanitized_method_not_allowed_body(method, route, headers, make_service):
     h = make_service()
-    assert_error(h.client.request(method, route, headers=AUTH), 405, "method_not_allowed")
+    assert_error(h.client.request(method, route, headers=headers, content="{"), 405, "method_not_allowed")
     assert h.made == [] and h.service.live() == []
 
 
@@ -783,31 +787,66 @@ def test_non_ascii_authorization_is_a_refusal_and_never_an_error(value, make_ser
     assert h.made == [] and h.service.live() == []
 
 
-def test_unauthorized_requests_are_refused_before_the_body_is_read(make_service, monkeypatch):
+@pytest.mark.parametrize("route", ["/sessions", "/sessions/s1/turns", "/sessions/s1/end"])
+@pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}], ids=["no-token", "wrong-token"])
+@pytest.mark.parametrize("body", [
+    json.dumps(dict(user_id="person-a", remember_me=False, consent_for_training=False, session_id="s1")).encode(),
+    b'{"text":"' + PHRASE.encode(),
+    b"\xff" + PHRASE.encode(),
+    b'{"text":"' + PHRASE.encode() + b"q" * 1_000_000 + b'"}',
+], ids=["valid-json", "malformed-json", "malformed-utf8", "large-body"])
+def test_unauthorized_requests_are_refused_before_the_body_is_read(
+        route, headers, body, make_service, monkeypatch, capsys, caplog):
     from starlette.requests import Request
+    caplog.set_level(logging.DEBUG)
     h = make_service()
-    reads = []
+    reads, receives = [], []
     original = Request.body
 
     async def observed_body(request):
         reads.append(request.url.path)
         return await original(request)
 
+    class ReceiveProbe:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            async def observed_receive():
+                receives.append(scope.get("path"))
+                return await receive()
+
+            await self.app(scope, observed_receive, send)
+
+    # This outer probe also detects a body drained directly through ASGI receive,
+    # which would bypass Request.body, including on the body-free end route.
+    h.app.add_middleware(ReceiveProbe)
     monkeypatch.setattr(Request, "body", observed_body)
-    response = h.client.post("/sessions", json=dict(user_id="person-a", remember_me=False,
-                             consent_for_training=False, session_id="s1"))
+    response = h.client.post(route, headers=headers, content=body)
     assert_error(response, 401, "unauthorized")
     assert h.made == [] and h.service.live() == []
     assert reads == [], "an unauthorized request reached the body parser"
+    assert receives == [], "an unauthorized request consumed an ASGI body event"
+    assert disk(h.root) == {} and disk(h.store.root) == {}
+    assert_private(capsys, caplog, PHRASE, TOKEN)
 
 
-def test_extra_field_names_are_returned_without_a_syntax_filter(make_service, capsys, caplog):
+@pytest.mark.parametrize("key,listed", [
+    ("client_metadata", True), ("9metadata", True), ("a" * 64, True),
+    ("client-metadata", False), ("client.metadata", False), ("client metadata", False),
+    ("a" * 65, False), (f"private {PHRASE}", False),
+], ids=["plain", "leading-digit", "64-characters", "hyphen", "dot", "space",
+        "65-characters", "sensitive-key"])
+def test_extra_field_names_follow_the_safe_name_filter(key, listed, make_service, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
     h = make_service()
-    response = h.start(**{"client-metadata": PHRASE})
+    value = "untrusted-extra-value-5921"
+    response = h.start(**{key: value})
     assert response.status_code == 422
-    assert response.json() == {"error": "invalid_request", "fields": ["client-metadata"]}
+    assert response.json() == {"error": "invalid_request", "fields": [key] if listed else []}
+    assert PHRASE not in response.text and value not in response.text
     assert h.service.live() == [] and h.made == []
-    assert_private(capsys, caplog, PHRASE)
+    assert_private(capsys, caplog, PHRASE, value)
 
 
 def test_the_bearer_token_is_compared_with_compare_digest(make_service, monkeypatch):

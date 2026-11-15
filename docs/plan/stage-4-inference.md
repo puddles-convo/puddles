@@ -127,6 +127,7 @@ Then, with real models and the frozen helper prompt: a 10-turn conversation thro
 - `run_turn`, and what it returns.
 - What their helper endpoint must support for schema output (from stage 1).
 - The consent rule above. Their cloud brain keeps logs too.
+- The hand-over page for the swap to the turn service: [robot-handover.md](../robot-handover.md).
 
 ## Still to measure
 
