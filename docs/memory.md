@@ -2,7 +2,7 @@
 
 What the memory is, what is stored at each level, what every agent reads and writes, when each level is updated and how, and what is still undecided. Anything about memory should be changed here first, and other documents should link here.
 
-This file describes schema version 3 (`schemas.py`). Version 3 is specified but only partly built: section 9 says what exists in code and where the code still follows version 2. Scores, counts and sources in the examples are illustrative.
+This file describes schema version 3 (`schemas.py`), which the training-memory code follows. Section 9 says what is built, what is a stand-in and what is not built yet. Scores, counts and sources in the examples are illustrative.
 
 ## Contents
 
@@ -299,7 +299,7 @@ The same shape in both memories (`MemoryEntry`).
   "timestamp": "2026-11-14T22:12:40Z",
   "identity": "critic",
   "audience": "training-agents",
-  "metadata": {"type": "failure_pattern", "round": 3,
+  "metadata": {"type": "failure_pattern", "round": 3, "record_id": "pattern-r03",
                "record_path": "records/round-03/pattern-r03.json", "sha256": "(hash of the record file)"}
 }
 ```
@@ -311,7 +311,7 @@ The same shape in both memories (`MemoryEntry`).
 | `label` | Which agent, which kind of item, which round |
 | `identity` | The agent that produced it: `critic`, `researcher`, `proposer`, `gatekeeper` or `note-taker` |
 | `audience` | `training-agents`, or one person's private audience such as `person-user-01` |
-| `metadata` | The type, the round, and a pointer to the record file with its hash. For a note: `kind`, `user_id`, `session_id`. |
+| `metadata` | The type, the round, the record ID, and a pointer to the record file with its hash. For a note: `kind`, `user_id`, `session_id`. |
 
 The sentence templates:
 
@@ -323,6 +323,27 @@ The sentence templates:
 | Gatekeeper, kept | `Edit {edit_id} was kept in round {round} and is rule {rule_id} of {policy_in_force}. Quality rose from {before} to {after}, above the noise of {noise}. All safety cases passed.` |
 | Gatekeeper, reverted | `Edit {edit_id} ({summary}) was reverted in round {round}: {reason} {policy_in_force} stays in force.` |
 | Note-taker | `{date}: {fact}` |
+
+### Where each policy rule came from
+
+`policies/policy-vN.meta.json` sits next to each promoted policy. Code writes it from the log, and the replay check reads it.
+
+```json
+{"policy_version": "policy-v4", "parent": "policy-v3",
+ "policy_sha256": "(hash of the policy file)", "safety_sha256": "(hash of the Safety section)",
+ "base_rules": ["C1", "C3", "C4"],
+ "learned_rules": {"C2": {"edit": "edit-r03", "action": "add", "pattern": "pattern-r03", "round": 3, "text_sha256": "(hash of the rule text)"}}}
+```
+
+Every active rule is in `base_rules` (from the starting policy) or `learned_rules` (from a kept edit). `pattern` is the first sighting's ID.
+
+### The read log
+
+`log/memory_reads.jsonl`, one line per recall:
+
+```json
+{"reader": "proposer", "query": "(the question asked)", "at": "2026-11-14T22:30:02Z", "record_ids": ["gate-r03", "edit-r03"]}
+```
 
 ### A person's notes
 
@@ -392,6 +413,11 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 - A record a `round` event points to with no `memory_copy` event is copied then.
 - Pending copies are resent, and the three-attempt limit is checked again after the resend, so the loop stops before the next round.
 
+**Known gaps in what is built**
+
+- **Two runners.** Only `scripts/run_round.py` calls `prepare_round` and the replay check. The stage 0 graph runner (`scripts/run_graph_round.py`) still takes the newest policy file as the policy in force and runs no replay, because its acceptance tests depend on that behaviour.
+- **The log is read in full** for every history list and check. This is fine for a few dozen rounds; long runs would need an index.
+
 ## 10. Still to decide
 
 **Needs an answer before the code is written**
@@ -399,7 +425,7 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 1. **Where a note's sentence is read from.** The index says which notes are live, but their sentences come back from past.dev by a search, and a search may miss one. If it misses the note someone asked to forget, that note stays live. Fix: keep the sentence in the index too. Cost: notes live in two places and past.dev becomes a searchable copy for user memory, as it already is for training memory.
 2. **Where the live-note index is stored.** The design says "kept by the brain" and no more. It needs a named place, a format on disk, and an owner on the robot side.
 3. **Deleting from past.dev.** The memory client has no delete call and no per-person audience. Both are needed for notes, and how fast a deleted entry stops being returned is untested.
-4. **Merging version 3 with `main`.** The five differences in section 9 need to be closed in one direction or the other, and records already written under the old IDs need a rule.
+4. **Records written under version 2.** The code now follows version 3. Runs from before it reuse a pattern's ID for repeat sightings and have no `.meta.json`, so they do not pass the replay check. Start new runs rather than converting them.
 5. **A round with a pattern and sources but no edit.** No outcome means this. Today it is logged as `no_pattern` with the pattern attached. Decide whether to add a fifth outcome (issue #1).
 
 **Affects quality, can wait**
@@ -409,12 +435,15 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 8. **Scope.** Gate scores are one overall mean, so a rule that helps one problem type and hurts another looks neutral. Recording scores per problem type would show it.
 9. **Repeated failed edits.** Reject a candidate that is near-identical to a reverted edit for the same pattern, and park a pattern after three reverts.
 10. **The six kinds and their limits.** They are our own choice. No source tested them, and they should be tuned on real sessions.
+11. **One runner.** Move the graph runner onto `prepare_round` and the replay check, and update its acceptance tests.
+12. **Recall returning the wrong kind of record.** past.dev does not filter by metadata. Starting each sentence with its type, or giving each record type its own audience, would make searches more precise.
+13. **Whether recall helps.** `log/memory_reads.jsonl` shows what each agent read, but nothing measures whether it changed what the agent did.
 
 **Not designed yet**
 
-11. **Real sessions feeding training.** Consented sessions use the same record format, so the judge and critic can read them. Nothing collects them, and they would need identifying details removed before the critic reads them in full. Real sessions can show what to fix; only simulated users can test a fix.
-12. **Whether the log and records are committed.** The design calls the log "a file in the repo". Runs are written under `runs/`, which git ignores.
-13. **How past.dev behaves in practice:** how long a write takes to be searchable, and whether metadata comes back on recall. The design does not depend on the second.
+14. **Real sessions feeding training.** Consented sessions use the same record format, so the judge and critic can read them. Nothing collects them, and they would need identifying details removed before the critic reads them in full. Real sessions can show what to fix; only simulated users can test a fix.
+15. **Whether the log and records are committed.** The design calls the log "a file in the repo". Runs are written under `runs/`, which git ignores.
+16. **How past.dev behaves in practice:** how long a write takes to be searchable, and whether metadata comes back on recall. The design does not depend on the second.
 
 ## 11. Where the detail lives
 
