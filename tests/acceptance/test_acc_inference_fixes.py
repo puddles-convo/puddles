@@ -126,7 +126,17 @@ def test_plain_limit_override_is_sent(monkeypatch, wire, param):
     assert ({"max_tokens", "max_completion_tokens"} - {param}).isdisjoint(body)
 
 
-@pytest.mark.parametrize("bad", ["", "max_output_tokens", "MAX_TOKENS", " max_tokens"])
+def test_plain_empty_limit_name_sends_default(monkeypatch, wire):
+    monkeypatch.setenv("PUDDLES_AGENT_MAX_TOKENS_PARAM", "")
+    llm = PlainLLM.from_env()
+    llm.structured("s", "u", NoteTakerOutput)
+    assert len(wire.requests) == 1
+    body = json.loads(wire.requests[0][0].data)
+    assert body["max_completion_tokens"] == llm.max_tokens
+    assert "max_tokens" not in body
+
+
+@pytest.mark.parametrize("bad", ["max_output_tokens", "MAX_TOKENS", " max_tokens"])
 def test_plain_rejects_every_invalid_limit_name_before_request(monkeypatch, wire, bad):
     monkeypatch.setenv("PUDDLES_AGENT_MAX_TOKENS_PARAM", bad)
     with pytest.raises(ConfigError, match="PUDDLES_AGENT_MAX_TOKENS_PARAM"):
