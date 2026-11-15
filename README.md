@@ -406,18 +406,22 @@ The full design, including the log format, consent and forgetting, and the crisi
 
 ## 7. How the loop runs experiments
 
-These parts sit under every action in the toolbox ([section 8](#8-the-proposers-toolbox)), so they are built first. Each borrows a mechanism from published self-improving systems and rewrites it for this loop; no framework is adopted. Times are our estimates. Full review: [docs/research/reusable-parts-from-agent-repos.md](docs/research/reusable-parts-from-agent-repos.md).
+These parts sit under every action in the toolbox ([section 8](#8-the-proposers-toolbox)), so they are built first. Each borrows a mechanism from published self-improving systems and rewrites it for this loop; no framework is adopted. Several are already in the team's build plan ([docs/plan/](docs/plan/)); the **Plan** column says which, and this section adds only what is new. Times cover the new work only and are our estimates. Full review: [docs/research/reusable-parts-from-agent-repos.md](docs/research/reusable-parts-from-agent-repos.md).
 
-| # | Part | In one sentence | Time (h) | Sources |
-|---|---|---|---|---|
-| 1 | Locked evaluation | The loop cannot change how it is graded | 1 | [DGM](https://arxiv.org/abs/2505.22954), [Sakana blog](https://sakana.ai/dgm/), [steer](https://github.com/xieyulai/steer), [A-Evolve](https://github.com/A-EVO-Lab/a-evolve), [survey 2607.13104](https://arxiv.org/abs/2607.13104) |
-| 2 | Fixed time per round, and a quick test first | Every round gets the same time; a candidate is tested on 5 conversations before the full set | 1–1.5 | [karpathy/autoresearch](https://github.com/karpathy/autoresearch), [DGM](https://arxiv.org/abs/2505.22954), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
-| 3 | A record for every test conversation | Score, cost, time and timeout per conversation, with limits; a run resumes after a crash | 1.5–2 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent) |
-| 4 | An archive of versions | Every version that passes the checks is kept with a pointer to its parent | 1.5–2.5 | [DGM code](https://github.com/jennyzzt/dgm), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
-| 5 | Two noise rules | One rule decides what reaches the robot, another decides what to build on next | 1 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent), [PoLL](https://arxiv.org/abs/2404.18796) |
-| 6 | Researcher search rules | Scale the search to the problem, start broad, prefer trusted sources | 0.5 | [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system) |
-| 7 | Conversations in parallel | The conversations of a round run side by side; the critic to gatekeeper steps stay one at a time | 1.5–3 | [LangGraph](https://docs.langchain.com/oss/python/langgraph/graph-api), [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system), [Cognition](https://cognition.com/blog/dont-build-multi-agents) |
-| 8 | Change labels and prediction checks | Each change is tagged weights or harness; each prediction is compared with the result | 1.5 | [survey 2607.13104](https://arxiv.org/abs/2607.13104), [survey 2507.21046](https://arxiv.org/abs/2507.21046), [Reliable survey](https://www.preprints.org/manuscript/202609.0913) |
+**Priority.** **Must-have** before the overnight run: parts 1, 2 and 8 (cheap, and they carry the rigour and interpretability scores). **Next:** part 4. **If time allows:** parts 6 and the comparison run in part 8. Parts 3, 5 and 7 are mostly already planned.
+
+| # | Part | In one sentence | Plan | New work (h) | Priority | Sources |
+|---|---|---|---|---|---|---|
+| 1 | Locked evaluation | The loop cannot change how it is graded | Partly: stage 6 hashes the Safety section and freezes judge, validation set and gate within a stretch of rounds. **New:** write list per action, fingerprint each round | 1 | Must-have | [DGM](https://arxiv.org/abs/2505.22954), [Sakana blog](https://sakana.ai/dgm/), [steer](https://github.com/xieyulai/steer), [A-Evolve](https://github.com/A-EVO-Lab/a-evolve), [survey 2607.13104](https://arxiv.org/abs/2607.13104) |
+| 2 | Fixed time per round, and a quick test first | Every round gets the same time; a candidate is tested on 5 conversations before the full set | **New** (stage 6 has spend limits, not a time per round) | 1–1.5 | Must-have | [karpathy/autoresearch](https://github.com/karpathy/autoresearch), [DGM](https://arxiv.org/abs/2505.22954), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
+| 3 | A record for every test conversation | Score, cost, time and timeout per conversation, with limits; a run resumes after a crash | Mostly: stage 6 tracks spend and survives restarts. **New:** time and timeout per conversation; a missing score counts as a failure | 0.5 | With stage 6 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent) |
+| 4 | An archive of versions | Every version that passes the checks is kept with a pointer to its parent | **New** (stage 6 keeps one policy in force) | 1.5–2.5 | Next | [DGM code](https://github.com/jennyzzt/dgm), [HyperAgents](https://github.com/facebookresearch/HyperAgents) |
+| 5 | Two noise rules | One rule decides what reaches the robot, another decides what to build on next | Gate rule: stage 5 measures the noise. **New:** the parent rule | 0.5 | With part 4 | [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent), [PoLL](https://arxiv.org/abs/2404.18796) |
+| 6 | Researcher search rules | Scale the search to the problem, start broad, prefer trusted sources | **New** (prompt only) | 0.5 | If time allows | [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system) |
+| 7 | Conversations in parallel | The conversations of a round run side by side; the critic to gatekeeper steps stay one at a time | **Already planned:** stage 6 runs conversations in parallel on Modal workers (#12) | 0 | With stage 6 | [Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system), [Cognition](https://cognition.com/blog/dont-build-multi-agents) |
+| 8 | Change labels and prediction checks | Each change is tagged weights or harness; each prediction is compared with the result | **New** | 1.5 | Must-have (comparison run: if time allows) | [survey 2607.13104](https://arxiv.org/abs/2607.13104), [survey 2507.21046](https://arxiv.org/abs/2507.21046), [Reliable survey](https://www.preprints.org/manuscript/202609.0913) |
+
+New work in total: about 6–8 h, of which the must-haves are about 4 h.
 
 ### 1. Locked evaluation
 
@@ -429,7 +433,7 @@ A loop that can change its own grading can "improve" by making the test easier. 
 ### 2. Fixed time per round, and a quick test first
 
 - **Fixed time per round.** Karpathy's autoresearch gives every experiment the same 5-minute training budget, so results are comparable and the number of experiments per night is predictable (about 12 an hour) ([karpathy/autoresearch](https://github.com/karpathy/autoresearch)). Here, every round gets the same wall-clock budget from config, with a separate, longer budget for `train_adapter`. A round that runs out of time ends as `timeout`, is logged, and changes nothing.
-- **Quick test first.** A candidate is first tested on about 5 validation conversations. Only if it is not already clearly worse than its parent does it get the full set. DGM screens on 10 tasks before 50 more ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)); HyperAgents uses the same staged evaluation ([repo](https://github.com/facebookresearch/HyperAgents), ideas only: CC BY-NC-SA licence).
+- **Quick test first.** A candidate is first tested on about 5 validation conversations. If its score there is below its parent's score minus the noise, it stops and is reverted; otherwise it gets the full set. DGM screens on 10 tasks before 50 more ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)); HyperAgents uses the same staged evaluation ([repo](https://github.com/facebookresearch/HyperAgents), ideas only: CC BY-NC-SA licence).
 
 ### 3. A record for every test conversation
 
@@ -437,7 +441,11 @@ Each test conversation writes one record: score, tokens, cost, time, and whether
 
 ### 4. An archive of versions
 
-Instead of one current version that gets overwritten, every version that passes the safety and format checks is kept, each pointing to the version it came from (decided by the team; see the status log). Only the best version that passed the gate goes on the robot. A version that failed safety is never used as a starting point.
+Instead of one current version that gets overwritten, every version that passes the safety and format checks is kept, each pointing to the version it came from (decided by the team; see the status log). A version that failed safety is never used as a starting point.
+
+What the gate compares (decided by the team):
+- **Into the archive:** the gate compares a candidate with its **parent**.
+- **Onto the robot:** a version replaces the deployed one only if it also passes the gate against the **version currently deployed**.
 
 To choose the version a round builds on, the archive favours high scorers that have not been built on much yet, so the search does not get stuck on one branch: weight = sigmoid(10 × (score − 0.5)) × 1 / (1 + children), from the Darwin Gödel Machine ([code](https://github.com/jennyzzt/dgm), Apache-2.0; [paper](https://arxiv.org/abs/2505.22954)). HyperAgents uses a softer penalty on children ([repo](https://github.com/facebookresearch/HyperAgents)).
 
@@ -449,7 +457,7 @@ Scores move from run to run, so a version can look better by luck.
 - **What to build on next:** keep building on the latest version unless its average is below the best version's lower 95% bound (mean − 1.96 × standard deviation / √n). This rule is in SICA's code, not its paper ([runner.py](https://github.com/MaximeRobeyns/self_improving_coding_agent)).
 - **Decided by the team:** the gate's rule for deployment, the 95% rule only for choosing the parent.
 
-**Open question: a judge council inside the loop.** Scoring each conversation with three smaller judges from different model families, instead of one, can agree better with people and reduce a judge's preference for its own model family, at lower cost than one large judge ([PoLL, arXiv 2404.18796](https://arxiv.org/abs/2404.18796)). It triples judge calls per conversation. Proposal: start with one judge, measure the noise, and switch to a council of three if the noise is so large that few changes can pass the gate. The held-out jury ([section 11](#11-how-we-measure-the-result)) stays separate either way.
+**Open question: a judge council inside the loop.** Scoring each conversation with three smaller judges from different model families, instead of one, can agree better with people and reduce a judge's preference for its own model family, at lower cost than one large judge ([PoLL, arXiv 2404.18796](https://arxiv.org/abs/2404.18796)). It triples judge calls per conversation. Proposal: start with one judge, measure the noise, and switch to a council of three if the noise is so large that few changes can pass the gate. As stage 6 requires for any judge change, switching starts a new stretch of rounds: calibrate the council, measure the baselines and the noise again (stage 5), and never join the two stretches in a plot. The held-out jury ([section 11](#11-how-we-measure-the-result)) stays separate either way.
 
 ### 6. Researcher search rules
 
@@ -457,7 +465,7 @@ From Anthropic's multi-agent research system ([engineering post](https://www.ant
 
 ### 7. Conversations in parallel
 
-The simulated conversations of a round do not depend on each other, so they run side by side with LangGraph's `Send`, with the number at once set in config ([LangGraph](https://docs.langchain.com/oss/python/langgraph/graph-api)). Same tokens, less time per round, more rounds overnight. The critic, researcher, proposer and gatekeeper stay one at a time and see each other's full records, because each builds on the previous one's decisions ([Cognition](https://cognition.com/blog/dont-build-multi-agents); Anthropic's post makes the same point about tasks with shared context).
+Already in the team's plan: stage 6 runs the simulated conversations of a round in parallel on Modal workers (#12); workers return records and only the loop process writes files and memory. Same tokens, less time per round, more rounds overnight. Nothing new to build here. The critic, researcher, proposer and gatekeeper stay one at a time and see each other's full records, because each builds on the previous one's decisions ([Cognition](https://cognition.com/blog/dont-build-multi-agents); Anthropic's post makes the same point about tasks with shared context).
 
 ### 8. Change labels and prediction checks
 
