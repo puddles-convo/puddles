@@ -30,7 +30,7 @@ tests/acceptance/test_acc_graph.py, test_acc_tracing.py, test_acc_graph_script.p
 
 ## 1. `puddles/round.py`
 
-`run_agents` is split at its two early returns. Each new function takes the `RoundResult`, changes it in place and returns the same object.
+`run_agents` is split at its two early returns. `run_critic` makes the `RoundResult`. The other two take it, change it in place and return the same object.
 
 ```python
 def run_critic(round_: int, conversations: list[ScoredConversation], policy_path: Path,
@@ -45,6 +45,7 @@ def run_proposer(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM
 - `run_researcher` requires `result.pattern`. It sets `research` and `refs["research"]` and saves the search log. With no sources it sets `outcome="no_evidence"` and the reason `run_agents` uses today.
 - `run_proposer` requires `result.pattern` and `result.research`. It sets `edit`, `candidate_path`, `refs["edit"]` and `outcome="candidate"`.
 - None of the three catches `puddles.llm.AgentFailed`.
+- Calling `run_researcher` without a pattern, or `run_proposer` without a pattern and research, is a caller's mistake. What happens then is not specified.
 - `run_agents` keeps its signature and behaviour. It calls the three in order and returns early exactly where it does today. `tests/test_memory_wiring.py` and `tests/test_agents.py` pass unchanged.
 
 ## 2. `puddles/tracing.py`
@@ -116,11 +117,11 @@ START -> converse -> judge --(scored)--> critic --(pattern)--> researcher --(sou
 | Node | What it does |
 |---|---|
 | `converse` | Loads the policy with `check_policy_file(state["policy_path"])`. Wraps the two chat clients in `TracedClient`, named `helper` and `simulated_user`. Calls `loop.runner.run_batch(..., round=state["round"], max_turns=..., seed=..., out_path=root / "conversations" / f"round-{round:02d}-train.jsonl")`. Sets `records` and `failures` from the `BatchResult`. |
-| `judge` | Sets `scored = deps.judge(records)`. If `records` is empty it also sets `result` to a `RoundResult` with `outcome="no_pattern"` and the reason `No conversation finished.`, and the round goes to `finish`. |
+| `judge` | Sets `scored = deps.judge(records)`. If `scored` is empty it also sets `result` to a `RoundResult` with `outcome="no_pattern"`, and the round goes to `finish` without calling the critic. The reason is `No conversation finished.` when `records` was empty, and `The judge scored no conversation.` when there were records but no scores. |
 | `critic` | `run_critic`. Sets `result`. |
 | `researcher` | `run_researcher`. |
 | `proposer` | `run_proposer`. |
-| `gate` | Sets `gate = deps.gate(result)`. Runs only when `result.edit` is set. |
+| `gate` | Sets `gate = deps.gate(result)`. Runs only when `result.edit` is set. A proposer that succeeds always sets it, so the "no edit" path is the path of a proposer that failed twice. |
 | `finish` | Sets `event = puddles.round.finish_round(result, state.get("gate"), deps.log, deps.memory, deps.root)`. |
 
 ### When an agent fails twice
@@ -139,8 +140,8 @@ The gate never runs after a failure. No other exception is caught.
 
 In this order:
 
-1. `deps.memory.ensure_training_audience()`, then `puddles.round.retry_pending(deps.log, deps.memory, deps.root)`.
-2. `check_policy_file(policy_path)`. A `PolicyError` propagates, and nothing is written to the log.
+1. `check_policy_file(policy_path)`. A `PolicyError` propagates. Nothing has touched the memory or the log by then, so the log is exactly as it was, even when it holds copies that are still pending.
+2. `deps.memory.ensure_training_audience()`, then `puddles.round.retry_pending(deps.log, deps.memory, deps.root)`.
 3. `round = deps.log.next_round()`.
 4. Inside one MLflow run named `round-NN`, invoke the graph with `invoke`.
 5. On that MLflow run: parameters `round` and `policy_version`; tag `outcome`, set to `event.outcome`; metrics `conversations` (finished) and `conversations_failed`.
@@ -181,7 +182,7 @@ python -m scripts.run_graph_round --fake --root runs/dev
 
 - It calls `tracing.setup`, runs one round with `run_round`, and prints one line: `round N: <outcome>. <reason>`.
 - With `--fake` on a root with no log, the round reaches the gate, so the outcome is `kept` or `reverted` as `--gate` says. The chat clients speak the same scripted lines as `python -m loop.run_batch --fake`. A second `--fake` run on the same root also finishes, as round 2; its outcome may be any of the four.
-- Without `--fake` it builds `loop.llm.client_from_env("HELPER")`, `client_from_env("SIMUSER")`, `puddles.llm.OpenAILLM()`, `puddles.exa.search` and `puddles.memory.PastClient()`.
+- Without `--fake` it builds `loop.llm.client_from_env("HELPER")`, `client_from_env("SIMUSER")`, `puddles.llm.OpenAILLM()`, `puddles.exa.search` and `puddles.memory.PastClient()`. It checks that `EXA_API_KEY` is set before the round starts, because the search would otherwise fail only in the middle of a round; a missing key is missing configuration.
 - Exit code 0 when a round finished, whatever its outcome. Exit code 2, with one line on standard error and nothing in the log, for a policy or scenario file that cannot be read or is malformed, and for missing configuration.
 
 ## 5. Tests
