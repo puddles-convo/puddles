@@ -1,0 +1,110 @@
+[
+  {
+    "case_id": "researcher-01",
+    "what_it_tests": "One pattern and no earlier queries: the sources it keeps must not be forums.",
+    "input": {
+      "pattern": {
+        "id": "pattern-r03",
+        "name": "advice-before-understanding",
+        "description": "Gives a suggestion in its first reply without asking about the person's circumstances."
+      }
+    },
+    "expect": {
+      "must_not_mention": ["reddit.com", "quora.com"]
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "researcher-02",
+    "what_it_tests": "The same pattern with two earlier queries for it, which must not be run again.",
+    "input": {
+      "pattern": {
+        "id": "pattern-r03",
+        "name": "advice-before-understanding",
+        "description": "Gives a suggestion in its first reply without asking about the person's circumstances."
+      },
+      "earlier_queries": [
+        "exploring before advising counselling skills",
+        "open questions in counselling"
+      ]
+    },
+    "expect": {
+      "must_not_mention": [
+        "exploring before advising counselling skills",
+        "open questions in counselling",
+        "reddit.com",
+        "quora.com"
+      ]
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "researcher-03",
+    "what_it_tests": "Lists of options, with earlier queries that belong to other patterns and must not be repeated either.",
+    "input": {
+      "pattern": {
+        "id": "pattern-r02",
+        "name": "lists-of-options",
+        "description": "Offers several suggestions in one reply instead of one small one."
+      },
+      "earlier_queries": [
+        "how long should a counsellor's responses be",
+        "reflective listening techniques"
+      ]
+    },
+    "expect": {
+      "must_not_mention": [
+        "how long should a counsellor's responses be",
+        "reflective listening techniques",
+        "reddit.com",
+        "quora.com"
+      ]
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "researcher-04",
+    "what_it_tests": "Directive language, with one earlier query for this pattern and a summary line counting older ones.",
+    "input": {
+      "pattern": {
+        "id": "pattern-r04",
+        "name": "directive-language",
+        "description": "Tells the person what they should do, with \"you should\", instead of inviting them to consider it."
+      },
+      "earlier_queries": [
+        "avoiding directive language in counselling"
+      ],
+      "older_queries_summary": "(3 older queries for other patterns are not shown)"
+    },
+    "expect": {
+      "must_not_mention": [
+        "avoiding directive language in counselling",
+        "reddit.com",
+        "quora.com"
+      ]
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "researcher-05",
+    "what_it_tests": "A question with no acknowledgement first: a pattern whose fix is reflecting the feeling before asking.",
+    "input": {
+      "pattern": {
+        "id": "pattern-r05",
+        "name": "question-without-acknowledgement",
+        "description": "Opens with a practical question and does not respond to the feeling the person named."
+      },
+      "earlier_queries": [
+        "exploring before advising counselling skills"
+      ]
+    },
+    "expect": {
+      "must_not_mention": [
+        "exploring before advising counselling skills",
+        "reddit.com",
+        "quora.com"
+      ]
+    },
+    "reviewed_by": null
+  }
+]
