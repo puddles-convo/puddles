@@ -132,9 +132,16 @@ def copy_to_memory(record: Record, ref: RecordRef, round_: int, memory: Memory, 
     return status
 
 
+MAX_COPY_ATTEMPTS = 3
+
+
 def retry_pending(log: DecisionLog, memory: Memory, root: Path) -> None:
-    """Run at the start of a round: resend copies that were still pending."""
-    for event in log.pending_copies():
+    """Run at the start of a round: resend copies that were still pending; stop the loop after three attempts."""
+    pending = log.pending_copies()
+    stuck = [f"{e.record_id} (round {e.round})" for e in pending if e.attempt >= MAX_COPY_ATTEMPTS]
+    if stuck:
+        raise PastError(f"memory copies still pending after {MAX_COPY_ATTEMPTS} attempts: {', '.join(stuck)}")
+    for event in pending:
         for kind, model in MODELS.items():
             round_event = next((r for r in log.rounds() if r.round == event.round), None)
             ref = round_event.records.get(kind) if round_event else None

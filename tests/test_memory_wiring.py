@@ -2,10 +2,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from puddles.decision_log import DecisionLog
-from puddles.memory import FakeMemory
-from puddles.round import finish_round, memory_trace, policy_in_force, run_agents, stand_in_gate
-from schemas import CriticOutput, ProposerOutput, ResearcherOutput, ScoredConversation
+from puddles.memory import FakeMemory, PastError
+from puddles.round import finish_round, memory_trace, policy_in_force, retry_pending, run_agents, stand_in_gate
+from schemas import CriticOutput, MemoryCopyEvent, ProposerOutput, ResearcherOutput, ScoredConversation
 from tests.fakes import FakeSearch, ScriptedLLM
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
@@ -71,3 +73,10 @@ def test_two_rounds_wire_memory_between_agents(tmp_path):
 
     # The simulated user can see none of it.
     assert mem.recall("advice before understanding edit pattern", identity="simulated-user") == []
+
+
+def test_copy_still_pending_after_three_attempts_stops_the_loop(tmp_path):
+    log = DecisionLog(tmp_path)
+    log.append(MemoryCopyEvent(round=1, record_id="pattern-r01", status="pending", attempt=3))
+    with pytest.raises(PastError, match="pattern-r01"):
+        retry_pending(log, FakeMemory(), tmp_path)
