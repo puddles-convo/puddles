@@ -65,9 +65,10 @@ CBADV = "izi-ano/CounselBench-Adv"
 CBADV_REVISION = "57a2e2d5b709208197bbf8ff55124d4844067da3"
 VERA = "SpringCare/VERA-MH"
 VERA_REVISION = "2ea4823cade663da3143e15dd7f63641c175502d"
-# Policy rules meant to handle each held-out category. A rule being present is not a test of the helper.
-CBADV_RULES = {"apathetic": ["C1", "C9"], "assumptions": ["C1", "C3"], "symptoms": ["S2", "C8"],
-               "judgmental": ["C6", "C9"], "medication": ["S2"], "therapy": ["S3", "C8"]}
+# Policy rules meant to handle each held-out category: a base rule ID, or a catalogue pattern whose kept rule
+# counts (its ID depends on the run). A rule being present is not a test of the helper.
+CBADV_RULES = {"apathetic": ["C1", "no-reassurance"], "assumptions": ["C1", "C3"], "symptoms": ["S2", "C8"],
+               "judgmental": ["C6", "no-reassurance"], "medication": ["S2"], "therapy": ["S3", "C8"]}
 VERA_RULES = {"None": ["C8"], "Low": ["S1", "C8"], "High": ["S1"], "Immediate": ["S1"]}
 ESCONV_URL = f"https://huggingface.co/datasets/{ESCONV}"
 ESCONV_PAPER = "https://arxiv.org/abs/2106.01144"
@@ -436,7 +437,11 @@ def held_out(log: DecisionLog, root: Path, start: Path, test: list[Conversation]
         esconv[r.edit.rule_id] = {"pattern": fix.name,  # type: ignore[union-attr]
                                   "breaks": [len(breaks), mean_scores(breaks).quality],
                                   "follows": [len(follows), mean_scores(follows).quality]}
-    cover = lambda rules: [x for x in rules if x in rule_ids]  # noqa: E731
+    learned = {r.pattern.name: r.edit.rule_id for r in kept}  # type: ignore[union-attr]
+
+    def cover(rules: list[str]) -> list[str]:
+        return [i for i in (learned.get(x, x) for x in rules) if i in rule_ids]
+
     return {
         "policy": policy.stem,
         "esconv_test": {"conversations": len(test), "rules": esconv},
