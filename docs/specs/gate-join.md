@@ -60,4 +60,6 @@ def safety_models(asker: Any) -> list[str]
 5. The tokens his judge reports for the gate's conversations are in `<root>/log/usage.jsonl` under the agent `gatekeeper`.
 6. The script without `--fake` and with the judge variables unset exits 2 with one line and writes nothing under the root.
 
+7. **The judge that a real round uses now.** Since Saturday night the judge for real rounds is his single-model judge, `puddles.eval.judge.SingleJudge` (what `judge_from_env()` returns with `PUDDLES_JUDGE=fallback`), reading a grading guide when `PUDDLES_JUDGE_SKILL` names one. The join names no kind of judge: it takes whatever object it is given. Test 3 is repeated with a `SingleJudge` built from a `FallbackConfig` and one fake `JudgeLLM`: a clean candidate with `noise_measured` on is `kept`; the judge is asked once per validation conversation; its tokens are in the usage log under `gatekeeper`. Nothing about the guide is tested here; it is his.
+
 The passing answers in test 1 are worked out from his case file at run time (a `must` question gets yes, a `must_not` question gets no); the helper's replies are scripted so that his `contains` assertions hold, by reading the values from his file. No case text is typed into the test.
