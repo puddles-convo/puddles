@@ -8,7 +8,7 @@ puddles/gate.py; it promotes nothing unless --noise-measured says --noise is a m
 
 --fake uses scripted chat clients, a scripted model, a fake search and in-process memory: no keys,
 no network. Without it the clients come from HELPER_*, SIMUSER_*, OPENAI_API_KEY,
-PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY.
+PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY, and the judge from puddles.eval.judge.judge_from_env.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import argparse
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, NoReturn, Sequence, TypeVar
 
@@ -31,6 +31,7 @@ from puddles import gate as real_gate
 from puddles import tracing
 from puddles.decision_log import DecisionLog
 from puddles.graph import RoundDeps, check_policy_file, run_round
+from puddles.judging import Judge, MeteredJudge
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import FakeMemory, Memory, PastError, now
 from puddles.policy import TOKEN_CAP
@@ -55,19 +56,20 @@ REAL_GATE_NOT_JOINED = ("--gate real needs the real judge and safety check, whic
 @dataclass
 class _Judged:
     score: ScoreRecord
+    usage: list = field(default_factory=list)  # a scripted judge makes no model call, so it reports none
 
 
 class FakeJudge:
-    """For --fake --gate real: fixed scores. It reads no conversation."""
+    """For --fake, the round's judge and the gate's: fixed scores. It reads no conversation."""
 
     version = "judge-fake"
 
     def score(self, record: ConversationRecord) -> _Judged:
-        helper_turns = sum(t.speaker == "helper" for t in record.turns)
+        # Only the ID is read. No strategy labels: no turn was read, so none can be claimed.
         return _Judged(ScoreRecord(
             id=f"score-{record.id}", written_by="judge", created_at=now(), parent_ids=[record.id],
             conversation_id=record.id, judge_version=self.version, empathy=3, relevance=3, emotion_before=3,
-            emotion_after=3, strategies=["Question"] * helper_turns,
+            emotion_after=3, strategies=[],
             note="Scripted judge: fixed scores, the conversation was not read."))
 
 
@@ -174,9 +176,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         user_client: ChatClient
         llm: LLM
         memory: Memory
+        judge_panel: Judge
         if args.fake:
             helper_client, user_client = FakeClient(_fake_helper), FakeClient(_fake_user)
             llm, search, memory = FakeLLM(), fake_search, FakeMemory()
+            judge_panel = FakeJudge()
         else:
             from loop.llm import client_from_env
             from puddles import exa
@@ -187,6 +191,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not os.environ.get("EXA_API_KEY"):
                 raise ConfigError("environment variable EXA_API_KEY is not set")
             llm, search, memory = OpenAILLM(), exa.search, PastClient()
+            from puddles.eval import judge as eval_judge
+
+            # Looked up on the module now, so a test can replace it there. A missing variable is a ValueError.
+            judge_panel = eval_judge.judge_from_env()
     except (ConfigError, PolicyError, OSError, UnicodeDecodeError, ValidationError, ValueError,
             AgentFailed, PastError, OpenAIError) as exc:
         detail = str(exc)
@@ -203,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if decision == "real":
         gate_deps = real_gate.GateDeps(
             helper_client=tracing.TracedClient(helper_client, "helper"),
-            user_client=tracing.TracedClient(user_client, "simulated_user"), judge=FakeJudge(),
+            user_client=tracing.TracedClient(user_client, "simulated_user"), judge=MeteredJudge(judge_panel),
             safety=fake_safety, root=root, scenarios=validation, noise_measured=args.noise_measured,
             max_turns=args.max_turns, seed=args.seed)
         gate = real_gate.make_gate(gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
@@ -211,7 +219,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     tracing.setup(tracking_uri=args.mlflow)
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
-                     memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy))
+                     memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy),
+                     judge_panel=judge_panel)
     try:
         state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
                           seed=args.seed)
