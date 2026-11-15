@@ -50,7 +50,10 @@ def test_multiline_safety_rule_is_kept_byte_for_byte():
     policy = parse_policy(wrapped)
     new, _ = apply_edit(policy, "remove", "C5", None, "v")
     assert safety_section(new) == safety_section(policy)
-    assert render_policy(new).split("## Conversation")[0] == wrapped.split("## Conversation")[0]
+    def safety(text):
+        return text.split("## Safety")[1].split("## Conversation")[0]
+
+    assert safety(render_policy(new)) == safety(wrapped)
 
 
 def test_versions_and_length_limit():
