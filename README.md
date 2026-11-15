@@ -17,6 +17,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 2. [Training agents](#2-training-agents)
 3. [Inference steps](#3-inference-steps)
 4. [Inference agents](#4-inference-agents)
+   - [Models](#models): which model plays each agent
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
 7. [Handoffs](#7-handoffs)
@@ -148,6 +149,39 @@ INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
 | [**Release**](docs/agents/i3b-release.md) (code, no model) | • Holds all audio until the crisis checker answers<br>• Crisis: fixed response. Checker failed: holding line. Otherwise: the draft. | Nothing | Nothing | The risk level and the helper's draft | The draft, or a fixed response such as "I'm really glad you told me that. Are you thinking about ending your life? ... You can call or text 988 ..." |
 | [**4. Speaker**](docs/agents/i4-speaker.md) (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
 | [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced or deleted | The finished session and the existing notes | `[{"action": "add", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
+
+## Models
+
+Which model plays each agent. These are starting choices and none has been benchmarked yet. No model name is hard-coded: each one is set in configuration, so changing a model does not change the code.
+
+### Training
+
+| Agent | Model | Runs on |
+|---|---|---|
+| [1. Simulated user](docs/agents/t1-simulated-user.md) | Qwen3.6-35B-A3B. A different model from the helper, so the helper is not talking to itself | Tinker |
+| [2. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, thinking mode off | Modal |
+| [3. Judge](docs/agents/t3-judge.md) | The strongest OpenAI model the credits allow, version pinned, temperature 0 | OpenAI API |
+| [4. Critic](docs/agents/t4-critic.md) | The same OpenAI model as the judge | OpenAI API |
+| [5. Researcher](docs/agents/t5-researcher.md) | The same OpenAI model, with Exa search as its one tool | OpenAI API and Exa |
+| [6. Proposer](docs/agents/t6-proposer.md) | The same OpenAI model as the judge | OpenAI API |
+| [7. Gatekeeper](docs/agents/t7-gatekeeper.md) | Code, not a model. It asks the judge model one yes-or-no question per judged safety check | |
+
+### Inference
+
+| Agent | Model | Runs on |
+|---|---|---|
+| [1. Listener](docs/agents/i1-listener.md) | faster-whisper, large-v3-turbo (speech to text) | Modal, the same GPU as the helper |
+| [2. Crisis checker](docs/agents/i2-crisis-checker.md) | A keyword list in code first, then the helper model with its own prompt | Modal |
+| [3. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, the same model and prompt as in training | Modal |
+| [Release](docs/agents/i3b-release.md) | Code, not a model | |
+| [4. Speaker](docs/agents/i4-speaker.md) | Kokoro (text to speech) | Modal |
+| [5. Note-taker](docs/agents/i5-note-taker.md) | A small OpenAI model, run after the session ends | OpenAI API |
+
+### Still to decide
+
+- **The exact OpenAI model** for the judge, critic, researcher and proposer. It must be pinned before the judge is calibrated ([#3](https://github.com/puddles-convo/puddles/issues/3)), because changing it afterwards invalidates the scores. A fallback judge on Tinker is [#23](https://github.com/puddles-convo/puddles/issues/23).
+- **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 3-second limit.
+- **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
 
 ## 5. The memory
 
