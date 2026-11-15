@@ -172,10 +172,14 @@ def policy_snapshot(root):
             if p.is_file() and (p.suffix == ".md" or p.name.endswith(".meta.json"))}
 
 
-def cache_payload(policy_path, judge, ids, scores):
+def cache_payload(policy_path, deps, ids, scores):
     text = policy_path.read_text()
+    scenarios = {scenario.scenario_id: scenario for scenario in deps.scenarios}
+    scenario_text = "\n".join(scenarios[id_].model_dump_json() for id_ in ids)
     return dict(policy_version=parse_policy(text).version, policy_sha256=sha256_text(text),
-                scenario_ids=ids, judge_version=judge.version, scores=scores.model_dump())
+                scenario_ids=ids, judge_version=deps.judge.version,
+                scenarios_sha256=sha256_text(scenario_text), max_turns=deps.max_turns, seed=deps.seed,
+                scores=scores.model_dump())
 
 
 def assert_baseline_unscored_reason(reason, policy_version="policy-v1"):
@@ -385,18 +389,24 @@ def test_score_policy_rejects_judge_scores_for_another_conversation(case):
     ]
 
 
-@pytest.mark.parametrize("change", [None, "policy_version", "policy_sha256", "scenario_ids", "judge_version"])
-def test_current_score_cache_requires_all_four_identities(case, change):
+@pytest.mark.parametrize("change", [
+    None, "policy_version", "policy_sha256", "scenario_ids", "judge_version", "scenarios_sha256", "max_turns", "seed",
+])
+def test_current_score_cache_requires_all_seven_identities(case, change):
     cached_scores = Scores(empathy=1.25, relevance=2.5, quality=1.875, emotion_change=-1)
-    cache = cache_payload(case.base, case.deps.judge, ["a", "b"], cached_scores)
+    cache = cache_payload(case.base, case.deps, ["a", "b"], cached_scores)
     if change == "policy_version":
         cache[change] = "policy-v0"
     elif change == "scenario_ids":
         cache[change] = ["b", "a"]
     elif change == "judge_version":
         cache[change] = "judge-v0"
-    elif change == "policy_sha256":
+    elif change in {"policy_sha256", "scenarios_sha256"}:
         cache[change] = "0" * 64
+    elif change == "max_turns":
+        cache[change] = 2
+    elif change == "seed":
+        cache[change] = None
     path = case.root / "scores/current.json"
     path.parent.mkdir()
     path.write_text(json.dumps(cache))
@@ -411,29 +421,65 @@ def test_current_score_cache_requires_all_four_identities(case, change):
         for folder in ("conversations", "scores"):
             assert len(rows(case.root / folder / "round-00-current.jsonl")) == 2
         saved = json.loads(path.read_text())
-        assert saved == cache_payload(case.base, case.deps.judge, ["a", "b"], got)
+        assert saved == cache_payload(case.base, case.deps, ["a", "b"], got)
 
 
 def test_current_score_cache_is_invalidated_by_text_changes_under_the_same_version(case):
     path = case.root / "scores/current.json"
     path.parent.mkdir()
     path.write_text(json.dumps(cache_payload(
-        case.base, case.deps.judge, ["a"], Scores(empathy=1, relevance=1, quality=1),
+        case.base, case.deps, ["a"], Scores(empathy=1, relevance=1, quality=1),
     )))
     case.base.write_text(case.base.read_text().replace("Listen carefully.", "Listen and ask gently."))
     got = current_scores(case.deps, case.base, ["a"])
     assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
     assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, "a", CURRENT_TAG)]
-    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps.judge, ["a"], got)
+    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps, ["a"], got)
+
+
+def test_current_score_cache_is_invalidated_by_scenario_text_under_the_same_id(case):
+    ids = ["b", "a"]
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    old_cache = cache_payload(case.base, case.deps, ids, Scores(empathy=1, relevance=1, quality=1))
+    path.write_text(json.dumps(old_cache))
+    case.deps.scenarios[0] = case.deps.scenarios[0].model_copy(update={
+        "situation": "My hours were cut again.\nI am worried about next month's rent.",
+    })
+    got = current_scores(case.deps, case.base, ids)
+    assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
+    assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, s, CURRENT_TAG) for s in ids]
+    saved = json.loads(path.read_text())
+    assert saved == cache_payload(case.base, case.deps, ids, got)
+    assert saved["scenarios_sha256"] != old_cache["scenarios_sha256"]
+
+
+@pytest.mark.parametrize("setting,value", [("max_turns", 2), ("seed", None), ("seed", 38)])
+def test_current_score_cache_is_invalidated_by_changed_run_settings(case, setting, value):
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a"], Scores(empathy=1, relevance=1, quality=1),
+    )))
+    setattr(case.deps, setting, value)
+    got = current_scores(case.deps, case.base, ["a"])
+    assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
+    assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, "a", CURRENT_TAG)]
+    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps, ["a"], got)
+    counts = (len(case.deps.helper_client.calls), len(case.deps.user_client.calls), len(case.deps.judge.calls))
+    # A present null seed is a valid identity value, not a missing field.
+    assert current_scores(case.deps, case.base, ["a"]) == got
+    assert counts == (len(case.deps.helper_client.calls), len(case.deps.user_client.calls), len(case.deps.judge.calls))
 
 
 @pytest.mark.parametrize("bad", [
     "corrupt_json", "non_utf8", "policy_version", "policy_sha256", "scenario_ids", "judge_version", "scores",
+    "scenarios_sha256", "max_turns", "seed",
 ])
 def test_unreadable_or_incomplete_cache_is_absent_and_is_rebuilt(case, bad):
     path = case.root / "scores/current.json"
     path.parent.mkdir()
-    cache = cache_payload(case.base, case.deps.judge, ["a"], Scores(empathy=1, relevance=1, quality=1))
+    cache = cache_payload(case.base, case.deps, ["a"], Scores(empathy=1, relevance=1, quality=1))
     if bad == "corrupt_json":
         path.write_text("{broken json")
     elif bad == "non_utf8":
@@ -444,7 +490,7 @@ def test_unreadable_or_incomplete_cache_is_absent_and_is_rebuilt(case, bad):
     got = current_scores(case.deps, case.base, ["a"])
     assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
     assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, "a", CURRENT_TAG)]
-    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps.judge, ["a"], got)
+    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps, ["a"], got)
 
 
 @pytest.mark.parametrize("kind", ["conversation", "judge"])
@@ -456,6 +502,24 @@ def test_incomplete_baseline_raises_and_is_never_cached(case, kind):
     with pytest.raises(GateError):
         current_scores(case.deps, case.base, ["a", "b", "c"])
     assert not (case.root / "scores/current.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["conversation", "judge"])
+def test_incomplete_refresh_preserves_the_existing_stale_cache_byte_for_byte(case, kind):
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    stale = cache_payload(case.base, case.deps, ["a", "b", "c"], Scores(empathy=1, relevance=1, quality=1))
+    stale["seed"] = -1
+    path.write_text(json.dumps(stale, indent=2) + "\n")
+    original = path.read_bytes()
+    if kind == "conversation":
+        case.deps.user_client = Chat(["Worry.", "[END]", "Worry."])
+    else:
+        case.deps.judge = Judge(errors=["b"])
+    with pytest.raises(GateError):
+        current_scores(case.deps, case.base, ["a", "b", "c"])
+    assert path.read_bytes() == original
+    assert [r.scenario_id for r in case.deps.judge.calls] == (["a", "c"] if kind == "conversation" else ["a", "b", "c"])
 
 
 # 2. run_gate: no check can be overridden by good scores or the measured-noise flag.
@@ -668,9 +732,12 @@ def test_validation_ids_must_not_occur_in_the_rounds_training_file(case, trainin
         assert report.failed == ["complete_evidence"] and not report.would_keep
         assert report.outcome.decision == "reverted"
         assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+        assert report.outcome.after == NOT_MEASURED and report.log_scores is None
     else:
         assert report.failed == [] and report.would_keep and report.outcome.decision == "kept"
     assert len(case.deps.judge.calls) == 3 and report.log_safety is not None
+    assert {r["id"] for r in rows(case.root / "conversations/round-03-validation.jsonl")} == validation_ids
+    assert {r["conversation_id"] for r in rows(case.root / "scores/round-03-validation.jsonl")} == validation_ids
     assert (case.root / "conversations/round-03-train.jsonl").read_bytes() == training_bytes
     assert_report(report, case.root)
 
@@ -797,15 +864,76 @@ def test_make_gate_attaches_measurements_and_updates_cache_only_for_kept_candida
     promoted.version = "policy-v2"
     promoted_text = render_policy(promoted)
     assert promoted_text != case.candidate.read_text().replace("policy-v2-candidate", "policy-v2", 1)
-    assert cached == dict(policy_version="policy-v2" if measured else "policy-v1", scenario_ids=["c", "a"],
-                          policy_sha256=sha256_text(promoted_text if measured else case.base.read_text()),
-                          judge_version=case.deps.judge.version,
-                          scores=(outcome.after if measured else outcome.before).model_dump())
+    expected_cache = cache_payload(case.base, case.deps, ["c", "a"], outcome.after if measured else outcome.before)
+    if measured:
+        expected_cache.update(policy_version="policy-v2", policy_sha256=sha256_text(promoted_text))
+    assert cached == expected_cache
     assert [r.id for r in case.deps.judge.calls] == [
         "conv-r00-current-c", "conv-r00-current-a", "conv-r03-val-c", "conv-r03-val-a",
     ]
     assert policy_snapshot(case.root) == before
     assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("cache_state", ["stale", "missing"])
+def test_failed_post_keep_cache_write_keeps_outcome_and_the_promoted_policy_is_rescored(case, cache_state):
+    case.deps.noise_measured = True
+    ids = ["a", "b", "c"]
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3),
+    )))
+    original_cache = cache.read_bytes()
+    blocked = []
+
+    def block_cache_write():
+        if not blocked:
+            # The baseline is cached and Safety does not call reply, so the first
+            # helper call is validation, after the baseline cache has been read.
+            cache.unlink()
+            cache.mkdir()
+            (cache / "blocked").write_text("Only the promoted-cache destination is unavailable.\n")
+            blocked.append(True)
+
+    case.deps.helper_client = Chat(before_call=block_cache_write)
+    result = candidate_result(case)
+    adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
+    before = policy_snapshot(case.root)
+    outcome = adapter(result)
+    assert blocked == [True]
+    assert outcome.decision == "kept" and outcome.policy_in_force == "policy-v2"
+    assert outcome.before.quality == 3 and outcome.after.quality == 4
+    assert adapter.last_report.outcome == outcome and adapter.last_report.failed == []
+    assert adapter.last_report.would_keep is True
+    assert result.scores == adapter.last_report.log_scores and result.scores is not None
+    assert result.safety == adapter.last_report.log_safety and result.safety is not None
+    assert policy_snapshot(case.root) == before
+    assert_report(adapter.last_report, case.root)
+
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    event = round_api.finish_round(result, outcome, log, memory, case.root)
+    assert event.outcome == "kept"
+    promoted = case.root / "policies/policy-v2.md"
+    assert promoted.is_file()
+
+    # Restore storage in each allowed state; neither can match the promoted policy.
+    case.deps.helper_client.before_call = None
+    if cache.is_dir():
+        cache.rename(case.root / "blocked-cache-destination")
+    else:
+        cache.unlink(missing_ok=True)
+    if cache_state == "stale":
+        cache.write_bytes(original_cache)
+    counts = (len(case.deps.helper_client.calls), len(case.deps.user_client.calls), len(case.deps.judge.calls))
+    got = current_scores(case.deps, promoted, ids)
+    assert got == outcome.after
+    assert len(case.deps.helper_client.calls) > counts[0] and len(case.deps.user_client.calls) > counts[1]
+    rescored = case.deps.judge.calls[counts[2]:]
+    assert [r.id for r in rescored] == [runner.conversation_id(0, s, CURRENT_TAG) for s in ids]
+    assert all(r.policy_version == "policy-v2" for r in rescored)
+    assert json.loads(cache.read_text()) == cache_payload(promoted, case.deps, ids, got)
 
 
 @pytest.mark.parametrize("measured", [False, True])
@@ -845,7 +973,7 @@ def test_make_gate_replaces_stale_measurements_with_what_was_actually_measured(c
     cache = case.root / "scores/current.json"
     cache.parent.mkdir()
     cache.write_text(json.dumps(cache_payload(
-        case.base, case.deps.judge, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+        case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
     )))
     original_cache = cache.read_bytes()
     if mode == "static":
