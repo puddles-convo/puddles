@@ -380,3 +380,17 @@ All offline, with the fakes of section 5 or scripted clients, in `tmp_path`, wit
 - Tracing without consent, and the `--training no` path of `scripts/chat.py`.
 - Cost accounting for the pilot (no usage meter is set). Judge usage is logged only if a meter is current.
 - A README section. It is written from a real run's `report.md` afterwards.
+
+## Amendments (15 November, after the test author's defect list)
+
+These override the text above where they differ.
+
+1. **`run_pilot` has two more keyword arguments**, both with defaults: `policy_path: str = ""`, which is what `pilot.json` carries as `policy_path`, and `on_session: Callable[[dict], None] | None = None`, called with each session's `s<n>.json` dict as the session finishes. The command passes both.
+2. **"Writes nothing" means the pilot's own files.** `run_pilot` writes no `s<n>.json`, `pilot.json` or `report.md`; the existing session code still writes the session file and the record under `root`, and the note store its files.
+3. **The two arms differ in what the helper sees only by the notes.** With `--fake` the scripted user's first line also differs, because the markers that make the fake note-taker act are sent only in `notes_on`. That is a property of the fakes, not of the pilot, and the report of a `--fake` run proves only that the report renders.
+4. **`<out>/mlflow.db` is written in both modes.**
+5. **A `deleted` or `replaced` row takes its kind from `notes_before`**, and `-` when the note is not there.
+6. **Rounding:** a mean is rounded to 2 decimals for display only. A difference of means is computed from the unrounded means and then rounded to 2 decimals. A per-session difference of zero is written `0`; a difference of means of zero is written `0.00`, without a sign.
+7. **`--fake` shows notes added in every persona only when `--turns` is at least 2**, since the markers are in the simulated user's first answer.
+8. **`--workers N`** (default 1, at least 1): the six chains (persona, arm) run on up to N threads. The three sessions of one chain always run in order on one thread. Results, files, `pilot.json` and the report are in the same order whatever finishes first, and the lines on standard output may come in any order. `run_pilot` takes `workers: int = 1`. Each chain has its own user ID, so no two threads touch the same person's notes. A failure in one chain does not stop the others.
+9. **Real mode builds the note store with the store's defaults**, so the wait for past.dev to confirm a note and the timeout of the recall at session start follow `PUDDLES_NOTE_WRITE_WAIT_S` and `PUDDLES_NOTE_RECALL_TIMEOUT_S` once those exist in `NoteStore`. The pilot passes no timeout of its own.
