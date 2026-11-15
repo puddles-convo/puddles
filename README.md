@@ -36,11 +36,11 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 
 ## 1. Training steps
 
-The agreed design is an offline policy-improvement loop. The figure below distinguishes implemented handoffs from planned integration; the current development gate is selected manually.
+The agreed design is an offline policy-improvement loop. The figure below shows the older `scripts.run_round` path, with pre-scored conversations and a manual stand-in gate; this branch also implements judge integration and the real gatekeeper (`scripts.run_graph_round --gate real`).
 
 ![Puddles training implementation snapshot](figures/fig1-training.svg)
 
-**Implementation snapshot:** solid paths show implemented handoffs; dashed paths show planned Judge integration. The round script consumes pre-scored JSON, and the gate is a developer-selected keep/revert stand-in, not measured evaluation. There is **no automatic next-batch loop**.
+**Implementation snapshot of the older `scripts.run_round` path:** solid paths show its implemented handoffs; dashed paths show Judge integration, which this branch now implements in `puddles/judging.py`, with the real gatekeeper in `puddles/gate.py`. The round script consumes pre-scored JSON, and the gate is a developer-selected keep/revert stand-in, not measured evaluation. There is **no automatic next-batch loop**.
 
 - **State inputs** name policy, decision-log and memory dependencies; the log and hash-checked local records are authoritative.
 - **Finish round** logs the outcome, copies available records to shared memory and promotes the policy only when kept. No-pattern/no-evidence exits finish without an edit.
@@ -68,12 +68,12 @@ Inference is the live conversation with a person. The policy is fixed for the wh
 
 ![Puddles inference target pipeline](figures/fig2-inference.svg)
 
-**The text path works end to end and was tested** on real models on 15 November ([results](#inference-tested-end-to-end-15-november)); the robot's voice is not yet routed through it. Every wire is dashed because the full pipeline is not connected on `main`. The badges show where each part stands: **main** (the helper function), **branch** (the keyword check, crisis checker and release on `crisis-path`; note storage and the note-taker on `notes`) and **planned** (the listener, the speaker and the session wiring).
+**The text path works end to end and was tested** on real models on 15 November ([results](#inference-tested-end-to-end-15-november)); the robot's voice is not yet routed through it. Every wire is dashed because the full pipeline is not connected on `main`. The badges describe an earlier implementation snapshot: **main** (the helper function), **branch** (the keyword check, crisis checker and release on `crisis-path`; note storage and the note-taker on `notes`) and **planned** (the listener, the speaker and the session wiring). Text-session wiring is now implemented on this branch; speech integration remains planned.
 
 - **The listener's text goes three ways at once:** to the keyword check, the crisis checker and the helper. Release combines the three results; the crisis checker does not feed the helper.
 - **The note-taker runs once, at session end,** on the finished text turns. Only the helper and the note-taker read the private notes.
 - **Green flickers mark the audio hardware ports** (microphone, robot playback, stored offline audio). All motion is illustrative, not execution timing.
-- **The crisis checker and the helper start together**, so the check adds no delay.
+- **The crisis checker and the helper start together**, but waiting for the checker can add latency ([measured example](#what-the-real-runs-broke-and-what-was-fixed-the-same-morning)).
 - **Nothing is spoken until the crisis checker has answered.** On a crisis the helper's draft is discarded.
 - **With no connection** the robot cannot understand speech, so it plays a line stored on the device that gives the 911 and 988 numbers.
 
@@ -122,7 +122,7 @@ The runs on 15 November and the training loop used OpenAI `gpt-6-luna` for the h
 ### Still to decide
 
 - **The exact OpenAI model** for the judge, critic, researcher and proposer. It must be pinned before the judge is calibrated ([#3](https://github.com/puddles-convo/puddles/issues/3)), because changing it afterwards invalidates the scores. A fallback judge on Tinker is [#23](https://github.com/puddles-convo/puddles/issues/23).
-- **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 5-second limit.
+- **The crisis checker's model.** The checker and the helper run concurrently, but waiting for the checker can add latency. A stronger model would miss less, if it can answer inside the 5-second limit.
 - **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
 
 ## 5. The memory
@@ -779,7 +779,7 @@ python -m pytest                                   # offline: scripted model, Ex
 PAST_API_KEY=past_sk_... python -m scripts.pastdev_smoke   # task B1: write one record and read it back
 ```
 
-A live round needs `PAST_API_KEY`, `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL` and `EXA_API_KEY`. Until the gatekeeper (J7) exists, `--gate` picks a stand-in outcome, which the log and memory label as a stand-in. Use a separate past.dev project for these runs so they stay out of the team's memory.
+A live round needs `PAST_API_KEY`, `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL` and `EXA_API_KEY`. This legacy `scripts.run_round` command uses a manual stand-in gate: `--gate` picks the outcome, which the log and memory label as a stand-in. The implemented gatekeeper is available through `scripts.run_graph_round --gate real`. Use a separate past.dev project for these runs so they stay out of the team's memory.
 
 ```bash
 python -m scripts.run_round --root runs/demo --gate reverted   # round 1, on fixtures/bad_conversations.json
