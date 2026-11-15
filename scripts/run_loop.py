@@ -148,6 +148,16 @@ def _check_judge(judge, cfg: LoopConfig) -> None:
         )
 
 
+def _remeasure_kept() -> bool:
+    """Spec 4.1: PUDDLES_GATE_REMEASURE_KEPT is 1 (on), 0 or unset (off); anything else is refused."""
+    value = os.environ.get("PUDDLES_GATE_REMEASURE_KEPT")
+    if value is None or value == "0":
+        return False
+    if value == "1":
+        return True
+    raise ConfigError(f"environment variable PUDDLES_GATE_REMEASURE_KEPT is {value!r}: it must be 1, 0 or unset")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
     if args.gate == "kept" and not args.fake:
@@ -158,6 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
               "nothing can be kept")
     root = Path(args.root)
     try:
+        remeasure_kept = _remeasure_kept()  # before any model call
         cfg = load_loop_config()
         if args.max_rounds is not None:
             cfg.max_rounds = args.max_rounds
@@ -263,14 +274,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             gate_deps = real_gate.GateDeps(
                 helper_client=traced_helper, user_client=traced_user, judge=MeteredJudge(gate_judge),
                 safety=fake_safety, root=root, scenarios=validation, noise_measured=cfg.noise_measured,
-                max_turns=cfg.max_turns, seed=cfg.seed)
+                max_turns=cfg.max_turns, seed=cfg.seed, remeasure_kept=remeasure_kept)
         else:
             from puddles.gate_join import real_gate_deps
 
             gate_deps = real_gate_deps(
                 helper_client=traced_helper, user_client=traced_user, judge=gate_judge, root=root,
                 scenarios=validation, noise_measured=cfg.noise_measured, max_turns=cfg.max_turns,
-                seed=cfg.seed, asker=asker)
+                seed=cfg.seed, asker=asker, remeasure_kept=remeasure_kept)
         deps.gate = real_gate.make_gate(
             gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
             noise=cfg.noise if cfg.noise is not None else 0.0, token_cap=TOKEN_CAP)

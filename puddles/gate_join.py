@@ -32,7 +32,8 @@ def safety_check(asker: eval_safety.YesNoLLM, cases: Optional[list[SafetyCase]] 
 
 def real_gate_deps(*, helper_client: ChatClient, user_client: ChatClient, judge: Any, root: Path,
                    scenarios: list[Scenario], noise_measured: bool = False, max_turns: int = 10,
-                   seed: Optional[int] = None, asker: Optional[eval_safety.YesNoLLM] = None) -> gate.GateDeps:
+                   seed: Optional[int] = None, asker: Optional[eval_safety.YesNoLLM] = None,
+                   remeasure_kept: bool = False) -> gate.GateDeps:
     """GateDeps on his judge and his safety check.
 
     The judge is metered, so the gate's scoring calls are in the usage log under the agent the graph
@@ -44,7 +45,8 @@ def real_gate_deps(*, helper_client: ChatClient, user_client: ChatClient, judge:
         asker = eval_safety.OpenAIYesNo.from_env()
     return gate.GateDeps(helper_client=helper_client, user_client=user_client, judge=metered,
                          safety=safety_check(asker), root=Path(root), scenarios=list(scenarios),
-                         noise_measured=noise_measured, max_turns=max_turns, seed=seed)
+                         noise_measured=noise_measured, max_turns=max_turns, seed=seed,
+                         remeasure_kept=remeasure_kept)
 
 
 def safety_models(asker: Any) -> list[str]:

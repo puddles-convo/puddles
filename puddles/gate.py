@@ -138,6 +138,12 @@ class GateDeps:
     noise_measured: bool = False  # stage 5 turns it on; until then nothing is promoted
     max_turns: int = 10
     seed: Optional[int] = None
+    # unattended-run 4.1: a keep does not save the winning scores; only a fresh measurement is believed
+    remeasure_kept: bool = False
+
+
+# unattended-run 4.4: the field a current.json carries when _current_scores measured it (setting on only)
+FRESH = {"measured": "fresh"}
 
 
 @dataclass
@@ -369,6 +375,8 @@ def _current_scores(deps: GateDeps, policy_path: Path, scenario_ids: list[str]) 
     policy = _load_tied(policy_path, "policy in force")
     sha = sha256_text(policy.text)
     key = _cache_key(deps, policy.version, sha, scenario_ids)
+    if deps.remeasure_kept:  # 4.4: matched only with the field, and written with it
+        key = {**key, **FRESH}
     saved = _saved_current(deps.root, key)
     if saved is not None:
         return saved, sha
@@ -803,7 +811,7 @@ class _Gate:
                     _save_report(self.deps, result.round, report)
                 except Exception:  # noqa: BLE001  the decision is already a revert
                     pass
-            else:
+            elif not self.deps.remeasure_kept:  # 4.3: on, the next round measures the kept policy afresh
                 try:
                     self._keep_current(text, report.outcome.policy_in_force, report.log_scores.after)
                 except Exception:  # noqa: BLE001  a stale or missing file cannot match, so the next round scores again
