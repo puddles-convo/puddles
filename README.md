@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/media/puddles-robot.png" alt="The puddles robot: a StackChan on an M5Stack CoreS3" width="200"></p>
+<p align="center"><img src="docs/media/puddles-robot.png" alt="The Vibe Therapist robot: a StackChan on an M5Stack CoreS3" width="200"></p>
 
-<h1 align="center">puddles</h1>
+<h1 align="center">Vibe Therapist</h1>
 
 <p align="center"><b>A support-conversation helper that improves its own behaviour.</b><br>An offline loop reads the helper's weakest conversations, researches how counsellors handle the failure, proposes one change, and keeps it only if a gate fixed before the run says it is better and still safe.<br>The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.</p>
 
@@ -227,7 +227,7 @@ Nothing here is a safety validation or an estimate of real-world safety: every m
 Python 3.11 or later. Everything below runs offline on scripted models: no keys, no network.
 
 ```bash
-git clone https://github.com/puddles-convo/puddles && cd puddles
+git clone https://github.com/puddles-convo/vibe-therapist && cd vibe-therapist
 pip install -r requirements.txt
 python -m pytest                                  # the whole suite, offline
 printf "I had a rough day at work.\n" > messages.txt
