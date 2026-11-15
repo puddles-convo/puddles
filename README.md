@@ -35,6 +35,8 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 14. [Related work](#14-related-work)
 15. [Improvements from the literature](#15-improvements-from-the-literature)
 - [Running the training agents](#running-the-training-agents)
+- [Evaluation](#evaluation)
+- [Limits](#limits)
 
 ## 1. Training steps
 
@@ -824,8 +826,41 @@ Each run ends by printing, for every record, the agent that wrote it and the age
 | `puddles/replay.py` | The replay check: the log, the policy in force, its Safety section and `.meta.json` must agree |
 | `puddles/round.py` | Steps 4 to 6 with direct handoffs, then the log entry and the copies into memory |
 
+## Evaluation
+
+Team 1's code is in [`puddles/eval/`](puddles/eval/). Each command fetches its data at run time from a pinned revision and caches it outside the repo. Write outputs under `runs/`, which is not committed. The same commands run in the container: `docker compose run --rm eval puddles.eval.<command> ...`.
+
+| Step | Command | Produces |
+|---|---|---|
+| Calibrate and freeze the judge | `python -m puddles.eval.calibrate --split validation --n 100 --output runs/calibration.json --freeze` | `calibration/frozen.json` |
+| Safety check of one policy | `run_safety(policy_version, reply, asker)` in `puddles/eval/safety.py`, called by the gate | A `SafetyResult` |
+| External sets for one policy | `python -m puddles.eval.external --policy policies/X.md --system X --output runs/external-X` | `counselbench.json`, `external.json` |
+| Final evaluation | `python -m puddles.eval.final --plain ... --handwritten ... --final ... --output runs/final` | `results.json`, `results.md` |
+
+Settings come from the environment: `OPENAI_API_KEY`; `PUDDLES_JUDGE_PANEL` (three OpenAI models), `PUDDLES_JUDGE_ASTRA`, and `PUDDLES_JUDGE=fallback` with `PUDDLES_FALLBACK_JUDGE_MODEL` and `TINKER_API_KEY` for the fallback judge; `PUDDLES_SAFETY_MODEL`; `PUDDLES_HELPER_*`, `PUDDLES_USER_*` and `PUDDLES_VERA_*_MODEL`. No model name is written in code.
+
+### Method
+
+- **The judge.** Three OpenAI judges each rate a conversation: empathy and relevance (1 to 5), emotion before and after, one strategy per helper turn, and a one-sentence note. Each judge then re-checks its own rating. Astra, the final judge, reads their final ratings and writes the score that is kept. The judge sees only the turns, runs at temperature 0, and its version is a hash of its prompts, models and settings. See [docs/agents/t3-judge.md](docs/agents/t3-judge.md).
+- **Calibration.** The judge scores real ESConv validation conversations, and its scores are compared with the ratings the seekers gave their own conversations: Spearman, mean absolute error, quadratic-weighted κ and exact match. This is reported for Astra and for every panel judge before and after its re-check. The frozen report is the judge every later run must match.
+- **Safety.** [`safety/safety-v1.json`](safety/safety-v1.json) holds 19 cases written for this project: 10 for S1 (suicide and self-harm, including wording with no keyword), 5 for S2 (medication and diagnosis) and 4 for S3 ("are you a person?"). The helper answers each opener under the candidate policy with no crisis checker in front of it. One failed case fails the policy.
+- **Final evaluation.** The plain policy, the hand-written policy and Team 2's final policy run on the same ESConv test scenarios, with the same simulated user, judge and turn limit. The test split is used once, here. Each average is reported with `n` and its spread. Failures are counted, never dropped.
+- **External sets.** CounselBench-Adv (120 clinician-written openers in 6 categories) is reported per category. VERA-MH runs its SI personas against the helper. Neither is seen by the training loop.
+
+### Results
+
+**Judge agreement with ESConv seekers:** not measured yet. The number will be copied here from `calibration/frozen.json` once the judge is frozen.
+
+**Final evaluation:** not run yet. The table will be copied here from `runs/final/results.md` after Team 2's final policy is frozen. What did not improve will be reported alongside what did.
+
 ## Limits
 
 - A simulated user is more cooperative than a real one, so training scores will look better than real use.
 - The helpers in ESConv are not clinicians. The evaluation measures good peer support, not therapy.
 - Nothing here shows that anyone's mental health improves. That needs a study with real users.
+- ESConv seekers rated their own conversations, so the judge is not expected to agree with them perfectly. LLM judges tend to rate model replies too highly (CounselBench). The agreement number above is the only evidence that the judge tracks what people felt.
+- The judge was calibrated on typed ESConv conversations. On spoken robot sessions, with speech-to-text errors and short turns, its accuracy is unchecked until #27.
+- The safety cases are 19 openers in U.S. English, written by the team. Passing them does not show that a policy is safe. The crisis responses, keyword list and checker prompt have had no clinical review.
+- The CounselBench-Adv pass rules are the team's own yes-or-no questions, answered by a model, not by clinicians.
+- A VERA-MH score is indicative only. Its licence says a score is not a certification or a determination of safety.
+- Until A1 to A3 land, the evaluation uses stand-ins for the helper's prompt code, the simulated user and the conversation runner. Final numbers must come from Team 2's code.
