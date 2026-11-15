@@ -3,6 +3,7 @@
 Within a round the critic, researcher and proposer hand records straight to each other.
 Only after the round is logged are its records copied into memory, for later rounds to recall.
 """
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Optional
@@ -266,6 +267,42 @@ def gate_report_path(root: Path, round_: int) -> Path:
     return Path(root) / "scores" / f"round-{round_:02d}-gate.json"
 
 
+def gate_files(root: Path, round_: int) -> list[Path]:
+    """Every file the real gate writes for a round (gate.md section 6)."""
+    root = Path(root)
+    return [gate_report_path(root, round_), root / "scores" / f"round-{round_:02d}-safety.json",
+            root / "scores" / f"round-{round_:02d}-validation.jsonl",
+            root / "conversations" / f"round-{round_:02d}-validation.jsonl"]
+
+
+# (resolved root, round) for every round make_gate's gate was called on in this process. Only added to.
+_GATED: set[tuple[str, int]] = set()
+
+
+def mark_gated(root: Path, round_: int) -> None:
+    """Called by the real gate as its first act: from here on the round is the gate's, whatever fails later."""
+    _GATED.add((str(Path(root).resolve()), int(round_)))
+
+
+def is_gated(root: Path, round_: int) -> bool:
+    return (str(Path(root).resolve()), int(round_)) in _GATED
+
+
+def gated_signs(result: RoundResult, root: Path) -> list[str]:
+    """Every sign that the round is the real gate's (gate.md section 9); empty when there is none."""
+    signs = []
+    if any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256)):
+        signs.append("the result carries the gate's measurements or hashes, so it went through the gate")
+    if is_gated(root, result.round):
+        signs.append("make_gate's gate was called for this root and round in this process")
+    signs += [f"{path} is there, written by the real gate"
+              for path in gate_files(root, result.round) if os.path.lexists(path)]
+    scores_dir = Path(root) / "scores"
+    if os.path.lexists(scores_dir) and not scores_dir.is_dir():
+        signs.append(f"{scores_dir} is there and is not a folder, so nothing can be known about what the gate left")
+    return signs
+
+
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
                  root: Path, start_policy: Optional[Path] = None, scores: Optional[LogScores] = None,
                  safety: Optional[LogSafety] = None) -> RoundEvent:
@@ -286,22 +323,20 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     `result.safety` go into the event; without one both stay empty.
 
     `scores` and `safety` are for a caller with a gate of its own (scripts/dataset_rounds.py). A
-    round that went through `make_gate` (any of `result.scores`, `result.safety`,
-    `result.base_sha256`, `result.candidate_sha256` set) refuses them with ValueError before
-    anything is read or written. So does a round whose `<root>/scores/round-NN-gate.json` exists,
-    whatever the four fields hold: `make_gate` writes that file on every return, so clearing the
-    fields does not make a gated round ungated (a caller that deletes the file has gone beyond
-    what one process can check). Otherwise they go into the event exactly as given; finish_round
+    round is the real gate's as soon as `make_gate`'s gate is called for it, and it refuses them
+    with ValueError, before anything is read or written, on any sign of that (`gated_signs`): one
+    of `result.scores`, `result.safety`, `result.base_sha256`, `result.candidate_sha256` set; the
+    gate called for this root and round in this process (`is_gated`); any file the gate writes for
+    the round there, a dangling link included; or `<root>/scores` there and not a folder. Left
+    outside: another process's gate killed before it wrote any file for the round, and a caller
+    that deletes the gate's files. Otherwise they go into the event exactly as given; finish_round
     does not tie them to any file's contents, and the caller answers for them.
     """
     gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
     if scores is not None or safety is not None:
-        if gated:
-            raise ValueError(f"round {result.round} went through the gate; its measurements cannot be replaced "
-                             "by the caller's scores or safety; nothing was written")
-        report = gate_report_path(root, result.round)
-        if report.exists():
-            raise ValueError(f"the real gate ran for round {result.round} ({report} exists); its measurements "
+        signs = gated_signs(result, root)
+        if signs:
+            raise ValueError(f"round {result.round} is the real gate's ({'; '.join(signs)}); its measurements "
                              "cannot be replaced by the caller's scores or safety; nothing was written")
     # ---- read each file once, as its bytes, and check what was measured against those bytes ----
     base_text = read_policy_text(
