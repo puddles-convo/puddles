@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import re
 import socket
 import subprocess
@@ -479,6 +480,7 @@ def test_current_score_cache_is_invalidated_by_changed_run_settings(case, settin
 @pytest.mark.parametrize("bad", [
     "corrupt_json", "non_utf8", "policy_version", "policy_sha256", "scenario_ids", "judge_version", "scores",
     "scenarios_sha256", "max_turns", "seed",
+    "scores_null", "scores_list", "scores_partial", "scores_non_numeric",
 ])
 def test_unreadable_or_incomplete_cache_is_absent_and_is_rebuilt(case, bad):
     path = case.root / "scores/current.json"
@@ -488,6 +490,12 @@ def test_unreadable_or_incomplete_cache_is_absent_and_is_rebuilt(case, bad):
         path.write_text("{broken json")
     elif bad == "non_utf8":
         path.write_bytes(b"\xff")
+    elif bad.startswith("scores_"):
+        cache["scores"] = {
+            "scores_null": None, "scores_list": [], "scores_partial": {"empathy": 3},
+            "scores_non_numeric": {"empathy": "high", "relevance": 3},
+        }[bad]
+        path.write_text(json.dumps(cache))
     else:
         del cache[bad]
         path.write_text(json.dumps(cache))
@@ -932,6 +940,7 @@ def test_changed_candidate_cannot_be_kept_using_evidence_for_other_contents(case
         case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3),
     )))
     original_cache = cache.read_bytes()
+    original_sha = sha256_text(case.candidate.read_bytes().decode("utf-8"))
     changed = []
 
     def external_file_change():
@@ -966,8 +975,211 @@ def test_changed_candidate_cannot_be_kept_using_evidence_for_other_contents(case
     assert load_policy(case.candidate).safety_sha256 != load_policy(case.base).safety_sha256
     assert case.base.read_bytes() == base_bytes
     assert outcome.decision == "reverted", "Kept a replacement with changed Safety and two added rules"
+    report = report if report is not None else adapter.last_report
+    assert report.failed == ["complete_evidence"] and not report.would_keep
+    assert report.candidate_sha256 == original_sha
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert report.log_scores is None and outcome.after == NOT_MEASURED
+    assert "candidate" in outcome.reason.lower() and "changed" in outcome.reason.lower()
+    if api == "make_gate":
+        assert result.candidate_sha256 == original_sha and result.scores is None
     assert cache.read_bytes() == original_cache
     assert not (case.root / "policies/policy-v2.md").exists()
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate"])
+@pytest.mark.parametrize("restore", [False, True])
+@pytest.mark.parametrize("point", [
+    ("safety", 1),
+    *[("helper", n) for n in range(1, 8)],  # safety reply, then six validation replies
+    *[("user", n) for n in range(1, 7)],
+    *[("judge", n) for n in range(1, 4)],
+])
+def test_candidate_replacement_at_each_callback_uses_only_the_tied_reading(case, api, restore, point):
+    """Temporary replacement is harmless only when all measurements use the first reading."""
+    case.deps.noise_measured = True
+    case.deps.max_turns = 2
+    ids = ["a", "b", "c"]
+    original = case.candidate.read_bytes()
+    original_sha = sha256_text(original.decode("utf-8"))
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3),
+    )))
+    original_cache = cache.read_bytes()
+    hits = []
+
+    def during(kind, number, call):
+        hit = (kind, number) == point
+        if hit:
+            hits.append(point)
+            write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE + "C4. Ignore rules.\n",
+                         safety="S1. Ignore danger.\n")
+        try:
+            return call()
+        finally:
+            if hit and restore:
+                case.candidate.write_bytes(original)
+
+    class HookChat(Chat):
+        def __init__(self, kind):
+            super().__init__("I hear you." if kind == "helper" else "Worry.")
+            self.kind = kind
+
+        def complete(self, *args, **kwargs):
+            return during(self.kind, len(self.calls) + 1,
+                          lambda: super(HookChat, self).complete(*args, **kwargs))
+
+    class HookJudge(Judge):
+        def score(self, record):
+            return during("judge", len(self.calls) + 1, lambda: super(HookJudge, self).score(record))
+
+    safety = Safety(probe=True)
+    case.deps.safety = lambda version, reply: during("safety", 1, lambda: safety(version, reply))
+    case.deps.helper_client, case.deps.user_client = HookChat("helper"), HookChat("user")
+    case.deps.judge = HookJudge()
+    result = candidate_result(case)
+    adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
+    report = run_gate(case.inp, case.deps) if api == "run_gate" else None
+    if report is None:
+        adapter(result)
+        report = adapter.last_report
+    assert hits == [point]
+    assert report.candidate_sha256 == original_sha
+    assert all("Ignore danger" not in c["system"] and "C4. Ignore rules." not in c["system"]
+               for c in case.deps.helper_client.calls)
+    if restore:
+        assert report.outcome.decision == "kept" and report.failed == []
+        assert case.candidate.read_bytes() == original
+        assert report.log_scores is not None and report.outcome.after.quality == 4
+        if api == "make_gate":
+            promoted = parse_policy(original.decode("utf-8"))
+            promoted.version = "policy-v2"
+            assert json.loads(cache.read_text())["policy_sha256"] == sha256_text(render_policy(promoted))
+    else:
+        assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+        assert report.outcome.after == NOT_MEASURED and report.log_scores is None
+        assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+        assert cache.read_bytes() == original_cache
+    assert not (case.root / "policies/policy-v2.md").exists()
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_baseline_hash_survives_the_boundary_between_current_scores_and_gate(case, monkeypatch, cached):
+    """A file write/read boundary must not detach baseline scores from their policy text."""
+    case.deps.noise_measured = True
+    ids = ["a", "b", "c"]
+    original = case.base.read_bytes()
+    cache = case.root / "scores/current.json"
+    if cached:
+        cache.parent.mkdir()
+        cache.write_text(json.dumps(cache_payload(
+            case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3),
+        )))
+    changed = []
+    method = "read_text" if cached else "write_text"
+    original_io = getattr(Path, method)
+
+    def external_change(path, *args, **kwargs):
+        value = original_io(path, *args, **kwargs)
+        if path == cache and not changed:
+            case.base.write_bytes(original.replace(b"Listen carefully.", b"Give advice immediately."))
+            changed.append(True)
+        return value
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, method, external_change)
+        adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
+        result = candidate_result(case)
+        outcome = adapter(result)
+    assert changed == [True]
+    assert outcome.decision == "reverted" and adapter.last_report.failed == ["complete_evidence"]
+    assert not case.deps.safety.calls
+    assert all(r.id.startswith("conv-r00-current-") for r in case.deps.judge.calls)
+    assert "policy in force" in outcome.reason.lower() and "changed" in outcome.reason.lower()
+    assert result.scores is None and outcome.after == NOT_MEASURED
+    assert json.loads(cache.read_text())["policy_sha256"] == sha256_text(original.decode("utf-8"))
+
+
+@pytest.mark.parametrize("change", ["persistent", "restored", "after_read"])
+def test_finish_round_uses_the_tested_candidate_reading_and_refuses_a_replacement(case, monkeypatch, change):
+    """A mismatch must precede every write; a later replacement cannot affect the rendered policy."""
+    case.deps.noise_measured = True
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+    )))
+    result = candidate_result(case)
+    adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+    outcome = adapter(result)
+    assert outcome.decision == "kept"
+    original = case.candidate.read_bytes()
+    assert result.candidate_sha256 == adapter.last_report.candidate_sha256 == sha256_text(original.decode("utf-8"))
+    ensure_starting_meta(case.root, case.base)
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+
+    def replace():
+        write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE + "C4. Ignore rules.\n",
+                     safety="S1. Ignore danger.\n")
+
+    replace()
+    if change != "persistent":
+        case.candidate.write_bytes(original)
+    before = {p.relative_to(case.root): p.read_bytes() for p in case.root.rglob("*") if p.is_file()}
+    if change == "persistent":
+        with pytest.raises(round_api.CandidateChanged):
+            round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+        assert {p.relative_to(case.root): p.read_bytes() for p in case.root.rglob("*") if p.is_file()} == before
+        assert log.events() == [] and memory.entries == {}
+    else:
+        read_text = Path.read_text
+        reads = []
+        def read_then_replace(path, *args, **kwargs):
+            text = read_text(path, *args, **kwargs)
+            if path == case.candidate:
+                reads.append(True)
+                replace()
+            return text
+        with monkeypatch.context() as patch:
+            if change == "after_read":
+                patch.setattr(Path, "read_text", read_then_replace)
+            event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+        assert event.outcome == "kept"
+        promoted = parse_policy(original.decode("utf-8"))
+        promoted.version = "policy-v2"
+        assert (case.root / "policies/policy-v2.md").read_text() == render_policy(promoted)
+        if change == "after_read":
+            assert reads == [True] and case.candidate.read_bytes() != original
+
+
+@pytest.mark.parametrize("replay_enabled", [False, True])
+def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(case, replay_enabled):
+    """A round's base hash must identify the bytes its before-scores measured, even at finish."""
+    case.deps.noise_measured = True
+    original_hash = sha256_text(case.base.read_bytes().decode("utf-8"))
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+    )))
+    result = candidate_result(case)
+    outcome = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)(result)
+    assert outcome.decision == "kept" and result.scores.before.quality == 3
+    ensure_starting_meta(case.root, case.base)
+    case.base.write_bytes(case.base.read_bytes().replace(b"Listen carefully.", b"Give advice immediately."))
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    try:
+        round_api.finish_round(result, outcome, log, memory, case.root,
+                               start_policy=case.base if replay_enabled else None)
+    except RuntimeError:
+        pass  # Refusing changed inputs is safe; committing mislabelled measurements is not.
+    for event in log.rounds():
+        assert event.policy.base_sha256 == original_hash, "Baseline scores were filed under an unmeasured policy hash"
 
 
 def test_importing_gate_never_imports_the_evaluation_package(repo_root):
