@@ -1233,3 +1233,244 @@ def test_all_store_files_use_same_folder_temporary_rename(store, monkeypatch):
     old = seed(store)[0]
     assert store.delete("alice", [old.id]) == []
     assert destinations == {"counter.json", "notes.json", "index.json", "pending_deletes.json"}
+
+
+class CutPointMemory(FakeUserMemory):
+    """A remote fake with a KeyboardInterrupt checkpoint on either side of each call."""
+
+    def __init__(self):
+        super().__init__()
+        self.checkpoint = lambda event: None
+        self.wait_result = True
+
+    def _around(self, name, operation):
+        self.checkpoint(f"before:{name}")
+        result = operation()
+        self.checkpoint(f"after:{name}")
+        return result
+
+    def ensure_audience(self, audience, identities):
+        return self._around("ensure", lambda: super(CutPointMemory, self).ensure_audience(audience, identities))
+
+    def ingest(self, entry):
+        return self._around("ingest", lambda: super(CutPointMemory, self).ingest(entry))
+
+    def wait(self, ingestion_id, timeout_s=60):
+        return self._around("wait", lambda: self.wait_result)
+
+    def recall(self, query, identity, level="low", limit=20):
+        return self._around("recall", lambda: super(CutPointMemory, self).recall(query, identity, level, limit))
+
+    def delete(self, entry_id):
+        return self._around("delete", lambda: super(CutPointMemory, self).delete(entry_id))
+
+
+def raw_note_state(root):
+    folder = root / "notes/alice"
+
+    def read(name, default):
+        path = folder / name
+        return json.loads(path.read_text()) if path.exists() else default
+
+    return {
+        "index": {n["note_id"] for n in read("index.json", {"notes": []})["notes"]},
+        "stored": set(read("notes.json", {})),
+        "pending": set(read("pending_deletes.json", [])),
+        "writing": {w["note_id"] for w in read("counter.json", {}).get("writing", [])},
+    }
+
+
+def stop_on_committed_file(monkeypatch, filename):
+    real_replace = os.replace
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == filename:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(os, "replace", replace_then_stop)
+
+
+def exercise_note_cut(root, monkeypatch, scenario, cut=None):
+    memory = CutPointMemory()
+    store = NoteStore(memory, root)
+    reading_expiry = scenario in {"expire", "live_notes", "helper_notes", "build_input", "model_failure"}
+    first, second, third = seed(store, specs=[
+        {"kind": "follow_up" if reading_expiry else "situation",
+         "fact": "First fact.", "last_confirmed": TODAY - timedelta(days=30) if reading_expiry else EARLIER},
+        {"kind": "goals", "fact": "Second fact."},
+        {"kind": "people", "fact": "Third fact."},
+    ])
+    candidate = note(store.next_note_id("alice"), kind="preferences", fact="New fact.")
+    if scenario == "save_index":
+        store.write(candidate)
+    if scenario == "limit":
+        seed_extra(store, fact="Another situation.")
+        seed_extra(store, fact="A third situation.")
+    if scenario == "recover":
+        store.write(candidate)
+        with monkeypatch.context() as patch:
+            stop_on_committed_file(patch, "pending_deletes.json")
+            with pytest.raises(KeyboardInterrupt):
+                store.take_off("alice", [first.id])
+        store = NoteStore(memory, root)
+    if scenario == "wait_false":
+        memory.wait_result = False
+    if scenario == "delete_false":
+        memory.fail_deletes = 100
+
+    mixed = {"actions": [
+        act("replace", note_id=first.id, kind="situation", fact="Replacement."),
+        act("confirm", note_id=second.id), act("delete", note_id=third.id),
+        act("add", kind="preferences", fact="New preference."),
+    ]}
+    calls = {
+        "ensure_person": lambda: store.ensure_person("alice"),
+        "next_note_id": lambda: store.next_note_id("alice"),
+        "write": lambda: store.write(candidate),
+        "wait_false": lambda: store.write(candidate),
+        "save_index": lambda: store.save_index(LiveNoteIndex(user_id="alice", notes=[live(second), live(candidate)])),
+        "take_off": lambda: store.take_off("alice", [first.id]),
+        "delete": lambda: store.delete("alice", [first.id]),
+        "delete_false": lambda: store.delete("alice", [first.id]),
+        "expire": lambda: store.expire("alice", TODAY),
+        "live_notes": lambda: store.live_notes("alice", TODAY),
+        "helper_notes": lambda: store.helper_notes("alice", TODAY),
+        "build_input": lambda: build_input(store, "alice", [], remember_me=False, today=TODAY),
+        "session": lambda: session(store, ScriptedLLM(mixed)),
+        "no_consent": lambda: session(store, ScriptedLLM(mixed), remember_me=False),
+        "forget_everything": lambda: session(store, ScriptedLLM({**mixed, "forget_everything": True})),
+        "limit": lambda: session(store, ScriptedLLM({"actions": [act("add", kind="situation", fact="New situation.")]})),
+        "model_failure": lambda: session(store, ScriptedLLM(RuntimeError("offline model failure"))),
+        "recover": lambda: store.helper_notes("alice", TODAY),
+    }
+    events, snapshots = [], []
+    original_index = set(ids(store))
+
+    def checkpoint(event):
+        state = raw_note_state(root)
+        snapshots.append((event, state, set(memory.entries)))
+        events.append(event)
+        if len(events) == cut:
+            raise KeyboardInterrupt()
+
+    real_replace = os.replace
+
+    def replace(src, dst, *args, **kwargs):
+        checkpoint(f"before:file:{Path(dst).name}")
+        real_replace(src, dst, *args, **kwargs)
+        checkpoint(f"after:file:{Path(dst).name}")
+
+    memory.checkpoint = checkpoint
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", replace)
+        try:
+            calls[scenario]()
+        except KeyboardInterrupt:
+            assert cut is not None
+        except PastError:
+            assert scenario == "wait_false"
+    memory.checkpoint = lambda event: None
+    if cut is not None:
+        assert len(events) == cut, (scenario, cut, events)
+
+    forgotten = set()
+    for event, state, remote in snapshots:
+        known = state["index"] | state["stored"] | state["pending"] | state["writing"]
+        assert remote <= known, (scenario, cut, event, "unknown remote note", remote - known)
+        assert state["stored"] - state["index"] <= state["pending"] | state["writing"], (scenario, cut, event, state)
+        forgotten |= state["pending"] | (original_index - state["index"])
+        if event == "before:delete":
+            assert not state["pending"] & (state["index"] | state["stored"] | state["writing"]), (scenario, cut, state)
+
+    restarted = NoteStore(memory, root)
+    facts = restarted.helper_notes("alice", TODAY)
+    state = raw_note_state(root)
+    assert not forgotten & (state["index"] | state["stored"]), (scenario, cut, state)
+    assert not state["pending"] & (state["index"] | state["stored"] | state["writing"]), (scenario, cut, state)
+    assert state["index"] == state["stored"]
+    assert not state["writing"]
+    assert set(memory.entries) <= state["index"] | state["pending"]
+    assert facts == [r.fact for r in restarted.live_notes("alice", TODAY)]
+    pending = restarted.delete("alice", [])
+    assert set(memory.entries) <= set(ids(restarted)) | set(pending)
+    assert not forgotten & set(ids(restarted))
+    return events
+
+
+# Reason: every file/remote boundary, including recovery itself, must survive a kill without resurrection or orphans.
+@pytest.mark.parametrize("scenario", [
+    "ensure_person", "next_note_id", "write", "wait_false", "save_index", "take_off", "delete", "delete_false",
+    "expire", "live_notes", "helper_notes", "build_input", "session", "no_consent", "forget_everything",
+    "limit", "model_failure", "recover",
+])
+def test_keyboard_interrupt_at_every_file_and_remote_boundary(tmp_path, monkeypatch, scenario):
+    events = exercise_note_cut(tmp_path / "baseline", monkeypatch, scenario)
+    assert events
+    for cut in range(1, len(events) + 1):
+        exercise_note_cut(tmp_path / f"cut-{cut}", monkeypatch, scenario, cut)
+
+
+# Reason: the amended contract requires each mutating entry point to finish local recovery before its own work.
+@pytest.mark.parametrize("operation", ["ensure_person", "next_note_id", "save_index", "write", "take_off",
+                                       "delete", "expire", "live_notes", "helper_notes", "build_input", "take_notes"])
+def test_every_mutating_entry_point_finishes_interrupted_local_delete(tmp_path, monkeypatch, operation):
+    memory = FakeUserMemory()
+    store = NoteStore(memory, tmp_path)
+    gone, kept = seed(store, specs=[{}, {"kind": "goals"}])
+    candidate = note(store.next_note_id("alice"), kind="preferences")
+    with monkeypatch.context() as patch:
+        stop_on_committed_file(patch, "pending_deletes.json")
+        with pytest.raises(KeyboardInterrupt):
+            store.take_off("alice", [gone.id])
+    restarted = NoteStore(memory, tmp_path)
+    calls = {
+        "ensure_person": lambda: restarted.ensure_person("alice"),
+        "next_note_id": lambda: restarted.next_note_id("alice"),
+        "save_index": lambda: restarted.save_index(LiveNoteIndex(user_id="alice", notes=[live(kept)])),
+        "write": lambda: restarted.write(candidate),
+        "take_off": lambda: restarted.take_off("alice", []),
+        "delete": lambda: restarted.delete("alice", []),
+        "expire": lambda: restarted.expire("alice", TODAY),
+        "live_notes": lambda: restarted.live_notes("alice", TODAY),
+        "helper_notes": lambda: restarted.helper_notes("alice", TODAY),
+        "build_input": lambda: build_input(restarted, "alice", [], remember_me=False, today=TODAY),
+        "take_notes": lambda: session(restarted, ScriptedLLM({"actions": []}), remember_me=False),
+    }
+    calls[operation]()
+    assert gone.id not in ids(restarted)
+    assert gone.id not in restarted.stored("alice")
+
+
+# Reason: a lost ingestion response cannot prove rejection; forgetting must still find any accepted remote copy.
+@pytest.mark.parametrize("interrupt_cleanup", [False, True])
+def test_lost_ingestion_response_cannot_erase_the_only_remote_write_intent(store, tmp_path, monkeypatch,
+                                                                        interrupt_cleanup):
+    candidate = note(store.next_note_id("alice"), fact="Forget the remotely accepted note.")
+    original_ingest, real_replace = store.memory.ingest, os.replace
+    counter_commits = []
+
+    def accepted_without_response(entry):
+        original_ingest(entry)
+        raise PastError("connection lost after the server accepted ingestion")
+
+    def replace_then_stop(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if Path(dst).name == "counter.json":
+            counter_commits.append(dst)
+            if len(counter_commits) == 2:
+                raise KeyboardInterrupt()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store.memory, "ingest", accepted_without_response)
+        if interrupt_cleanup:
+            patch.setattr(os, "replace", replace_then_stop)
+        with pytest.raises(KeyboardInterrupt if interrupt_cleanup else PastError):
+            store.write(candidate)
+    assert candidate.id in store.memory.entries
+    restarted = NoteStore(store.memory, tmp_path)
+    result = session(restarted, ScriptedLLM({"forget_everything": True}), remember_me=False)
+    assert result.forgot_everything and not result.failed
+    assert candidate.id not in store.memory.entries
+    assert ids(restarted) == [] and restarted.stored("alice") == {}
+    assert result.undeleted == []
