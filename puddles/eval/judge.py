@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -382,6 +383,29 @@ class JudgePanel:
         return JudgeResult(score=score, verdicts=verdicts, usage=usage)
 
 
+_TURN_MARKER = re.compile(r"^(?:(?:helper\s+)?turn\s*)?\d+\s*[.:\-–—)]\s*", re.IGNORECASE)
+_QUOTES = " \t\r\n\"'`“”‘’"
+
+
+def normalise_strategy(label: str) -> str:
+    """The canonical strategy name for a label like `Turn 2: Reflection of feelings`, else the label."""
+    text = _TURN_MARKER.sub("", label.strip(_QUOTES)).strip(_QUOTES)
+    return next((s for s in STRATEGIES if s.lower() == text.lower()), label)
+
+
+class _NormalisedLabels:
+    """The single-model judge's LLM, with its strategy labels normalised before they are checked."""
+
+    def __init__(self, llm: JudgeLLM):
+        self.llm = llm
+        self.model = llm.model
+
+    def judge(self, system: str, user: str) -> tuple[JudgeOutput, int, int]:
+        out, prompt_tokens, completion_tokens = self.llm.judge(system, user)
+        out = out.model_copy(update={"strategies": [normalise_strategy(s) for s in out.strategies]})
+        return out, prompt_tokens, completion_tokens
+
+
 class SingleJudge:
     """One judge step, no panel and no Astra: the fallback judge on Tinker."""
 
@@ -404,9 +428,12 @@ class SingleJudge:
         if helper_count == 0:
             raise ValueError(f"{record.id}: conversation has no helper turns")
         usage: list[Usage] = []
-        out = checked_judgement(self.llm, "single", "fallback", with_skill(JUDGE_SYSTEM, self.config.skill),
+        out = checked_judgement(_NormalisedLabels(self.llm), "single", "fallback",
+                                with_skill(JUDGE_SYSTEM, self.config.skill),
                                 render_conversation(record.turns), helper_count, record.id, usage)
-        return JudgeResult(score=_score_record(record, self.version, out), verdicts=[], usage=usage)
+        score = _score_record(record, self.version, out).model_copy(
+            update={"evidence": out.evidence, "safety_flags": list(out.safety_flags)})
+        return JudgeResult(score=score, verdicts=[], usage=usage)
 
 
 def judge_from_env():

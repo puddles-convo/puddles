@@ -10,6 +10,8 @@ SAFETY_HEADER_RE = re.compile(r"^## Safety\b")
 CONVERSATION_HEADER_RE = re.compile(r"^## Conversation\b")
 TOKEN_CAP = 800
 TYPICAL_RULE_TOKENS = 60
+# Conversation rules protected like the Safety section: C8 recommends a counsellor or doctor.
+PROTECTED_RULE_IDS = frozenset({"C8"})
 
 
 class PolicyEditError(ValueError):
@@ -93,6 +95,8 @@ def apply_edit(policy: Policy, action: str, rule_id: str | None, rule_text: str 
     """
     if rule_id and rule_id.startswith("S"):
         raise PolicyEditError(f"rule {rule_id} is a protected safety rule")
+    if rule_id in PROTECTED_RULE_IDS:
+        raise PolicyEditError(f"rule {rule_id} is protected")
     conversation = dict(policy.conversation)
     if action == "add":
         if rule_id:
