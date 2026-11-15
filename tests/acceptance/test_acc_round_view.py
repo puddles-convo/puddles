@@ -73,6 +73,22 @@ def offline_mlflow(tmp_path, monkeypatch):
         mlflow.end_run()
 
 
+# Reason: attempted paid/model/memory calls must fail even if product code swallows ordinary exceptions.
+@pytest.fixture(autouse=True)
+def no_external_training_services(monkeypatch):
+    from loop.llm import OpenAICompatClient
+    from puddles import exa
+    from puddles.llm import OpenAILLM
+    from puddles.memory import PastClient
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("The view must not call a model, Exa, or past.dev")
+
+    monkeypatch.setattr(exa, "search", forbidden)
+    for cls in (OpenAICompatClient, OpenAILLM, PastClient):
+        monkeypatch.setattr(cls, "__init__", forbidden)
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value) + "\n", encoding="utf-8")
@@ -162,10 +178,15 @@ def row_for(text, identifier):
 
 
 def has_number(text, value):
-    # Permit ordinary decimal precision/currency formatting, but not a substring of another number.
-    suffix = r"0*" if "." in str(value) else r"(?:\.0+)?"
-    pattern = rf"(?<![\d.,]){re.escape(str(value))}{suffix}(?![\d.,])"
-    assert re.search(pattern, text), f"Missing numeric value {value!r}: {text}"
+    # Reason: the contract fixes only dollar precision; allow decimal rounding and sentence punctuation.
+    numbers = re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?(?!\w|\.\d)", text)
+    for number in numbers:
+        places = len(number.split(".", 1)[1]) if "." in number else 0
+        if float(number) == value:
+            return
+        if places and float(number) != 0 and abs(float(number) - value) <= 0.5 * 10 ** -places + 1e-12:
+            return
+    pytest.fail(f"Missing numeric value {value!r}: {text}")
 
 
 class Chat:
@@ -660,6 +681,79 @@ def test_wrapper_sets_summary_on_active_named_span_and_preserves_fn_exception(tm
     assert caught.value is error
 
 
+# Reason: a summary-construction error must preserve the node's exact result, just like an MLflow error.
+def test_wrapper_returns_identical_update_when_summarising_raises(tmp_path, monkeypatch):
+    from puddles import round_view
+
+    received = {"round": 1}
+    returned = {"records": [], "failures": []}
+    calls = []
+
+    def fn(state):
+        assert state is received
+        calls.append(state)
+        return returned
+
+    def broken(*args, **kwargs):
+        raise ValueError("offline summary failure")
+
+    monkeypatch.setattr(round_view, "node_summary", broken)
+    with mlflow.start_span(name="converse"):
+        assert with_summary("converse", fn, tmp_path)(received) is returned
+    assert calls == [received]
+
+
+# Reason: summary failures at any node must leave a complete training round and its decision intact.
+def test_round_survives_errors_in_every_node_summary(training_round, monkeypatch):
+    from puddles import round_view
+
+    attempted = []
+
+    def broken(node, *args, **kwargs):
+        attempted.append(node)
+        raise ValueError("offline summary failure")
+
+    monkeypatch.setattr(round_view, "node_summary", broken)
+    root, state, _ = training_round(decision="reverted")
+    assert attempted == list(NODES)
+    assert state["event"].outcome == state["gate"].decision == "reverted"
+    assert DecisionLog(root).rounds()[0] == state["event"]
+    assert build_report(root, 1).startswith("# Round 1: reverted")
+
+
+# Reason: when the node span is inaccessible, the fallback child and report disclosure are both required.
+def test_inaccessible_node_spans_use_disclosed_summary_children(training_round, monkeypatch):
+    original = mlflow.get_current_active_span
+
+    class InaccessibleNode:
+        def __init__(self, span):
+            self.span = span
+            self.name = "inaccessible:" + span.name
+
+        def __getattr__(self, name):
+            return getattr(self.span, name)
+
+    def inaccessible():
+        span = original()
+        return InaccessibleNode(span) if span is not None and span.name in NODES else span
+
+    monkeypatch.setattr(mlflow, "get_current_active_span", inaccessible)
+    root, _, _ = training_round()
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.search_traces(return_type="list")
+    spans = [span for trace in traces for span in trace.data.spans]
+    by_id = {span.span_id: span for span in spans}
+    for node in NODES:
+        children = [span for span in spans if span.name == f"summary:{node}"]
+        assert len(children) == 1 and SUMMARY_KEY in children[0].attributes
+        assert by_id[children[0].parent_id].name == node
+    report = build_report(root, 1).lower()
+    # Reason: disclosure wording is not fixed; either child/fallback wording or the span name suffices.
+    assert "span" in report and "summar" in report and any(
+        word in report for word in ("child", "fallback", "summary:")
+    ), "The report must disclose fallback summary spans"
+
+
 # Section 2: numbers must reflect the actual decision and measured evidence.
 
 
@@ -863,8 +957,33 @@ def test_report_gate_contains_every_check_status_and_failed_safety_case(tmp_path
         for value in (2.5, 4.25, 0.125):
             has_number(gate, value)
     else:
-        # Missing scores cannot become an apparent zero gain or zero noise.
-        assert not re.search(r"\b(?:quality|noise)[^\n|]*[:=]\s*0(?:\.0*)?\b", gate, re.I)
+        # Reason: unmeasured values must not look measured in tables, prose, or lists.
+        measurements_text = "\n".join(
+            line for line in gate.splitlines()
+            if not any(re.search(rf"\b{re.escape(name)}\b", line) for name in checks)
+            and "unsafe-case-acceptance" not in line
+        )
+        assert not re.search(r"(?<![\w.])-?\d+(?:\.\d+)?(?!\w|\.\d)", measurements_text)
+        assert not re.search(r"\b(?:passed|true)\b", measurements_text, re.I)
+
+
+# Reason: absent safety evidence must never become a passed safety check in a report.
+def test_report_missing_safety_is_not_reported_as_passed(tmp_path):
+    event, _, _, checks = archived_round(tmp_path, measurements=False)
+    event = event.model_copy(update={"safety": None})
+    replace_logged_round(tmp_path, event)
+    checks["safety_cases"] = "not_run"
+    write_json(tmp_path / "scores/round-07-gate.json", {
+        "round": 7, "decision": "reverted", "checks": checks,
+        "failed": [name for name, status in checks.items() if status == "failed"],
+    })
+    gate = section(build_report(tmp_path, 7), "Gate")
+    assert any("safety" in line.lower() and
+               any(word in line.lower() for word in ("not run", "did not run", "not measured", "unmeasured"))
+               for line in gate.splitlines())
+    assert not any(("safety_cases" in line.lower() or "safety check" in line.lower())
+                   and re.search(r"\b(?:passed|true)\b", line, re.I)
+                   for line in gate.splitlines())
 
 
 def test_report_cost_is_per_agent_and_only_for_requested_round(tmp_path):
@@ -879,7 +998,7 @@ def test_report_cost_is_per_agent_and_only_for_requested_round(tmp_path):
 
 
 @pytest.mark.parametrize("existing_report", [False, True])
-def test_build_report_never_creates_or_overwrites_report_file(tmp_path, existing_report):
+def test_build_report_never_creates_or_overwrites_report_file(tmp_path, monkeypatch, existing_report):
     root = tmp_path / "archive"
     archived_round(root)
     path = root / "reports/round-07.md"
@@ -887,12 +1006,22 @@ def test_build_report_never_creates_or_overwrites_report_file(tmp_path, existing
         path.parent.mkdir()
         path.write_bytes(b"A previously saved report must stay untouched.\r\n")
     before = snapshot(root)
-    report = build_report(root, 7)
+    original_open = Path.open
+
+    def read_only(path, mode="r", *args, **kwargs):
+        # Reason: a write restored before returning still violates "build_report writes nothing".
+        assert not any(flag in mode for flag in "wax+"), f"build_report attempted a write: {path}"
+        return original_open(path, mode, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", read_only)
+        report = build_report(root, 7)
     assert report.startswith("# Round 7: reverted")
     assert snapshot(root) == before
     assert path.exists() is existing_report
 
 
+@pytest.mark.parametrize("suffix", ["", " 2 conversations were left unscored."])
 @pytest.mark.parametrize("exit_,ran", [
     ("no_conversations", {"converse", "judge", "finish"}),
     ("nothing_scored", {"converse", "judge", "finish"}),
@@ -903,12 +1032,13 @@ def test_build_report_never_creates_or_overwrites_report_file(tmp_path, existing
     ("proposer_error", {"converse", "judge", "critic", "researcher", "proposer", "finish"}),
     ("kept", set(NODES)), ("reverted", set(NODES)),
 ])
-def test_report_infers_nodes_from_files_at_every_exit(tmp_path, exit_, ran):
-    # These use the exact two nothing-scored reasons named by the view contract.
-    # judging.md's appended unscored sentence makes that matching rule ambiguous;
-    # no expectation for a suffixed reason is invented here.
+def test_report_infers_nodes_from_files_at_every_exit(tmp_path, exit_, ran, suffix):
+    # Reason: the contract explicitly says "starts with", including appended unscored sentences.
     root = tmp_path / "archive"
     event = archived_exit(root, exit_)
+    if suffix:
+        event = event.model_copy(update={"reason": event.reason + suffix})
+        replace_logged_round(root, event)
     before = snapshot(root)
     report = build_report(root, 7)
     assert report.startswith(f"# Round 7: {event.outcome}")
@@ -948,6 +1078,17 @@ def test_reports_survive_early_exits_and_mark_later_nodes_not_run(training_round
     assert CLIENT_LINE not in report and HELPER_LINE not in report
 
 
+# Reason: the documented every-exit guarantee also matters after an interrupted attempt reuses a round number.
+def test_report_builds_after_stale_scores_from_interrupted_attempt(tmp_path, training_round):
+    root = tmp_path / "training"
+    write_jsonl(root / "scores/round-01-train.jsonl", [score(conversation(1, "previous-attempt"))])
+    root, state, _ = training_round(mode="no_conversations")
+    assert state["event"].reason.startswith("No conversation finished.")
+    report = build_report(root, 1)
+    assert report.startswith("# Round 1: no_pattern")
+    assert "The gate did not run." in section(report, "Gate")
+
+
 def test_stand_in_report_explicitly_says_nothing_was_measured(training_round):
     root, _, _ = training_round()
     gate = section(build_report(root, 1), "Gate").lower()
@@ -980,6 +1121,20 @@ def test_show_round_without_matching_run_still_writes_prints_and_preserves_input
     assert {key: value for key, value in after.items() if key != Path("reports/round-07.md")} == before
 
 
+# Reason: a missing SQLite tracking store must not be created while displaying an archived round.
+def test_show_round_missing_sqlite_store_adds_only_report(tmp_path, capsys):
+    root = tmp_path / "archive"
+    archived_round(root)
+    before = snapshot(root)
+    missing = root / "tracking/missing.db"
+    expected = build_report(root, 7)
+    assert show_round.main(["--root", str(root), "--round", "7",
+                            "--mlflow", f"sqlite:///{missing}"]) == 0
+    assert_not_attached(capsys.readouterr(), expected)
+    assert snapshot(root) == {**before, Path("reports/round-07.md"): expected.encode("utf-8")}
+    assert not missing.parent.exists()
+
+
 @pytest.mark.parametrize("source", ["argument", "environment", "default"])
 def test_show_round_attaches_to_named_run_using_tracking_address_precedence(tmp_path, monkeypatch, capsys, source):
     root = tmp_path / "archive"
@@ -1000,8 +1155,13 @@ def test_show_round_attaches_to_named_run_using_tracking_address_precedence(tmp_
         client.set_terminated(unrelated.info.run_id)
         clients[name] = (uri, client, target.info.run_id, other.info.run_id, unrelated.info.run_id)
     monkeypatch.setattr(tracing, "DEFAULT_TRACKING_URI", clients["default"][0])
+    # Reason: importing the documented default into the script is allowed; patch that binding too.
+    monkeypatch.setattr(show_round, "DEFAULT_TRACKING_URI", clients["default"][0], raising=False)
     if source != "default":
         monkeypatch.setenv("MLFLOW_TRACKING_URI", clients["environment"][0])
+    else:
+        # Reason: MLflow setup itself sets this variable; a default-address test must remove it afterwards.
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     args = ["--root", str(root), "--round", "7"]
     if source == "argument":
         args.extend(["--mlflow", clients["argument"][0]])
