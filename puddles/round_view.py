@@ -14,6 +14,7 @@ import json
 import math
 import re
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Union
@@ -72,16 +73,30 @@ USAGE_KINDS = ("model", "search")
 Number = Union[int, float]
 
 
-def name(x: Any) -> str:
-    """Rule 1. An ID, agent, model, judge or policy version, file name or path, reader, writer, check
-    name, or MLflow ID: shown only when it is 1 to 200 characters of the pattern, else `unreadable`."""
-    if isinstance(x, str) and 1 <= len(x) <= 200 and NAME_PATTERN.fullmatch(x):
-        return x
+# Rule 8: while a report section is built, every value its shape function shows as `unreadable` is
+# counted here, and the section ends with one line giving the count (see _counted). Outside a section
+# (a summary, or a check used only to decide), nothing is counted.
+_UNREADABLE_SHOWN: ContextVar[Optional[list[int]]] = ContextVar("unreadable_shown", default=None)
+
+
+def unreadable() -> str:
+    """The word shown in place of a value that is not of its kind, counted for the section's line."""
+    counter = _UNREADABLE_SHOWN.get()
+    if counter is not None:
+        counter[0] += 1
     return UNREADABLE
 
 
 def is_name(x: Any) -> bool:
-    return name(x) != UNREADABLE
+    """Rule 1's test alone, for a decision; nothing is shown, so nothing is counted."""
+    return isinstance(x, str) and 1 <= len(x) <= 200 and NAME_PATTERN.fullmatch(x) is not None
+
+
+def name(x: Any) -> str:
+    """Rule 1. An ID, agent, model, judge or policy version, file name or path, reader, writer, check
+    name, or MLflow ID: shown only when it is 1 to 200 characters of the pattern, else `unreadable`.
+    A placeholder such as `?` that a file holds is a name like any other, and fails."""
+    return x if is_name(x) else unreadable()
 
 
 def number(x: Any, kind: str) -> Optional[Number]:
@@ -98,13 +113,15 @@ def number(x: Any, kind: str) -> Optional[Number]:
 
 def enum(x: Any, allowed: tuple, otherwise: Any = UNREADABLE) -> Any:
     """Rule 3. One of the allowed values, of the same type (so 1 is not True), or `otherwise`."""
-    return x if any(type(x) is type(a) and x == a for a in allowed) else otherwise
+    if any(type(x) is type(a) and x == a for a in allowed):
+        return x
+    return unreadable() if otherwise == UNREADABLE else otherwise
 
 
 def text(x: Any) -> str:
     """Rule 4, only for the free texts the contract allows: a reason, a pattern's name and description,
     a rule's text, an edit's summary, a source's URL, title and technique. Anything else is a name."""
-    return x if isinstance(x, str) else UNREADABLE
+    return x if isinstance(x, str) else unreadable()
 
 
 def _why(exc: BaseException) -> str:
@@ -134,7 +151,20 @@ def _measured(raw: Any, kind: str, fmt: str = "{:.2f}") -> str:
     if raw is None:
         return "not measured"
     value = number(raw, kind)
-    return UNREADABLE if value is None else fmt.format(value)
+    return unreadable() if value is None else fmt.format(value)
+
+
+def _counted(build: Callable[..., list[str]], *args: Any) -> list[str]:
+    """Rule 8: the lines `build` returns, ending with how many values in them could not be read."""
+    counter = [0]
+    token = _UNREADABLE_SHOWN.set(counter)
+    try:
+        lines = build(*args)
+    finally:
+        _UNREADABLE_SHOWN.reset(token)
+    if counter[0]:
+        lines = [*lines, f"{counter[0]} value(s) here could not be read and are shown as unreadable.", ""]
+    return lines
 
 
 # ---------- where a round's files are ----------
@@ -233,7 +263,7 @@ def _clean_gate_report(data: Any, round_: int, gate: Optional[GateOutcome], name
     if not isinstance(data, dict):
         where.append(f"{name_} is not a gate report; its checks are not shown.")
         return None
-    rnd, decision, checks = data.get("round", round_), data.get("decision"), data.get("checks", {})
+    rnd, decision, checks = data.get("round"), data.get("decision"), data.get("checks")
     if (number(rnd, "count") is None or (decision is not None and enum(decision, DECISIONS, None) is None)
             or not isinstance(checks, dict)):
         where.append(f"{name_} is not a gate report (its round, decision or checks are unreadable); "
@@ -270,7 +300,7 @@ class RoundFiles:
     """What one round left on disk, as far as it could be read; `problems` says what could not."""
 
     records: list[ConversationRecord] = field(default_factory=list)
-    failures: list[dict] = field(default_factory=list)  # {"scenario_id": a name, "reason": a text}
+    failures: list[dict] = field(default_factory=list)  # {"scenario_id", "reason"} as the file holds them
     scores: Optional[list[ScoreRecord]] = None  # this round's scores; None when there are none saved
     stray_scores: int = 0  # lines of the scores file that belong to no conversation of this round
     gate_report: Optional[dict] = None  # None: no usable gate report (none, unreadable or not this round's)
@@ -293,8 +323,8 @@ def read_round_files(root: Path, round_: int, records: Optional[list[Conversatio
         conversations_path(root, round_), root, ConversationRecord, conv, lambda data: is_name(data.get("id")))
     unreadable_failures = 0
     for data in _lines(failures_file(root, round_), root, conv):
-        scenario, reason = name(data.get("scenario_id")), text(data.get("reason"))
-        unreadable_failures += UNREADABLE in (scenario, reason)
+        scenario, reason = data.get("scenario_id"), data.get("reason")  # checked where they are shown
+        unreadable_failures += not is_name(scenario) or not isinstance(reason, str)
         files.failures.append({"scenario_id": scenario, "reason": reason})
     if unreadable_failures:
         conv.append(f"{unreadable_failures} line(s) of {_rel(failures_file(root, round_), root)} have a scenario "
@@ -372,10 +402,15 @@ def node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any],
         return {"error": _why(exc)}
 
 
+def _count(items: Any) -> Optional[int]:
+    """How many there are, or None when the node gave none: a missing list is not an empty one."""
+    return len(items) if isinstance(items, (list, tuple)) else None
+
+
 def _node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any], root: Path) -> dict:
     round_ = int(state["round"])
     if node == "converse":
-        return {"finished": len(update.get("records", [])), "failed": len(update.get("failures", [])),
+        return {"finished": _count(update.get("records")), "failed": _count(update.get("failures")),
                 "file": name(_rel(conversations_path(root, round_), root))}
     if node == "judge":
         records = state.get("records")
@@ -385,7 +420,7 @@ def _node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any]
             version: Optional[str] = name(files.scores[0].judge_version)
         else:  # no scores saved this round: what the node returned is all that was scored
             scored, version = list(update.get("scored", [])), None
-        return {"scored": len(scored), "unscored": len(update.get("unscored", [])),
+        return {"scored": len(scored), "unscored": _count(update.get("unscored")),
                 "mean_empathy": _mean([number(s.empathy, "score") for s in scored]),
                 "mean_relevance": _mean([number(s.relevance, "score") for s in scored]), "judge_version": version}
     result = update.get("result", state.get("result"))
@@ -416,7 +451,7 @@ def _node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any]
                 "quality_before": number(scores.before.quality, "score") if scores is not None else None,
                 "quality_after": number(scores.after.quality, "score") if scores is not None else None,
                 "noise": number(scores.noise, "noise") if scores is not None and noise_measured(report) else None,
-                "safety_passed": enum(safety.passed, (True, False), None) if safety is not None else None,
+                "safety_passed": _safety_passed(safety),
                 "failed_checks": _failed_checks(report)}
     if node == "finish":
         event = update.get("event")
@@ -428,6 +463,15 @@ def _node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any]
         return {"outcome": enum(event.outcome, OUTCOMES) if event is not None else None,
                 "policy_in_force": name(event.policy.in_force) if event is not None else None, "copies": copies}
     return {}
+
+
+def _safety_passed(safety: Any) -> Optional[bool]:
+    """Rule 7: a safety result with no case is not a pass. None when there is no result."""
+    if safety is None:
+        return None
+    if number(safety.cases, "count") == 0:
+        return False
+    return enum(safety.passed, (True, False), None)
 
 
 def _queries(research: ResearchNote) -> list[str]:
@@ -591,14 +635,14 @@ def build_report(root: Path, round_: int) -> str:
     copies = _round_copies(log, round_)
 
     sections = [
-        ("Nodes", _nodes_section(event, raw_event, root, files, pattern, research, edit, copies)),
-        ("Conversations", _conversations_section(files)),
-        ("Memory", _memory_section(event, root, copies, problems["Memory"])),
-        ("Policy change", _policy_section(event, [e for e, _ in rounds], root)),
-        ("Gate", _gate_section(event, raw_event, files)),
-        ("Cost", _cost_section(root, round_, problems["Cost"])),
+        ("Nodes", _counted(_nodes_section, event, raw_event, root, files, pattern, research, edit, copies)),
+        ("Conversations", _counted(_conversations_section, files)),
+        ("Memory", _counted(_memory_section, event, root, copies, problems["Memory"])),
+        ("Policy change", _counted(_policy_section, event, [e for e, _ in rounds], root)),
+        ("Gate", _counted(_gate_section, event, raw_event, files)),
+        ("Cost", _counted(_cost_section, root, round_, problems["Cost"])),
     ]
-    out = [f"# Round {round_}: {enum(event.outcome, OUTCOMES)}", "", text(event.reason), ""]
+    out = _counted(lambda: [f"# Round {round_}: {enum(event.outcome, OUTCOMES)}", "", text(event.reason), ""])
     for section, body in sections:
         out += [f"## {section}", "", *body]
         if problems.get(section):
@@ -640,15 +684,17 @@ def _nodes_section(event: RoundEvent, raw_event: dict, root: Path, files: RoundF
         critic_out = f"pattern {text(event.pattern.name)} ({seen(_at(raw_event, 'pattern'))})"
     else:
         critic_out = "no pattern"
-    given = number(raw_pattern.get("out_of"), "count") if pattern is not None else _critic_count(scores)
+    given = _measured(raw_pattern.get("out_of"), "count", "{}") if pattern is not None else _critic_count(scores)
     rows["critic"] = (f"{given} scored conversations" if given is not None else "the scored conversations",
                       critic_out, where("pattern"))
     rows["researcher"] = (f"pattern {text(event.pattern.name)}" if event.pattern else "",
                           f"{len(research.sources)} sources from {len(_queries(research))} queries"
                           if research is not None else "no research note that could be read", where("research"))
     if edit is not None:
-        rule = name(edit.rule_id) if edit.rule_id is not None else ""
-        proposer_out = f"{enum(edit.action, ACTIONS) if edit.action is not None else 'add'} {rule}".strip()
+        logged = event.edit
+        action = edit.action if edit.action is not None else (logged.action if logged is not None else None)
+        rule = edit.rule_id if edit.rule_id is not None else (logged.rule_id if logged is not None else None)
+        proposer_out = f"{enum(action, ACTIONS)} {name(rule)}"
         proposer_went = f"{where('edit')}, {name(edit.policy_path)}"
     elif event.edit is not None:
         proposer_out = f"{enum(event.edit.action, ACTIONS)} {name(event.edit.rule_id)}"
@@ -702,8 +748,8 @@ def _conversations_section(files: RoundFiles) -> list[str]:
         else:
             out.append(_row(name(record.id), _measured(score.empathy, "score", "{}"),
                             _measured(score.relevance, "score", "{}"), "yes" if record.id in given else "no"))
-    for failure in files.failures:  # already checked: a name and a text
-        out.append(_row(f"{failure['scenario_id']} (failed)", "", "", f"failed: {failure['reason']}"))
+    for failure in files.failures:
+        out.append(_row(f"{name(failure['scenario_id'])} (failed)", "", "", f"failed: {text(failure['reason'])}"))
     if not records and not files.failures:
         out.append(_row("none", "", "", ""))
     out.append("")
@@ -735,14 +781,13 @@ def _memory_section(event: RoundEvent, root: Path, copies: list, problems: list[
         rows = [r for r in memory_trace(DecisionLog(root), root) if r["round"] == event.round and r["record"] in ids]
     except Exception as exc:  # noqa: BLE001  a half-written reads file or record: say so, list what the log holds
         problems.append(f"Who read the round's records could not be worked out ({_why(exc)}).")
-        rows = [{"record": ref.id, "written_by": "?", "read_by": None} for ref in event.records.values()]
+        rows = [{"record": ref.id, "written_by": None, "read_by": None} for ref in event.records.values()]
     for row in rows:
         if row["read_by"] is None:
             readers = "unknown"
         else:
             readers = ", ".join(name(r) for r in row["read_by"]) if row["read_by"] else "no agent yet"
-        writer = "?" if row["written_by"] == "?" else name(row["written_by"])
-        out.append(f"- {name(row['record'])}: written by {writer}, read later by {readers}")
+        out.append(f"- {name(row['record'])}: written by {name(row['written_by'])}, read later by {readers}")
     if not rows:
         out.append("- The round wrote no record.")
     out.append("")
@@ -787,7 +832,7 @@ def _policy_section(event: RoundEvent, rounds: list[RoundEvent], root: Path) -> 
             out.append(f"- {rule_id}. {text(old)}" if old is not None
                        else f"- {rule_id}. (the earlier text is not in the root's files)")
         if edit.action in ("add", "reword"):
-            out.append(f"+ {rule_id}. {text(edit.rule_text) if edit.rule_text is not None else ''}".rstrip())
+            out.append(f"+ {rule_id}. {text(edit.rule_text)}")
         out += ["```", ""]
         out.append(f"The edit was {enum(event.outcome, OUTCOMES)}.")
     out += ["", f"Policy in force after the round: {name(event.policy.in_force)}", ""]
@@ -802,7 +847,7 @@ def _gate_section(event: RoundEvent, raw_event: dict, files: RoundFiles) -> list
         return ["Stand-in gate: nothing was measured.", ""]
     out: list[str] = []
     for check, status in (report["checks"] if report is not None else {}).items():  # names checked by enum()
-        out.append(f"- {check}: {CHECK_WORDS.get(status, UNREADABLE)}")
+        out.append(f"- {check}: {CHECK_WORDS[status] if status in CHECK_WORDS else unreadable()}")
     out.append("")
     if event.scores is None:
         before = after = noise = "not measured"
@@ -811,18 +856,22 @@ def _gate_section(event: RoundEvent, raw_event: dict, files: RoundFiles) -> list
         after = _measured(_at(raw_event, "scores", "after", "quality"), "score")
         figure = number(_at(raw_event, "scores", "noise"), "noise")
         if figure is None:
-            noise = UNREADABLE
+            noise = unreadable()
         elif noise_measured(report):
             noise = _num(figure)
         else:
             noise = f"not measured; the figure given was {figure:.2f}"
     out.append(f"Quality before: {before}. Quality after: {after}. Noise: {noise}.")
+    cases = _at(raw_event, "safety", "cases")
     if event.safety is None:
         out.append("The safety check did not run.")
+    elif number(cases, "count") == 0:  # rule 7: whatever `passed` says, no case ran
+        case_file = event.safety.case_file
+        out.append("No safety case was run." + (f" Case file: {case_file}." if is_name(case_file) else ""))
     elif event.safety.failed_case_ids:
         out.append("Safety cases that failed: " + ", ".join(name(c) for c in event.safety.failed_case_ids) + ".")
     else:
-        out.append(f"No safety case failed ({_measured(_at(raw_event, 'safety', 'cases'), 'count', '{}')} cases, "
+        out.append(f"No safety case failed ({_measured(cases, 'count', '{}')} cases, "
                    f"{name(event.safety.case_file)}).")
     return out + [""]
 
@@ -837,10 +886,11 @@ def _cost_section(root: Path, round_: int, problems: list[str]) -> list[str]:
         if rnd is not None and rnd != round_:
             continue
         # A finished call of this round, or one whose round cannot be read: every value it gives is checked.
-        kind, agent = enum(line.get("kind"), USAGE_KINDS, None), name(line.get("agent"))
+        kind = enum(line.get("kind"), USAGE_KINDS, None)
+        agent = line.get("agent") if is_name(line.get("agent")) else None
         usd = number(line.get("cost_usd"), "cost")
         tokens = (number(line.get("tokens_in"), "tokens"), number(line.get("tokens_out"), "tokens"))
-        ok = rnd is not None and agent != UNREADABLE and usd is not None and kind is not None and (
+        ok = rnd is not None and agent is not None and usd is not None and kind is not None and (
             kind == "search" or all(n is not None for n in tokens))
         if not ok:
             bad += 1  # a value that could not be read is never counted, and never as 0

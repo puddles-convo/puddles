@@ -129,7 +129,9 @@ def test_every_node_span_has_a_summary_and_none_holds_a_spoken_line(tmp_path, ml
     assert found["proposer"]["action"] == "add" and found["proposer"]["rule_id"]
     assert found["gate"]["decision"] == "reverted"
     assert "noise_not_measured" in found["gate"]["failed_checks"]
-    assert found["gate"]["safety_passed"] is True  # the fake safety check ran and passed
+    # The fake safety check runs no case: rule 7 says that is not a pass, as the gate itself now says.
+    assert found["gate"]["safety_passed"] is False
+    assert "safety_cases" in found["gate"]["failed_checks"]
     assert found["finish"]["outcome"] == "reverted"
     event = DecisionLog(root).rounds()[0]
     assert found["finish"]["policy_in_force"] == event.policy.in_force
