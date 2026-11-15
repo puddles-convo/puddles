@@ -10,9 +10,11 @@ from typing import Callable, Literal, Optional
 from puddles.agents import critic, proposer, researcher
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM
-from puddles.memory import READS_PATH, Memory, entry_for, now
+from puddles.memory import READS_PATH, Memory, PastError, entry_for, now
 from puddles.policy import parse_policy, render_policy
 from puddles.records import load_record, save_record, sha256_text
+import httpx
+
 from schemas import (
     FailurePattern,
     GateOutcome,
@@ -121,7 +123,10 @@ def extras_for(record: Record, log: DecisionLog, root: Path) -> dict:
 def copy_to_memory(record: Record, ref: RecordRef, round_: int, memory: Memory, log: DecisionLog,
                    root: Path, attempt: int = 1, wait_s: float = 60) -> str:
     entry = entry_for(record, ref, round_, **extras_for(record, log, root))
-    confirmed = memory.wait(memory.ingest(entry), timeout_s=wait_s)
+    try:
+        confirmed = memory.wait(memory.ingest(entry), timeout_s=wait_s)
+    except (PastError, httpx.HTTPError):
+        confirmed = False  # logged as pending, so retry_pending resends it
     status: Literal["confirmed", "pending"] = "confirmed" if confirmed else "pending"
     log.append(MemoryCopyEvent(round=round_, record_id=record.id, status=status, attempt=attempt))
     return status
