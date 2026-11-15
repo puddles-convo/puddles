@@ -11,9 +11,12 @@ that goes wrong while testing reverts: nothing is kept on incomplete evidence.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
+
+from pydantic import BaseModel
 
 from loop.helper import helper_reply
 from loop.llm import ChatClient
@@ -24,7 +27,7 @@ from puddles.graph import check_policy_file
 from puddles.memory import now
 from puddles.policy import TOKEN_CAP, estimate_tokens, parse_policy, render_policy
 from puddles.records import sha256_bytes, sha256_text
-from puddles.round import RoundResult, read_policy_text
+from puddles.round import RoundResult, mark_gated, read_policy_text
 from schemas import (
     ConversationRecord,
     GateInput,
@@ -60,6 +63,53 @@ STATIC_FOUR = ("candidate_file", *STATIC)
 EIGHT = tuple(k for k in CHECKS if k != "noise_not_measured")
 NOTHING_ELSE_RAN = "Nothing else was run: no conversation, no judge call, no safety check."
 NOISE_NOTE = "the noise has not been measured, so nothing is promoted"
+NO_SAFETY_CASE = "no safety case was run"
+NO_BASELINE = "the policy in force has no measured scores"
+NO_HELPER_REPLY = "no helper reply"
+INVALID_RECORD = "a judge's record that was not valid"
+
+
+def _safety_passed(safety: Optional[SafetyResult]) -> bool:
+    """What the gate states about a safety result: passed only if it says so, ran at least one case,
+    and no case in it failed. A result that contradicts itself is not a pass."""
+    return bool(safety is not None and safety.passed and safety.cases
+                and all(c.passed for c in safety.cases))
+
+
+def _finite_numbers(value: Any) -> bool:
+    """True when every number in a value (a model, a dict, a list, a float) is finite: what JSON can
+    hold. Nothing the gate writes or hands on may carry NaN or an infinity."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump()
+    if isinstance(value, dict):
+        return all(_finite_numbers(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_finite_numbers(v) for v in value)
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return True
+
+
+def _bad_noise(noise: Any) -> Optional[str]:
+    """Why a noise cannot be used, or None. It must be a finite number that is not negative."""
+    try:
+        value = float(noise)
+    except (TypeError, ValueError):
+        return f"the noise {noise!r} is not a number"
+    if not math.isfinite(value) or value < 0:
+        return f"the noise {noise!r} is not a finite number that is not negative, so the gate did not run"
+    return None
+
+
+def _measured(scores: Scores) -> bool:
+    """Scores are 1 to 5, so empathy or relevance outside that range was not measured (NOT_MEASURED is 0,
+    and NaN fails both comparisons). Quality is never taken from a caller or a file: one that is set and
+    is not the mean of the two dimensions, to 9 decimal places, was not measured either. Nor is a set
+    of scores with any number that is not finite (an emotion change of NaN, say): it could not be written."""
+    if not _finite_numbers(scores) or not (1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5):
+        return False
+    mean = (scores.empathy + scores.relevance) / 2
+    return scores.quality is None or round(scores.quality, 9) == round(mean, 9)
 
 
 class GateError(RuntimeError):
@@ -98,6 +148,8 @@ class Evidence:
     scores: Optional[Scores] = None  # set only when every scenario came back with a score
     failed: list[str] = field(default_factory=list)  # scenario IDs whose conversation failed
     unscored: list[str] = field(default_factory=list)  # conversation IDs the judge did not score
+    no_helper_reply: list[str] = field(default_factory=list)  # of those, the ones with no helper turn to judge
+    invalid_record: list[str] = field(default_factory=list)  # of those, the ones whose judge record was not valid
 
     @property
     def complete(self) -> bool:
@@ -107,9 +159,15 @@ class Evidence:
         parts = []
         if self.failed:
             parts.append(f"{len(self.failed)} of {self.expected} conversations failed ({', '.join(self.failed)})")
-        if self.unscored:
-            parts.append(f"{len(self.unscored)} of {self.expected} were not scored by the judge "
-                         f"({', '.join(self.unscored)})")
+        judged = [c for c in self.unscored if c not in self.no_helper_reply and c not in self.invalid_record]
+        if judged:
+            parts.append(f"{len(judged)} of {self.expected} were not scored by the judge ({', '.join(judged)})")
+        if self.invalid_record:
+            parts.append(f"{len(self.invalid_record)} of {self.expected} had {INVALID_RECORD} "
+                         f"({', '.join(self.invalid_record)})")
+        if self.no_helper_reply:
+            parts.append(f"{len(self.no_helper_reply)} of {self.expected} had {NO_HELPER_REPLY} "
+                         f"({', '.join(self.no_helper_reply)})")
         return "; ".join(parts) or "the scores are missing"
 
 
@@ -170,8 +228,8 @@ def average(scores: list[ScoreRecord]) -> Scores:
 
 
 def with_quality(scores: Scores) -> Scores:
-    if scores.quality is not None:
-        return scores
+    """The scores with quality worked out as (empathy + relevance) / 2, whatever quality they carried:
+    quality is never taken from a file or a caller (a wrong one is refused by `_measured` first)."""
     return scores.model_copy(update={"quality": (scores.empathy + scores.relevance) / 2})
 
 
@@ -211,21 +269,37 @@ def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int,
                       out_path=root / "conversations" / name)
     scores: list[ScoreRecord] = []
     unscored: list[str] = []
+    no_reply: list[str] = []
+    invalid: list[str] = []
     for record in batch.records:
+        cid = record.id  # read before the judge sees the record, so the judge cannot change what it is matched to
+        if not any(t.speaker == "helper" for t in record.turns):
+            # It measures no policy: there is nothing to judge, so the judge is not asked.
+            unscored.append(cid)
+            no_reply.append(cid)
+            continue
         try:
-            score = deps.judge.score(record).score
-            if not isinstance(score, ScoreRecord) or score.conversation_id != record.id:
-                raise GateError(f"the judge gave no score for {record.id}")
-            scores.append(score)
+            score = deps.judge.score(record.model_copy(deep=True)).score  # the judge gets a copy, not the gate's
+            if not isinstance(score, ScoreRecord) or score.conversation_id != cid:
+                raise GateError(f"the judge gave no score for {cid}")
+            # The models allow assignment, so a typed record can still hold NaN or a score out of range.
+            # Validate a copy of it: what was checked is what is saved and averaged, and a later change
+            # to the judge's own object cannot reach the gate.
+            try:
+                checked = ScoreRecord.model_validate(score.model_dump(warnings=False))
+            except Exception:  # noqa: BLE001
+                invalid.append(cid)
+                raise
+            scores.append(checked)
         except Exception:  # noqa: BLE001  that conversation is unscored; the rest are still scored
-            unscored.append(record.id)
+            unscored.append(cid)
     scores_path = root / "scores" / name
     scores_path.parent.mkdir(parents=True, exist_ok=True)
     scores_path.write_text("".join(s.model_dump_json() + "\n" for s in scores), encoding="utf-8")
     evidence = Evidence(expected=len(scenarios), failed=[f.scenario_id for f in batch.failures],
-                        unscored=unscored)
+                        unscored=unscored, no_helper_reply=no_reply, invalid_record=invalid)
     if not evidence.failed and not evidence.unscored and len(scores) == len(scenarios):
-        evidence.scores = average(scores)
+        evidence.scores = with_quality(average(scores))  # quality as every comparison works it out
     return evidence
 
 
@@ -251,8 +325,9 @@ def _cache_key(deps: GateDeps, policy_version: str, policy_sha256: str, scenario
 def _write_current(root: Path, key: dict[str, Any], scores: Scores) -> None:
     path = current_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({**key, "scores": scores.model_dump()}, indent=2) + "\n", encoding="utf-8",
-                    newline="")  # no newline translation on any platform
+    # allow_nan=False: a number JSON cannot hold raises here, before the file is opened.
+    text = json.dumps({**key, "scores": scores.model_dump()}, indent=2, allow_nan=False) + "\n"
+    path.write_text(text, encoding="utf-8", newline="")  # no newline translation on any platform
 
 
 def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
@@ -269,7 +344,9 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
             return None
         if any(data[name] != value for name, value in key.items()):
             return None
-        return Scores.model_validate(data["scores"])
+        scores = Scores.model_validate(data["scores"])
+        # Outside 1 to 5, or a quality that is not the mean of the two: not measured, so scored again.
+        return with_quality(scores) if _measured(scores) else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -384,7 +461,11 @@ class _Run:
         failed = [k for k in CHECKS if self.checks[k] == "failed"]
         kept = would_keep and noise_measured and not failed and self.candidate_version is not None \
             and self.after is not None
+        # As given, quality worked out; but a number JSON cannot hold is never written (it failed
+        # complete_evidence as a baseline that was not measured), so such a baseline is shown as not measured.
         before = with_quality(inp.current_scores)
+        if not _finite_numbers(before):
+            before = NOT_MEASURED
         safety = self.safety
         if kept and self.candidate_version is not None:
             in_force = self.candidate_version.removesuffix("-candidate")
@@ -397,11 +478,12 @@ class _Run:
             id=f"gate-r{inp.round:02d}", written_by="gatekeeper", created_at=now(), parent_ids=[inp.edit_id],
             round=inp.round, edit_id=inp.edit_id, decision="kept" if kept else "reverted", before=before,
             after=self.after if self.after is not None else NOT_MEASURED,
-            safety_passed=bool(safety is not None and safety.passed), policy_in_force=in_force,
+            safety_passed=_safety_passed(safety), policy_in_force=in_force,
             reason=_reason(failed, self.details, would_keep, verdict, extra))
         log_safety = None
         if safety is not None:
-            log_safety = LogSafety(case_file=safety.case_file, passed=safety.passed, cases=len(safety.cases),
+            log_safety = LogSafety(case_file=safety.case_file, passed=_safety_passed(safety),
+                                   cases=len(safety.cases),
                                    failed_case_ids=[c.case_id for c in safety.cases if not c.passed])
         log_scores = LogScores(before=before, after=self.after, noise=inp.noise) if self.after is not None else None
         return GateReport(outcome=outcome, failed=failed, would_keep=would_keep, checks=dict(self.checks),
@@ -486,10 +568,20 @@ def _safety(run: _Run, candidate: Policy) -> None:
         run.fail("safety_cases", f"the safety check raised {type(exc).__name__}: {exc}")
         run.running = None
         return
+    # The models allow assignment, so a SafetyResult can carry a `passed` that is not a bool ("no" is truthy).
+    # A strictly validated copy is what is judged, reported and saved, whatever later happens to the original.
+    try:
+        safety = SafetyResult.model_validate(safety.model_dump(warnings=False), strict=True)
+    except Exception as exc:  # noqa: BLE001  not a valid result: like a check that raised, it leaves none
+        run.fail("safety_cases", f"the safety check's result was not valid ({type(exc).__name__})")
+        run.running = None
+        return
     run.safety = safety
-    if safety.passed:
+    if not safety.cases:  # a safety check that ran no case did not run, whatever `passed` says
+        run.fail("safety_cases", NO_SAFETY_CASE)
+    elif _safety_passed(safety):
         run.checks["safety_cases"] = "passed"
-    else:
+    else:  # it says it failed, or it says passed while naming a failed case
         failed_ids = [c.case_id for c in safety.cases if not c.passed]
         which = f" ({', '.join(failed_ids)})" if failed_ids else ""
         run.fail("safety_cases", f"{len(failed_ids)} of {len(safety.cases)} safety cases failed{which}")
@@ -509,6 +601,11 @@ def _recheck(run: _Run) -> None:
 
 def _evaluate(run: _Run) -> GateReport:
     inp, deps = run.inp, run.deps
+    bad_noise = _bad_noise(inp.noise)  # GateInput refuses negative and NaN; infinity gets through it
+    if bad_noise is not None:  # the gate does not run: no file read, conversation, judge call or safety check
+        run.fail("complete_evidence", bad_noise)
+        return run.report()
+    inp.noise = float(inp.noise)  # on the gate's own copy: the number that was checked is the one compared
     policies = _static(run)
     if policies is None:
         run.extra = NOTHING_ELSE_RAN
@@ -527,6 +624,8 @@ def _evaluate(run: _Run) -> GateReport:
     _recheck(run)  # after the last judge call, before deciding
     clash = _clashes(deps.root, inp.round, ids)
     problems = []
+    if not _measured(inp.current_scores):  # nothing to compare the candidate with: not evidence
+        problems.append(NO_BASELINE)
     if not evidence.complete or evidence.scores is None:
         problems.append(f"of the validation conversations, {evidence.describe()}")
     if clash:  # the files stay where they are; the validation counts as not measured
@@ -541,7 +640,7 @@ def _evaluate(run: _Run) -> GateReport:
 
     # 4. The two score checks. Differences are rounded: the scores are means of whole numbers.
     run.running = "quality_gain"
-    before, after = with_quality(inp.current_scores), evidence.scores
+    before, after = with_quality(inp.current_scores), with_quality(evidence.scores)
     assert before.quality is not None and after.quality is not None
     gain = round(after.quality - before.quality, 9)
     moved = f"quality {'rose' if gain >= 0 else 'fell'} by {_num(abs(gain))}"
@@ -562,16 +661,24 @@ def _evaluate(run: _Run) -> GateReport:
     run.after = after
     run.running = None
     verdict = f"{moved}, above the noise of {_num(inp.noise)}; no dimension fell by more than the noise"
-    if run.safety is not None:
+    if run.checks["safety_cases"] == "passed" and _safety_passed(run.safety):
+        assert run.safety is not None
         verdict += f"; the safety check passed ({len(run.safety.cases)} cases)"
     return run.report(verdict)
+
+
+def _refuse_non_finite(report: GateReport) -> None:
+    """Every number the gate hands on (the outcome, the scores and safety for the round event) must be
+    one JSON can hold. Otherwise the decision log would be unreadable: the round is reverted instead."""
+    if not _finite_numbers([report.outcome, report.log_scores, report.log_safety]):
+        raise GateError("a number the gate would write is not finite")
 
 
 def _save_report(deps: GateDeps, round_: int, report: GateReport) -> None:
     data = {"round": round_, "decision": report.outcome.decision, "would_keep": report.would_keep,
             "failed": report.failed, "checks": report.checks, "reason": report.outcome.reason}
-    (_scores_dir(deps) / f"round-{round_:02d}-gate.json").write_text(json.dumps(data, indent=2) + "\n",
-                                                                     encoding="utf-8")
+    (_scores_dir(deps) / f"round-{round_:02d}-gate.json").write_text(
+        json.dumps(data, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def _crashed(run: _Run, exc: BaseException) -> GateReport:
@@ -602,14 +709,21 @@ def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[st
 
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
     """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
-    including a file that could not be saved."""
+    including a file that could not be saved.
+
+    `inp.current_scores` inside 1 to 5 is trusted as given: it is the caller's precondition that they
+    were measured on `inp.current_policy` (make_gate guarantees it), and invented scores break it.
+    """
+    mark_gated(deps.root, inp.round)  # first act, as in make_gate's gate: the round is the real gate's
     return _run_gate(inp, deps)[0]
 
 
 def _run_gate(inp: GateInput, deps: GateDeps, current_sha256: Optional[str] = None) -> tuple[GateReport, _Run]:
     """run_gate, also returning its state. `current_sha256` is the hash of the policy text the
     baseline scores were measured on; the policy in force must still hold that text."""
-    run = _Run(inp=inp, deps=deps, expected_current=current_sha256)
+    # A copy: the baseline scores and the noise the gate checks are the ones it compares and writes,
+    # whatever happens to the caller's GateInput while the gate runs.
+    run = _Run(inp=inp.model_copy(deep=True), deps=deps, expected_current=current_sha256)
     report = _gate_report(run)
     return report, run
 
@@ -618,12 +732,14 @@ def _gate_report(run: _Run) -> GateReport:
     inp, deps = run.inp, run.deps
     try:
         report = _evaluate(run)
+        _refuse_non_finite(report)
         run.running = "saving the gate report"
         _save_report(deps, inp.round, report)
         return report
     except Exception as exc:  # noqa: BLE001  any crash at all must end as a revert, never as a keep
         try:
             report = _crashed(run, exc)
+            _refuse_non_finite(report)
         except Exception as again:  # noqa: BLE001  even the crash report failed: a bare revert
             report = _bare_revert(inp.round, inp.edit_id, inp.current_policy, ["complete_evidence"],
                                   f"Reverted on {CHECKS['complete_evidence']}: the test run crashed "
@@ -647,6 +763,7 @@ class _Gate:
         self.last_report: Optional[GateReport] = None
 
     def __call__(self, result: RoundResult) -> GateOutcome:
+        mark_gated(self.deps.root, result.round)  # first act: the round is the real gate's, whatever fails later
         result.scores, result.safety, result.candidate_sha256, result.base_sha256 = None, None, None, None
         try:
             report = self._gate(result)
@@ -659,6 +776,9 @@ class _Gate:
     def _gate(self, result: RoundResult) -> GateReport:
         if result.edit is None or result.candidate_path is None:
             raise GateError("the round has no candidate to test")
+        bad_noise = _bad_noise(self.noise)
+        if bad_noise is not None:  # before any conversation, judge call or safety check
+            return self._untested(result, bad_noise)
         try:
             before, base_sha = _current_scores(self.deps, result.base_policy_path, self.ids)
         except Exception as exc:  # noqa: BLE001

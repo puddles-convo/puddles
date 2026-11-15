@@ -777,7 +777,7 @@ def test_the_fake_script_runs_the_real_gate_and_promotes_nothing(tmp_path, trace
     [event] = DecisionLog(root).rounds()
 
     assert event.outcome == "reverted" and "noise has not been measured" in event.reason
-    assert event.scores is not None and event.safety is not None and event.safety.passed is True
+    assert event.scores is not None and event.safety is not None and event.safety.passed is False  # ran no case
     assert capsys.readouterr().out == f"round 1: reverted. {event.reason}\n"
     assert (root / "conversations" / "round-01-validation.jsonl").exists()
     assert (root / "policies" / "policy-v1.meta.json").exists()
@@ -1489,3 +1489,607 @@ def test_a_current_json_that_is_not_the_bytes_the_gate_wrote_counts_as_absent(tm
     assert gate.current_scores(deps, current, IDS) == first
     assert len(deps.judge.calls) - calls == len(IDS)  # scored again, and the file rewritten as bytes
     assert b"\r" not in path.read_bytes() and not path.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+# ---------- section 9: scores and safety passed to finish_round by its caller ----------
+
+GATE_FIELDS = ["scores", "safety", "base_sha256", "candidate_sha256"]
+
+
+def gated_by(result, field):
+    """Set one of the four fields make_gate sets, to a value that would otherwise be filed."""
+    if field in ("scores", "safety"):
+        setattr(result, field, measurement(field)[field])
+    elif field == "base_sha256":
+        result.base_sha256 = sha256_text(result.base_policy_path.read_text())
+    else:
+        result.candidate_sha256 = sha256_text(result.candidate_path.read_text())
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("field", GATE_FIELDS)
+@pytest.mark.parametrize("passed", ["scores", "safety"])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_a_gated_round_refuses_the_callers_scores_or_safety_before_any_write(tmp_path, decision, field, passed,
+                                                                            replay_on):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    gated_by(result, field)
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="went through the gate"):
+        finish_round(result, outcome, log, memory, root,
+                     start_policy=result.base_policy_path if replay_on else None, **measurement(passed))
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_an_ungated_round_files_the_callers_scores_and_safety_unchanged(tmp_path, decision, replay_on):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    given = measurement("scores") | measurement("safety")
+    dumped = {k: v.model_dump(mode="json") for k, v in given.items()}
+    log = DecisionLog(root)
+    event = finish_round(result, outcome, log, FakeMemory(), root,
+                         start_policy=result.base_policy_path if replay_on else None, **given)
+    assert event.scores == given["scores"] and event.safety == given["safety"]
+    logged = log.rounds()[-1]
+    assert logged.scores.model_dump(mode="json") == dumped["scores"]
+    assert logged.safety.model_dump(mode="json") == dumped["safety"]
+    assert event.outcome == decision and "outcome" in result.refs
+    assert (root / "policies" / "policy-v2.md").exists() == (decision == "kept")
+    assert (root / "policies" / "policy-v2.meta.json").exists() == (decision == "kept" and replay_on)
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_an_ungated_round_with_neither_files_no_measurements(tmp_path, decision):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    log = DecisionLog(root)
+    event = finish_round(result, outcome, log, FakeMemory(), root, start_policy=result.base_policy_path)
+    assert event.scores is None and event.safety is None
+    assert log.rounds()[-1].scores is None and log.rounds()[-1].safety is None
+    assert event.outcome == decision
+    assert event.policy.in_force == ("policy-v2" if decision == "kept" else "policy-v1")
+
+
+# ---------- section 9: what tells finish_round that the real gate ran is on disk ----------
+
+def invented():
+    """Caller values unlike anything the gate measured (it measured 4.0 and 3 cases)."""
+    from schemas import LogSafety, LogScores
+
+    return {"scores": LogScores(before=Scores(empathy=3, relevance=3), after=Scores(empathy=5, relevance=5),
+                                noise=0.15),
+            "safety": LogSafety(case_file="invented.json", passed=True, cases=999)}
+
+
+def refused_on_disk(tmp_path, result, outcome, root, **passed):
+    """finish_round refuses the caller's values, names the gate report, and nothing under tmp_path changed."""
+    from puddles.round import finish_round, gate_report_path
+
+    report = gate_report_path(root, result.round)
+    assert report.exists()
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError) as exc:
+        finish_round(result, outcome, log, memory, root, **passed)
+    assert str(report) in str(exc.value)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+def clear(result):
+    result.scores = result.safety = result.base_sha256 = result.candidate_sha256 = None
+    return result
+
+
+def rebuild(result):
+    """The same round, built again without anything make_gate set."""
+    return RoundResult(round=result.round, outcome=result.outcome, base_policy_path=result.base_policy_path,
+                       pattern=result.pattern, status_before=result.status_before, edit=result.edit,
+                       candidate_path=result.candidate_path, refs=dict(result.refs))
+
+
+@pytest.mark.parametrize("noise_measured, decision", [(True, "kept"), (False, "reverted")])
+@pytest.mark.parametrize("erase", [clear, rebuild])
+@pytest.mark.parametrize("passed", [["scores"], ["safety"], ["scores", "safety"]])
+def test_the_real_gates_provenance_cannot_be_erased_from_the_result(tmp_path, noise_measured, decision, erase,
+                                                                    passed):
+    deps, current, candidate = setup(tmp_path, noise_measured=noise_measured)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == decision and result.scores.after.quality == 4.0 and result.safety.cases == 3
+    erased = erase(result)
+    assert (erased.scores, erased.safety, erased.base_sha256, erased.candidate_sha256) == (None,) * 4
+    values = invented()
+    refused_on_disk(tmp_path, erased, out, deps.root, **{k: values[k] for k in passed})
+
+
+def test_a_gate_whose_baseline_could_not_be_scored_is_refused_the_callers_values(tmp_path):
+    deps, current, candidate = setup(tmp_path, user_fn=user_failing_on("two mugs"), noise_measured=False)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and "could not be scored" in out.reason
+    assert (result.scores, result.safety, result.base_sha256, result.candidate_sha256) == (None,) * 4  # by itself
+    refused_on_disk(tmp_path, result, out, deps.root, **invented())
+
+
+def test_a_cleared_gated_result_with_no_gate_outcome_is_refused_the_callers_values(tmp_path):
+    """The verifier's last row: it would otherwise be filed as no_pattern with the caller's values."""
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    refused_on_disk(tmp_path, clear(result), None, deps.root, **invented())
+
+
+@pytest.mark.parametrize("how", ["kept", "reverted", "untested", "crashed"])
+def test_make_gate_writes_its_report_on_every_return(tmp_path, how):
+    from puddles.round import gate_report_path
+
+    deps, current, candidate = setup(tmp_path, noise_measured=how != "reverted",
+                                     user_fn=user_failing_on("two mugs") if how == "untested" else _fake_user)
+    result = gated_round(deps, current, candidate)
+    if how == "crashed":
+        result.candidate_path = None  # the gate cannot run at all
+    assert not gate_report_path(deps.root, 1).exists()
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == ("kept" if how == "kept" else "reverted")
+    saved = json.loads(gate_report_path(deps.root, 1).read_text())
+    assert saved["round"] == 1 and saved["decision"] == out.decision
+
+
+@pytest.mark.parametrize("other_round", [False, True])
+def test_an_ungated_round_on_a_root_without_its_gate_report_files_the_callers_values(tmp_path, other_round):
+    from puddles.round import finish_round, gate_report_path
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    if other_round:  # another round's report does not make this one gated
+        gate_report_path(root, 2).parent.mkdir(parents=True, exist_ok=True)
+        gate_report_path(root, 2).write_text("{}\n")
+    assert not gate_report_path(root, 1).exists()
+    values = invented()
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, **values)
+    assert event.scores == values["scores"] and event.safety == values["safety"] and event.outcome == "kept"
+
+
+# ---------- section 9: a round is the real gate's as soon as make_gate is called for it ----------
+
+class Killed(BaseException):
+    """A run stopped from outside: not an Exception, so the gate's own handlers do not catch it."""
+
+
+def refused_by(tmp_path, result, outcome, root, sign, **passed):
+    """finish_round refuses the caller's values naming `sign`, and nothing under tmp_path changed."""
+    from puddles.round import finish_round
+
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="is the real gate's") as exc:
+        finish_round(result, outcome, log, memory, root, **(passed or invented()))
+    assert sign in str(exc.value)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+IN_PROCESS = "make_gate's gate was called for this root and round in this process"
+
+
+def forget_in_process(root, round_=1):
+    """As another process would see the root: no record in memory, only what is on disk."""
+    from puddles import round as round_module
+
+    round_module._GATED.discard((str(Path(root).resolve()), round_))
+
+
+def test_reproduction_1_scores_is_a_file_and_the_report_cannot_be_written(tmp_path):
+    from puddles.round import gate_files
+
+    deps, current, candidate = setup(tmp_path)
+    (deps.root / "scores").write_text("not a folder\n")
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and "could not" in out.reason
+    assert (result.scores, result.safety, result.base_sha256, result.candidate_sha256) == (None,) * 4
+    assert not any(p.exists() for p in gate_files(deps.root, 1))
+    refused_by(tmp_path, result, out, deps.root, IN_PROCESS)
+    forget_in_process(deps.root)
+    refused_by(tmp_path, result, out, deps.root, "is there and is not a folder")
+
+
+def test_reproduction_2_a_dangling_link_at_the_reports_path_counts_as_there(tmp_path):
+    from puddles.round import gate_report_path
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    report = gate_report_path(root, 1)
+    report.parent.mkdir(parents=True)
+    report.symlink_to(tmp_path / "nowhere.json")
+    assert not report.exists()
+    refused_by(tmp_path, result, outcome, root, f"{report} is there")
+
+
+def test_reproduction_3_a_gate_stopped_before_its_report_is_still_the_rounds(tmp_path, monkeypatch):
+    from puddles.round import gate_files, gate_report_path
+
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+
+    def killed(*args, **kwargs):
+        raise Killed()
+
+    monkeypatch.setattr(gate, "_save_report", killed)
+    with pytest.raises(Killed):
+        gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert not gate_report_path(deps.root, 1).exists()
+    assert all(p.exists() for p in gate_files(deps.root, 1)[1:])  # safety and validation files are there
+    rebuilt = rebuild(result)
+    refused_by(tmp_path, rebuilt, None, deps.root, IN_PROCESS)
+    forget_in_process(deps.root)
+    refused_by(tmp_path, rebuilt, None, deps.root, "round-01-safety.json is there")
+
+
+@pytest.mark.parametrize("field", GATE_FIELDS)
+def test_sign_1_alone_a_field_set_on_the_result(tmp_path, field):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    gated_by(result, field)
+    refused_by(tmp_path, result, outcome, root, "went through the gate")
+
+
+def test_sign_2_alone_the_gate_called_in_this_process(tmp_path):
+    from puddles.round import is_gated, mark_gated
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    assert not is_gated(root, 1)
+    mark_gated(tmp_path / "root" / ".." / "root", 1)  # keyed on the resolved root
+    assert is_gated(root, 1)
+    assert not (root / "scores").exists()
+    refused_by(tmp_path, result, outcome, root, IN_PROCESS)
+
+
+@pytest.mark.parametrize("which", range(4))
+@pytest.mark.parametrize("dangling", [False, True])
+def test_sign_3_alone_any_file_the_gate_writes_for_the_round(tmp_path, which, dangling):
+    from puddles.round import gate_files
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    path = gate_files(root, 1)[which]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if dangling:
+        path.symlink_to(tmp_path / "gone")
+    else:
+        path.write_text("")
+    refused_by(tmp_path, result, outcome, root, f"{path} is there")
+
+
+@pytest.mark.parametrize("kind", ["file", "dangling link"])
+def test_sign_4_alone_scores_is_there_and_not_a_folder(tmp_path, kind):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    if kind == "file":
+        (root / "scores").write_text("")
+    else:
+        (root / "scores").symlink_to(tmp_path / "gone")
+    refused_by(tmp_path, result, outcome, root, "is there and is not a folder")
+
+
+@pytest.mark.parametrize("failure", ["baseline", "report", "both"])
+def test_a_failure_inside_the_gate_after_it_marked_the_round_leaves_it_gated(tmp_path, monkeypatch, failure):
+    from puddles.round import gate_files, is_gated
+
+    deps, current, candidate = setup(tmp_path, noise_measured=False,
+                                     user_fn=user_failing_on("two mugs") if failure != "report" else _fake_user)
+    if failure != "baseline":
+        def cannot_write(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(gate, "_save_report", cannot_write)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and is_gated(deps.root, 1)
+    if failure == "both":  # nothing on disk and nothing on the result: only the record in memory says so
+        assert not any(p.is_symlink() or p.exists() for p in gate_files(deps.root, 1))
+    refused_by(tmp_path, clear(result), out, deps.root, IN_PROCESS)
+
+
+def test_the_gate_marks_the_round_before_it_reads_or_writes_anything(tmp_path, monkeypatch):
+    from puddles.round import is_gated
+
+    deps, current, candidate = setup(tmp_path)
+    seen = []
+
+    def first_read(*args, **kwargs):
+        seen.append(is_gated(deps.root, 1))
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(gate, "_current_scores", first_read)
+    gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(gated_round(deps, current, candidate))
+    assert seen == [True]
+
+
+def test_another_root_or_another_round_is_not_affected(tmp_path):
+    from puddles.round import finish_round, mark_gated
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    mark_gated(tmp_path / "elsewhere", 1)
+    mark_gated(root, 2)
+    (root / "scores").mkdir()
+    (root / "scores" / "round-02-gate.json").write_text("{}\n")
+    values = invented()
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, **values)
+    assert event.scores == values["scores"] and event.safety == values["safety"]
+
+
+def test_a_dataset_run_on_a_root_where_another_round_was_gated_is_unchanged(tmp_path):
+    from puddles.round import gate_files, mark_gated
+    from tests.test_dataset_rounds import START, dataset
+    from scripts.dataset_rounds import run as dataset_run
+
+    root = tmp_path / "ds"
+    mark_gated(root, 9)
+    for path in gate_files(root, 9):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    dataset_run(root, START, 3, 0, FakeMemory(), dataset("train", 120, True), dataset("validation", 60, True))
+    rounds = DecisionLog(root).rounds()
+    assert rounds[0].outcome == "kept" and rounds[0].scores is not None and rounds[0].safety.cases == 0
+    replay.check(DecisionLog(root), root, START)
+
+
+# ---------- section 9: a gate outcome belongs to one round and one edit ----------
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("mismatch", ["round", "edit", "no edit"])
+@pytest.mark.parametrize("with_values", [False, True])
+def test_a_gate_outcome_for_another_round_or_edit_is_refused_before_any_write(tmp_path, decision, mismatch,
+                                                                             with_values):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    if mismatch == "round":
+        outcome = outcome.model_copy(update={"round": 2, "id": "gate-r02"})
+    elif mismatch == "edit":
+        outcome = outcome.model_copy(update={"edit_id": "edit-r99"})
+    else:
+        result.edit = None
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="nothing was written") as exc:
+        finish_round(result, outcome, log, memory, root, **(invented() if with_values else {}))
+    assert "is for round" in str(exc.value)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_the_stand_in_gate_builds_an_outcome_for_the_results_own_round_and_edit(tmp_path, decision):
+    from puddles.round import finish_round, stand_in_gate
+
+    root, candidate, result, _ = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    outcome = stand_in_gate(result, decision)
+    assert (outcome.round, outcome.edit_id) == (result.round, result.edit.id)
+    assert finish_round(result, outcome, DecisionLog(root), FakeMemory(), root).outcome == decision
+
+
+def test_run_gate_called_directly_marks_the_round(tmp_path):
+    from puddles.round import is_gated
+
+    deps, current, candidate = setup(tmp_path)
+    assert not is_gated(deps.root, 1)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.round == 1 and is_gated(deps.root, 1)
+
+
+def test_run_gate_marks_the_round_before_it_reads_anything(tmp_path, monkeypatch):
+    from puddles.round import is_gated
+
+    deps, current, candidate = setup(tmp_path)
+    seen = []
+
+    def first_act(inp, deps_, current_sha256=None):
+        seen.append(is_gated(deps_.root, inp.round))
+        raise Killed()
+
+    monkeypatch.setattr(gate, "_run_gate", first_act)
+    with pytest.raises(Killed):
+        gate.run_gate(gate_input(current, candidate), deps)
+    assert seen == [True]
+    assert not (deps.root / "scores").exists()  # nothing read or written before the mark
+
+
+# ---------- section 9: not being able to look is not the same as not being there ----------
+
+import errno  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+
+CANNOT = "cannot be told that round 1 is not the real gate's"
+
+CHILD = r"""
+import json, sys
+from pathlib import Path
+from puddles.decision_log import DecisionLog
+from puddles.memory import FakeMemory
+from puddles.round import RoundResult, finish_round, gated_signs, is_gated
+from schemas import FailurePattern, GateOutcome, LogSafety, LogScores, PolicyEdit, RecordRef
+
+p = json.loads(Path(sys.argv[1]).read_text())
+root = Path(p["root"])
+result = RoundResult(round=p["round"], outcome="candidate", base_policy_path=Path(p["base"]),
+                     pattern=FailurePattern.model_validate(p["pattern"]), status_before="open",
+                     edit=PolicyEdit.model_validate(p["edit"]), candidate_path=Path(p["candidate"]),
+                     refs={k: RecordRef.model_validate(v) for k, v in p["refs"].items()})
+out = {"in_process": is_gated(root, result.round), "signs": gated_signs(result, root)}
+try:
+    event = finish_round(result, GateOutcome.model_validate(p["outcome"]), DecisionLog(root), FakeMemory(), root,
+                         scores=LogScores.model_validate(p["scores"]), safety=LogSafety.model_validate(p["safety"]))
+    out["filed"] = event.model_dump(mode="json")
+except ValueError as exc:
+    out["refused"] = str(exc)
+print(json.dumps(out))
+"""
+
+
+def permissions_bind():
+    return not (hasattr(os, "geteuid") and os.geteuid() == 0)
+
+
+def test_reproduction_4_unsearchable_scores_and_conversations_in_a_fresh_process(tmp_path):
+    """The verifier's reproduction: a real gate's round, rebuilt without the four fields, the search
+    permission taken off `scores` and `conversations`, and finish_round called in another process."""
+    if not permissions_bind():
+        pytest.skip("permissions do not bind for root")
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.id == "gate-r01" and result.safety.cases == 3
+    rebuilt = rebuild(result)
+    values = invented()
+    payload = tmp_path / "payload.json"
+    payload.write_text(json.dumps({
+        "root": str(deps.root), "round": 1, "base": str(rebuilt.base_policy_path),
+        "candidate": str(rebuilt.candidate_path), "pattern": rebuilt.pattern.model_dump(mode="json"),
+        "edit": rebuilt.edit.model_dump(mode="json"), "outcome": out.model_dump(mode="json"),
+        "refs": {k: v.model_dump(mode="json") for k, v in rebuilt.refs.items()},
+        "scores": values["scores"].model_dump(mode="json"), "safety": values["safety"].model_dump(mode="json")}))
+    before = tree(tmp_path)
+    folders = [deps.root / "scores", deps.root / "conversations"]
+    for folder in folders:
+        folder.chmod(0o644)  # readable, not searchable
+    try:
+        try:
+            os.lstat(folders[0] / "round-01-gate.json")
+        except PermissionError:
+            pass
+        else:
+            pytest.skip("search permission does not bind for this user")
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        env["MLFLOW_DISABLE_AGENT_HINT"] = "1"
+        child = subprocess.run([sys.executable, "-c", CHILD, str(payload)], cwd=Path(__file__).resolve().parents[1],
+                               env=env, capture_output=True, text=True, timeout=120)
+    finally:
+        for folder in folders:
+            folder.chmod(0o755)
+    assert child.returncode == 0, child.stderr
+    seen = json.loads(child.stdout.strip().splitlines()[-1])
+    assert seen["in_process"] is False and "filed" not in seen, seen
+    assert CANNOT in seen["refused"] and "nothing was written" in seen["refused"]
+    for path in gate_files_of(deps.root):
+        assert str(path) in seen["refused"] and "PermissionError" in seen["refused"]
+    assert tree(tmp_path) == before
+
+
+def gate_files_of(root):
+    from puddles.round import gate_files
+
+    return gate_files(root, 1)
+
+
+def looked_at(root):
+    """Every path finish_round looks at before it takes a caller's values, by name."""
+    return {"gate": root / "scores" / "round-01-gate.json", "safety": root / "scores" / "round-01-safety.json",
+            "scores validation": root / "scores" / "round-01-validation.jsonl",
+            "conversations validation": root / "conversations" / "round-01-validation.jsonl",
+            "root": root, "scores": root / "scores", "conversations": root / "conversations",
+            "log": DecisionLog(root).path}
+
+
+def cannot_tell(tmp_path, root, result, outcome, path, error_text):
+    from puddles.round import finish_round
+
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="nothing was written") as exc:
+        finish_round(result, outcome, log, memory, root, **invented())
+    assert CANNOT in str(exc.value) and str(path) in str(exc.value) and error_text in str(exc.value)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+ERRORS = [(PermissionError, errno.EACCES), (OSError, errno.EIO), (OSError, errno.ELOOP),
+          (OSError, errno.ENAMETOOLONG)]
+
+
+@pytest.mark.parametrize("which", list(looked_at(Path("r"))))
+@pytest.mark.parametrize("error, code", ERRORS)
+@pytest.mark.parametrize("folders", [False, True])
+def test_a_path_that_cannot_be_looked_at_is_a_refusal_naming_it_and_the_error(tmp_path, monkeypatch, which, error,
+                                                                              code, folders):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    if folders:  # with scores and conversations there and empty, as without them, nothing else is a sign
+        (root / "scores").mkdir()
+        (root / "conversations").mkdir()
+    target, real = looked_at(root)[which], os.lstat
+
+    def lstat(path, *args, **kwargs):
+        if Path(path) == target:
+            raise error(code, os.strerror(code), str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    cannot_tell(tmp_path, root, result, outcome, target, f"[Errno {code}]")
+
+
+@pytest.mark.parametrize("which", ["root", "scores", "conversations"])
+@pytest.mark.parametrize("error, code", ERRORS[:2])
+def test_a_folder_whose_entries_cannot_be_listed_is_a_refusal(tmp_path, monkeypatch, which, error, code):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    (root / "scores").mkdir()
+    (root / "conversations").mkdir()
+    target, real = looked_at(root)[which], os.scandir
+
+    def scandir(path=".", *args, **kwargs):
+        if Path(path) == target:
+            raise error(code, os.strerror(code), str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    cannot_tell(tmp_path, root, result, outcome, target, f"[Errno {code}]")
+
+
+@pytest.mark.parametrize("which", ["scores", "conversations"])
+def test_a_real_folder_that_cannot_be_listed_is_a_refusal(tmp_path, which):
+    from puddles.round import finish_round
+
+    if not permissions_bind():
+        pytest.skip("permissions do not bind for root")
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    folder = root / which
+    folder.mkdir()
+    folder.chmod(0o311)  # searchable, not readable: every path in it can be looked at, the folder not listed
+    try:
+        try:
+            os.scandir(folder).close()
+        except PermissionError:
+            pass
+        else:
+            pytest.skip("read permission does not bind for this user")
+        with pytest.raises(ValueError, match="nothing was written") as exc:
+            finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, **invented())
+    finally:
+        folder.chmod(0o755)
+    assert CANNOT in str(exc.value) and str(folder) in str(exc.value) and "PermissionError" in str(exc.value)
+    assert DecisionLog(root).events() == []
+
+
+def test_a_link_to_a_folder_that_cannot_be_found_is_not_a_folder(tmp_path):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    (root / "conversations").symlink_to(tmp_path / "gone")
+    refused_by(tmp_path, result, outcome, root, "conversations is there and is not a folder")
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_confirmed_absence_with_listable_folders_still_files_the_callers_values(tmp_path, linked):
+    from puddles.round import finish_round, gated_signs
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)
+    (root / "scores").mkdir()
+    (root / "scores" / "round-02-gate.json").write_text("{}\n")  # another round's
+    if linked:  # a link to a listable folder is a listable folder
+        (tmp_path / "convs").mkdir()
+        (root / "conversations").symlink_to(tmp_path / "convs")
+    else:
+        (root / "conversations").mkdir()
+    assert gated_signs(result, root) == []
+    values = invented()
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, **values)
+    assert event.scores == values["scores"] and event.safety == values["safety"] and event.outcome == "kept"

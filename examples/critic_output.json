@@ -1,9 +1,11 @@
 {
+  "evidence": "conv-r03-0017 turn 2 and conv-r03-0021 turn 2 both suggest a fix before asking a question; no high-scoring conversation does this.",
   "found": true,
   "name": "advice-before-understanding",
   "description": "Gives a suggestion in its first reply without asking about the person's circumstances.",
   "seen_in": 2,
   "out_of": 3,
+  "seen_in_high": 0,
   "example_conversation_ids": [
     "conv-r03-0017",
     "conv-r03-0021"

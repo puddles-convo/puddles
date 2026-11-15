@@ -5,6 +5,15 @@ and every agent that imports it changes with it. Version 3 gave user notes a kin
 a cap and a last-confirmed date, gave each sighting of a failure pattern its own
 ID, and put a budget on the history lists that go into prompts.
 
+Version 4 adds what the proposed version 2 prompts need (docs/agent-prompts.md),
+without changing anything the current code uses: evidence fields written before
+scores, the judge's safety flags, the critic's comparison with high-scoring
+conversations, a supporting quote per source, scenario fields for a gradual
+simulated user, skills and examples for the helper, the proposer's toolbox
+(ProposerInputV2, ProposerOutputV2, Intervention), the gate's assertion check,
+calibration example files and the held-out jury. New fields have defaults, and
+the proposer's new formats have their own names, so version 3 records still load.
+
 Sections: shared pieces, training records, what each model returns, the decision
 log, policy and safety files, inference records, user memory, and the shape of a
 past.dev memory entry. docs/agents.md explains how they fit together.
@@ -15,7 +24,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 Score = int  # 1 to 5, the scale ESConv users rated on
 Split = Literal["train", "validation", "test", "live"]
@@ -24,6 +33,15 @@ Split = Literal["train", "validation", "test", "live"]
 # everything; these limit only what code copies into a prompt.
 HISTORY_RECENT = 10  # most recent patterns, queries or edits shown beyond the relevant ones
 FROM_MEMORY_LIMIT = 5  # records loaded after a recall
+
+# Version 4: what the judge flags as unsafe in a conversation. Reported to the gate
+# on its own, never folded into the quality scores.
+SafetyFlag = Literal["missed_risk", "diagnosis_or_medical", "role_break", "harmful_validation"]
+
+# Version 4: the proposer's toolbox (version 1 of it), plus the option to change nothing.
+ToolAction = Literal[
+    "edit_rule", "add_skill_card", "set_examples", "train_adapter", "merge_adapters", "no_change"
+]
 
 
 class Strict(BaseModel):
@@ -60,6 +78,10 @@ class Scenario(Strict):
     initial_intensity: Score = Field(ge=1, le=5)
     openness: Literal["open", "guarded", "resistant"] = "open"
     from_session: Optional[str] = None  # set when made from a live session
+    # version 4: what makes the simulated user open up gradually
+    opener: Optional[str] = None  # the real seeker's first message in ESConv
+    reveal_facts: list[str] = []  # 2 to 4 facts, in the order the real seeker revealed them
+    min_turns: int = Field(default=4, ge=1)  # fewest turns before the simulated user may end
 
 
 class ConversationRecord(Record):
@@ -88,6 +110,8 @@ class ScoreRecord(Record):
     emotion_after: Score = Field(ge=1, le=5)
     strategies: list[str]  # one per helper turn, ESConv strategy names
     note: str
+    evidence: str = ""  # version 4: the judge's reasoning, written before its scores
+    safety_flags: list[SafetyFlag] = []  # version 4: goes to the gate separately
 
 
 class FailurePattern(Record):
@@ -105,6 +129,7 @@ class FailurePattern(Record):
     out_of: int  # the conversations the critic was given
     example_conversation_ids: list[str]
     same_as_pattern_id: Optional[str] = None  # the first sighting's id; None on a first sighting
+    seen_in_high: Optional[int] = None  # version 4: how many high-scoring ones show it too
 
     @property
     def pattern_id(self) -> str:
@@ -115,6 +140,7 @@ class FailurePattern(Record):
 class Source(BaseModel):
     url: str
     title: str = ""
+    quote: str = ""  # version 4: the passage on the page that supports the technique
     technique: str  # one line
 
 
@@ -164,6 +190,7 @@ class GateOutcome(Record):
     safety_passed: bool
     policy_in_force: str
     reason: str = ""
+    prediction_met: Optional[bool] = None  # version 4: did the proposer's prediction come true
 
 
 class GateInput(Strict):
@@ -191,6 +218,10 @@ class HelperInput(Strict):
     policy_version: str
     user_notes: list[str] = []  # empty in training
     turns: list[Turn]
+    # version 4: rendered text, one item each. Empty on the robot for now (open issue:
+    # how skills and examples reach the cloud brain); the prompt then says "none".
+    skills: list[str] = Field(default=[], max_length=3)
+    examples: list[str] = []
 
 
 class ScoredConversation(Strict):
@@ -221,7 +252,8 @@ class CriticInput(Strict):
     earlier_patterns: list[PatternBrief] = []
     older_patterns_summary: str = ""  # one line counting the patterns not shown
     from_memory: list[str] = []  # detail found by recall, loaded from record files; at most FROM_MEMORY_LIMIT
-    conversations: list[ScoredConversation]  # the lowest-scoring ones, in full
+    conversations: list[ScoredConversation]  # the lowest-scoring ones, in full (<low_scoring>)
+    high_scoring: list[ScoredConversation] = []  # version 4: a few of the best, for comparison
 
 
 class ResearcherInput(Strict):
@@ -297,20 +329,24 @@ class JudgeInput(Strict):
 
 
 class JudgeOutput(Strict):
+    evidence: str = ""  # version 4: first, so the judge reasons before it scores
     empathy: Score = Field(ge=1, le=5)
     relevance: Score = Field(ge=1, le=5)
     emotion_before: Score = Field(ge=1, le=5)
     emotion_after: Score = Field(ge=1, le=5)
     strategies: list[str]
+    safety_flags: list[SafetyFlag] = []  # version 4
     note: str
 
 
 class CriticOutput(Strict):
+    evidence: str = ""  # version 4: first
     found: bool
     name: Optional[str] = None
     description: Optional[str] = None
     seen_in: int = 0
     out_of: int = 0
+    seen_in_high: int = 0  # version 4: if about as common as in the low-scoring set, not the cause
     example_conversation_ids: list[str] = []
     same_as_pattern_id: Optional[str] = None
     reason: str = ""  # why nothing was found, when found is false
@@ -326,6 +362,154 @@ class ProposerOutput(Strict):
     rule_id: Optional[str] = None  # existing ID for reword or remove; None for add
     rule_text: Optional[str] = None  # None for remove
     summary: str
+
+
+# ---------- version 4: the proposer's toolbox (proposed, not used by the code yet) ----------
+
+class HarnessBrief(Strict):
+    """What the proposer is shown of the harness version in force."""
+
+    version: str
+    policy_text: str
+    at_length_limit: bool
+    skill_cards: list[str] = []  # "name: one-line summary"
+    example_situations: list[str] = []
+    adapter: Optional[str] = None  # adapter ID in force, or None
+
+
+class LeverStats(Strict):
+    """One row of the scoreboard, built by code from earlier gate outcomes."""
+
+    action: ToolAction
+    tried: int = Field(ge=0)
+    kept: int = Field(ge=0)
+    average_gain: float = 0.0  # change in quality when kept
+    average_cost: str = ""  # e.g. "4 min, $0.30"
+
+
+class ActionSummary(Strict):
+    """One earlier action, built by code from the decision log."""
+
+    id: str
+    action: ToolAction
+    pattern_id: Optional[str] = None  # the identity of the pattern it was for
+    target: str = ""  # e.g. rule C2, card reflect-before-advice, adapter-01
+    outcome: Literal["kept", "reverted", "no_change"]
+    prediction: str = ""
+    observed: str = ""
+    summary: str
+
+
+class Budget(Strict):
+    rounds_left: int = Field(ge=0)
+    training_runs_left: int = Field(ge=0)
+    exploration_round: bool = False
+
+
+class ProposerInputV2(Strict):
+    """Version 4: the proposed proposer's input, with the toolbox. Not used by the code yet."""
+
+    harness: HarnessBrief
+    pattern: PatternBrief
+    sources: list[Source]
+    scoreboard: list[LeverStats] = []
+    # Built from the log, budgeted like earlier_edits: every action tried for this
+    # pattern, and the HISTORY_RECENT most recent actions for other patterns.
+    earlier_actions: list[ActionSummary] = []
+    older_actions_summary: str = ""  # one line counting the actions not shown
+    budget: Budget
+    tools: list[ToolAction]  # shuffled by code each round
+
+
+class Considered(Strict):
+    action: ToolAction
+    rejected_because: str
+
+
+class EditRuleArgs(Strict):
+    op: EditAction
+    rule_id: Optional[str] = None  # existing ID for reword or remove; None for add
+    rule_text: Optional[str] = None  # None for remove
+
+
+class SkillCardArgs(Strict):
+    op: Literal["add", "rewrite", "retire"]
+    card_id: Optional[str] = None  # existing ID for rewrite or retire
+    name: str = ""
+    when_to_use: str = ""
+    when_not_to_use: str = ""
+    steps: list[str] = []
+    source_urls: list[str] = []  # must come from the researcher's sources
+
+
+class ExamplesArgs(Strict):
+    situation: str
+    k: int = Field(ge=1, le=3)
+
+
+class TrainAdapterArgs(Strict):
+    method: Literal["dpo", "sft", "grpo"] = "dpo"  # version 1 toolbox: dpo
+    pairs_from: str  # which conversations, e.g. "pattern-r07 scenarios, current harness"
+    rank: Literal[16, 32] = 16
+    epochs: Literal[1, 2] = 1
+
+
+class MergeArgs(Strict):
+    adapter_id: str  # an adapter that passed the gate
+    search: Literal["base_blend", "adapter_sum"] = "base_blend"
+
+
+class NoChangeArgs(Strict):
+    pass
+
+
+ARGS_FOR = {
+    "edit_rule": EditRuleArgs,
+    "add_skill_card": SkillCardArgs,
+    "set_examples": ExamplesArgs,
+    "train_adapter": TrainAdapterArgs,
+    "merge_adapters": MergeArgs,
+    "no_change": NoChangeArgs,
+}
+
+
+class ProposerOutputV2(Strict):
+    """Version 4: one action from the toolbox, with what it expects to happen.
+    Code checks the arguments match the action and its limits before applying it."""
+
+    considered: list[Considered] = Field(min_length=2)
+    action: ToolAction
+    args: dict[str, Any] = {}
+    hypothesis: str
+    prediction: str
+    addresses: str  # pattern ID
+
+    @model_validator(mode="after")
+    def _args_match_action(self):
+        ARGS_FOR[self.action].model_validate(self.args)
+        return self
+
+
+class Intervention(Record):
+    """Proposer -> gatekeeper, as stored: the output plus what code adds."""
+
+    round: int
+    pattern_id: str
+    research_id: Optional[str] = None  # None when the round had no sources
+    base_harness_version: str
+    new_harness_version: Optional[str] = None  # None for no_change
+    action: ToolAction
+    args: dict[str, Any] = {}
+    considered: list[Considered] = []
+    hypothesis: str
+    prediction: str
+
+
+class AssertionCheckOutput(Strict):
+    """The gatekeeper's yes-or-no check of one judged safety assertion."""
+
+    quote: str = ""  # the words in the reply that decide it
+    answer: Literal["yes", "no"]
 
 
 # ---------- the decision log (append-only) ----------
@@ -544,3 +728,80 @@ class MemoryEntry(Strict):
     identity: str  # the agent that produced it
     audience: str  # training-agents, or one person's private audience
     metadata: dict[str, Any] = {}
+
+
+# ---------- example files (calibration examples for the prompts) ----------
+
+class JudgeExample(Strict):
+    """One entry of examples/judge_examples.json."""
+
+    id: str
+    source: str
+    turns: list[Turn]
+    expected: JudgeOutput
+
+
+class CrisisLabel(Strict):
+    level: Literal["crisis", "concern", "none"]
+    category: Literal["self", "danger", "unsure", "-"]
+
+
+class CrisisExample(Strict):
+    """One entry of examples/crisis_checker_examples.json."""
+
+    id: str
+    recent_turns: list[Turn] = []
+    text: str
+    expected: CrisisLabel
+    why: str
+    in_prompt: bool = False  # the 4 in the prompt are never used to test it
+
+
+# ---------- held-out jury (final evaluation only) ----------
+
+class JurorPersonOutput(Strict):
+    """Juror A: the person seeking support."""
+
+    evidence: str
+    score: Score = Field(ge=1, le=5)  # felt heard
+    worst_turn: Optional[int] = None
+
+
+class JurorCounsellorOutput(Strict):
+    """Juror B: peer-support skill."""
+
+    evidence: str
+    score: Score = Field(ge=1, le=5)
+    exploration: Score = Field(ge=1, le=5)
+    stayed_in_role: bool
+
+
+SafetyFailure = Literal[
+    "missed_risk", "unsafe_advice", "method_detail", "diagnosis_or_medical",
+    "harmful_validation", "role_break",
+]
+
+
+class JurorSafetyOutput(Strict):
+    """Juror C: safety. A failure is a veto."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    evidence: str
+    score: Score = Field(ge=1, le=5)
+    passed: bool = Field(alias="pass")
+    failures: list[SafetyFailure] = []
+
+
+ScepticFlag = Literal[
+    "empty_validation", "flattery", "stock_phrases", "repetition", "over_promising",
+    "agreeing_to_please",
+]
+
+
+class JurorScepticOutput(Strict):
+    """Juror D: substance behind the warmth."""
+
+    evidence: str
+    score: Score = Field(ge=1, le=5)  # substance
+    flags: list[ScepticFlag] = []
