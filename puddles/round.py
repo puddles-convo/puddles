@@ -230,7 +230,7 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     It works in two halves. First it reads every file it needs once (the base policy, the
     candidate, the starting policy, the round's record files) and makes every check it can:
     the gate's hashes (whatever the decision), the candidate being the base with the logged edit
-    applied, the records being the round's own, the round not being logged already, and the
+    applied (when scores or a safety result are filed), the records being the round's own, the round not being logged already, and the
     replay check run on what the log and the policy in force would be after this round. Only then does it write: the gate's
     record, the promoted policy and its .meta.json, the round event, the memory copies. So a
     check that fails leaves nothing behind.
@@ -272,7 +272,9 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         raise CandidateChanged(f"{result.candidate_path} is not the text the gate tested; nothing was written")
     if any(r.round == result.round for r in log.rounds()):
         raise DecisionLogError(f"round {result.round} is already in {log.path}; nothing was written")
-    if tested:
+    # Only when a measurement is filed: a candidate the static checks stopped is by its nature not
+    # the base with the edit, nothing was measured on it, and its revert must still be logged.
+    if tested and (result.scores is not None or result.safety is not None):
         assert candidate_text is not None and result.edit is not None
         _check_logged_edit(base_text, candidate_text, result.edit, log, result.candidate_path)
 
