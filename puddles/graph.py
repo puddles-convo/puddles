@@ -5,6 +5,8 @@ through `RoundDeps`.
 """
 from __future__ import annotations
 
+import inspect
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, TypedDict
@@ -17,9 +19,18 @@ from loop.llm import ChatClient
 from loop.policy import Policy, load_policy
 from loop.runner import Failure, run_batch
 from puddles import exa
-from puddles.agents.critic import select_for_critic
 from puddles.config import load_config
 from puddles.decision_log import DecisionLog
+from puddles.judging import (
+    CRITIC_CONVERSATIONS,
+    Judge,
+    judge_models,
+    save_scores,
+    score_conversations,
+    scored_conversations,
+    select_for_critic,
+    train_scores_path,
+)
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import Memory
 from puddles.round import (
@@ -46,6 +57,18 @@ def stub_judge(records: list[ConversationRecord], round_: int = 0) -> list[Score
                                turns=list(r.turns)) for r in records]
 
 
+def _call_judge(judge: Callable, records: list[ConversationRecord], round_: int) -> list[ScoredConversation]:
+    """Call `deps.judge` with the round number when it takes one (the overnight loop's judge),
+    and without it otherwise (the stage-2 contract the acceptance tests use)."""
+    try:
+        params = [p for p in inspect.signature(judge).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)]
+    except (TypeError, ValueError):
+        params = []
+    takes_round = len(params) >= 2 or any(p.kind is p.VAR_POSITIONAL for p in params)
+    return judge(records, round_) if takes_round else judge(records)
+
+
 def stand_in_reverted(result: RoundResult) -> GateOutcome:
     return stand_in_gate(result, "reverted")
 
@@ -66,11 +89,16 @@ class RoundDeps:
     memory: Memory
     log: DecisionLog
     root: Path
-    judge: Callable[[list[ConversationRecord], int], list[ScoredConversation]] = stub_judge
+    # Takes the records, or the records and the round number (the overnight loop's judge does).
+    judge: Callable[..., list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
     usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
-    start_policy: Optional[Path] = None  # set by the loop: enables .meta.json and the end-of-round check
-    critic_conversations: Optional[int] = None  # None: the critic reads every scored conversation
+    # Set: the starting policy gets its .meta.json, a promoted one gets its own, and the replay check runs.
+    start_policy: Optional[Path] = None
+    # Set: the judge node runs this judge through puddles.judging and `judge` is not called.
+    judge_panel: Optional[Judge] = None
+    # How many of the lowest-scoring conversations the critic reads; None: every scored conversation.
+    critic_conversations: Optional[int] = CRITIC_CONVERSATIONS
 
 
 class RoundState(TypedDict, total=False):
@@ -85,6 +113,7 @@ class RoundState(TypedDict, total=False):
     result: RoundResult
     gate: Optional[GateOutcome]
     event: RoundEvent
+    unscored: list[str]
 
 
 def _failed(agent: str, exc: AgentFailed) -> str:
@@ -123,13 +152,23 @@ def build_round_graph(deps: RoundDeps):
 
     def judge(state: RoundState) -> dict:
         records = state.get("records", [])
+        unscored: list[str] = []
         with metering(meter, "judge"):
-            scored = deps.judge(records, state["round"])
-        update: dict = {"scored": scored}
+            if deps.judge_panel is None:
+                scored = _call_judge(deps.judge, records, state["round"])
+            else:
+                run = score_conversations(deps.judge_panel, records)
+                save_scores(run.scores, train_scores_path(root, state["round"]))
+                scored = scored_conversations(records, run.scores)
+                if deps.critic_conversations is not None:
+                    scored = select_for_critic(scored, deps.critic_conversations)
+                unscored = run.unscored
+        update: dict = {"scored": scored, "unscored": unscored}
         if not scored:
             update["result"] = RoundResult(
                 round=state["round"], outcome="no_pattern", base_policy_path=state["policy_path"],
                 reason=NO_CONVERSATION_REASON if not records else NOTHING_SCORED_REASON)
+            update["result"].unscored = list(unscored)
         return update
 
     def critic(state: RoundState) -> dict:
@@ -143,6 +182,7 @@ def build_round_graph(deps: RoundDeps):
         except AgentFailed as exc:
             result = RoundResult(round=state["round"], outcome="no_pattern",
                                  base_policy_path=state["policy_path"], reason=_failed("critic", exc))
+        result.unscored = list(state.get("unscored", []))
         return {"result": result}
 
     def researcher(state: RoundState) -> dict:
@@ -173,7 +213,7 @@ def build_round_graph(deps: RoundDeps):
 
     def finish(state: RoundState) -> dict:
         event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root,
-                             deps.start_policy)
+                             start_policy=deps.start_policy)
         return {"event": event}
 
     def after_judge(state: RoundState) -> str:
@@ -209,8 +249,13 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
     policy = check_policy_file(policy_path)  # first: a bad file must leave memory and the log untouched
     meter = round_meter(deps)
     # Before any call: a model with no price, or an unpriced Exa search, stops the run here.
-    meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)],
+    meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)]
+                       + judge_models(deps.judge_panel),
                        search=deps.search is exa.search)
+    if deps.start_policy is not None:
+        from puddles.gate import ensure_starting_meta  # puddles.gate imports this module
+
+        ensure_starting_meta(Path(deps.root), Path(deps.start_policy))
     deps.memory.ensure_training_audience()
     retry_pending(deps.log, deps.memory, deps.root)
     round_ = deps.log.next_round()
@@ -223,5 +268,6 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
         mlflow.set_tag("outcome", state["event"].outcome)
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
                             "conversations_failed": len(state.get("failures", [])),
+                            "conversations_unscored": len(state.get("unscored", [])),
                             **meter.metrics()})
     return state

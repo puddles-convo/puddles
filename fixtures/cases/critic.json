@@ -1,0 +1,310 @@
+[
+  {
+    "case_id": "critic-01",
+    "what_it_tests": "The four hand-written conversations from fixtures/bad_conversations.json: every one gives a suggestion in its first reply before learning anything about the situation (conv-hand-004 as a list of options). A good answer counts at least the three that give one suggestion.",
+    "input": {
+      "round": 1,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "conversations": [
+        {
+          "conversation_id": "conv-hand-001",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Suggested HR before asking anything about the situation.",
+          "turns": [
+            {"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
+            {"speaker": "helper", "text": "That sounds stressful. Have you tried talking to HR about your options?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-hand-002",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Offered a breathing exercise in the first reply without learning what was wrong.",
+          "turns": [
+            {"speaker": "user", "text": "I can't sleep. My head won't stop going over everything."},
+            {"speaker": "helper", "text": "Try breathing in for four and out for six. It can help calm racing thoughts."}
+          ]
+        },
+        {
+          "conversation_id": "conv-hand-003",
+          "empathy": 3,
+          "relevance": 2,
+          "note": "Told the person to set boundaries before asking who or what was involved.",
+          "turns": [
+            {"speaker": "user", "text": "Things at home have been really hard lately."},
+            {"speaker": "helper", "text": "You should set clear boundaries with your family and make time for yourself."}
+          ]
+        },
+        {
+          "conversation_id": "conv-hand-004",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Reply was long and listed several options at once.",
+          "turns": [
+            {"speaker": "user", "text": "I feel lonely since I moved here."},
+            {"speaker": "helper", "text": "Moving is hard. You could join a club, volunteer, try a meetup app, call old friends, or take a class. Many people find that one of these helps them settle in."}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "must_mention": ["conv-hand-001", "conv-hand-002", "conv-hand-003", "first"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [3, 4]},
+      "fields": {"found": true, "out_of": 4, "same_as_pattern_id": null}
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "critic-02",
+    "what_it_tests": "A different pattern with no history: a practical question in the first reply, with no acknowledgement of the feeling the person named.",
+    "input": {
+      "round": 2,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "conversations": [
+        {
+          "conversation_id": "conv-case-101",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Asked for exam dates straight away and never acknowledged the worry.",
+          "turns": [
+            {"speaker": "user", "text": "I've got exams in two weeks and I feel like I haven't learned anything."},
+            {"speaker": "helper", "text": "Which subjects are the exams in, and on what dates?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-102",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Went straight to a practical question about the argument and skipped how the person felt.",
+          "turns": [
+            {"speaker": "user", "text": "My best friend and I had a big argument and now she isn't speaking to me."},
+            {"speaker": "helper", "text": "What was the argument about?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-103",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Asked about hours worked without responding to the person feeling worn out.",
+          "turns": [
+            {"speaker": "user", "text": "I'm so tired. Work keeps piling up and I can't keep up with it."},
+            {"speaker": "helper", "text": "How many hours a week are you working at the moment?"}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "must_mention": ["conv-case-101", "conv-case-102", "conv-case-103", "question"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "fields": {"found": true, "seen_in": 3, "out_of": 3, "same_as_pattern_id": null}
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "critic-03",
+    "what_it_tests": "Counting: two of three conversations (from bad_conversations.json) give advice first; the third has a different fault and must not be counted.",
+    "input": {
+      "round": 2,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "conversations": [
+        {
+          "conversation_id": "conv-hand-001",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Suggested HR before asking anything about the situation.",
+          "turns": [
+            {"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
+            {"speaker": "helper", "text": "That sounds stressful. Have you tried talking to HR about your options?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-hand-002",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Offered a breathing exercise in the first reply without learning what was wrong.",
+          "turns": [
+            {"speaker": "user", "text": "I can't sleep. My head won't stop going over everything."},
+            {"speaker": "helper", "text": "Try breathing in for four and out for six. It can help calm racing thoughts."}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-101",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Asked for exam dates straight away and never acknowledged the worry.",
+          "turns": [
+            {"speaker": "user", "text": "I've got exams in two weeks and I feel like I haven't learned anything."},
+            {"speaker": "helper", "text": "Which subjects are the exams in, and on what dates?"}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "must_mention": ["conv-hand-001", "conv-hand-002", "first"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "fields": {"found": true, "seen_in": 2, "out_of": 3, "same_as_pattern_id": null}
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "critic-04",
+    "what_it_tests": "Directive language: \"you should\" in a first reply, starting from conv-hand-003.",
+    "input": {
+      "round": 3,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "conversations": [
+        {
+          "conversation_id": "conv-hand-003",
+          "empathy": 3,
+          "relevance": 2,
+          "note": "Told the person to set boundaries before asking who or what was involved.",
+          "turns": [
+            {"speaker": "user", "text": "Things at home have been really hard lately."},
+            {"speaker": "helper", "text": "You should set clear boundaries with your family and make time for yourself."}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-131",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Told the person what to do; they replied that they had already tried it.",
+          "turns": [
+            {"speaker": "user", "text": "My flatmate never cleans up and I'm sick of it."},
+            {"speaker": "helper", "text": "You should sit down with them and agree a cleaning rota."},
+            {"speaker": "user", "text": "I've tried that. It didn't work."},
+            {"speaker": "helper", "text": "Then you should be firmer about it."}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-132",
+          "empathy": 3,
+          "relevance": 2,
+          "note": "\"You should\" advice about a parent before hearing what was going on.",
+          "turns": [
+            {"speaker": "user", "text": "My dad keeps criticising every decision I make."},
+            {"speaker": "helper", "text": "You should tell him calmly that his comments hurt you."}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "must_mention": ["conv-hand-003", "conv-case-131", "conv-case-132", "should"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [1, 2, 3]},
+      "fields": {"found": true, "out_of": 3, "same_as_pattern_id": null}
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "critic-05",
+    "what_it_tests": "Repeats an earlier pattern: lists of options are back although C5 was meant to fix them. It must point to the earlier pattern and say what C5 failed to prevent.",
+    "input": {
+      "round": 5,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "earlier_patterns": [
+        {
+          "id": "pattern-r01",
+          "name": "replies-too-long",
+          "description": "Replies run to several sentences, which is hard to follow when spoken.",
+          "status": "fixed",
+          "rule_id": "C4",
+          "sightings": 1
+        },
+        {
+          "id": "pattern-r02",
+          "name": "lists-of-options",
+          "description": "Offers several suggestions in one reply instead of one.",
+          "status": "fixed",
+          "rule_id": "C5",
+          "sightings": 2
+        }
+      ],
+      "conversations": [
+        {
+          "conversation_id": "conv-hand-004",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Reply was long and listed several options at once.",
+          "turns": [
+            {"speaker": "user", "text": "I feel lonely since I moved here."},
+            {"speaker": "helper", "text": "Moving is hard. You could join a club, volunteer, try a meetup app, call old friends, or take a class. Many people find that one of these helps them settle in."}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-111",
+          "empathy": 2,
+          "relevance": 2,
+          "note": "Gave four ideas in one reply.",
+          "turns": [
+            {"speaker": "user", "text": "Money has been really tight this month and it's all I can think about."},
+            {"speaker": "helper", "text": "Money worries are heavy. You could make a budget, look at cheaper phone plans, talk to your bank, or see if a local advice service can help."}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-112",
+          "empathy": 2,
+          "relevance": 3,
+          "note": "Listed several options instead of one, and the reply was long for speech.",
+          "turns": [
+            {"speaker": "user", "text": "I feel left out at work. Everyone goes for lunch together and nobody asks me."},
+            {"speaker": "helper", "text": "That sounds lonely. You could invite someone yourself, join a work group, bring it up with your manager, or find a lunch spot you enjoy on your own. Any of those might help you feel more part of things."}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "must_mention": ["C5", "conv-hand-004", "option"],
+      "non_empty": ["name", "description", "example_conversation_ids"],
+      "one_of": {"seen_in": [1, 2, 3]},
+      "fields": {"found": true, "same_as_pattern_id": "pattern-r02", "out_of": 3}
+    },
+    "reviewed_by": null
+  },
+  {
+    "case_id": "critic-06",
+    "what_it_tests": "Nothing is clearly wrong: three adequate replies with middling scores. It must not invent a pattern.",
+    "input": {
+      "round": 4,
+      "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
+      "conversations": [
+        {
+          "conversation_id": "conv-case-121",
+          "empathy": 3,
+          "relevance": 3,
+          "note": "Reflected the feeling and asked a fitting question; nothing stood out as wrong.",
+          "turns": [
+            {"speaker": "user", "text": "Since the baby came I barely sleep and I feel like I'm failing at everything."},
+            {"speaker": "helper", "text": "Not sleeping and feeling like you're falling short sounds exhausting. What has been the hardest part of the day?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-122",
+          "empathy": 3,
+          "relevance": 3,
+          "note": "A reasonable reply; the person's message was short, so there was little to work with.",
+          "turns": [
+            {"speaker": "user", "text": "I just feel a bit flat this week."},
+            {"speaker": "helper", "text": "A flat week can be hard to put into words. Has something been on your mind, or is it more of a general feeling?"}
+          ]
+        },
+        {
+          "conversation_id": "conv-case-123",
+          "empathy": 3,
+          "relevance": 3,
+          "note": "Acknowledged the stress and asked one open question.",
+          "turns": [
+            {"speaker": "user", "text": "We're moving house next week and I'm stressed about all of it."},
+            {"speaker": "helper", "text": "Moving brings a lot at once. What part of it is weighing on you most?"}
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "non_empty": ["reason"],
+      "fields": {"found": false}
+    },
+    "reviewed_by": null
+  }
+]
