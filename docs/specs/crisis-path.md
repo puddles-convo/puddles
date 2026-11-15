@@ -185,7 +185,7 @@ In `timings_ms`, `helper` is `-1` when the helper had not answered by the time t
 | No | Yes | The session file and the session record |
 | Yes | Yes | The session file and the session record |
 
-- **With `consent_for_training` false, nothing the person typed is written to disk or traced**: no session file, no record file, no MLflow span, trace or run, no log line that holds their words. The clients are used as they were given, without `TracedClient`.
+- **With `consent_for_training` false, nothing the person typed is written to disk or traced**: no session file, no record file, no MLflow span, trace or run, no log line that holds their words. The same holds for what the models returned and for the text of a model's error, because either can repeat the person's words: with consent off, neither is logged, traced or written. The clients are used as they were given, without `TracedClient`.
 - With `consent_for_training` true, each turn runs inside one MLflow span named `turn`, and the two clients are wrapped in `puddles.tracing.TracedClient`, named `helper` and `crisis_checker`. `run_turn` does not call `tracing.setup`; the caller does.
 - `end_session`: with consent, builds the record with `to_conversation_record` from the lines read back from the session file, writes it to `record_path(...)` as JSON, and returns it. Without consent it writes nothing and returns `None`. A session with no turns returns `None` and writes nothing. In both cases it then clears `session.turns` and `session.lines`.
 
