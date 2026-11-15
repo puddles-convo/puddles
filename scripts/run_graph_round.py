@@ -95,6 +95,23 @@ class FakeLLM:
             return schema.model_validate({
                 "action": "add", "summary": f"Ask first, for {pattern_id}.",
                 "rule_text": f"Before any suggestion, ask one open question about the situation ({pattern_id})."})
+        if schema.__name__ == "ToolboxOutput":  # PUDDLES_PROPOSER=toolbox: a card first, then rules
+            pattern_id = _pattern_id(user)
+            urls = re.findall(r"^- (https?://\S+)$", user.split("<source_urls>")[-1], re.M)
+            if re.search(r"^K\d+\. ", user, re.M) or not urls:
+                return schema.model_validate({
+                    "considered": [{"tool": "add_skill_card", "rejected_because": "a card exists"},
+                                   {"tool": "set_examples", "rejected_because": "scripted"}],
+                    "tool": "edit_rule", "rule_op": "add",
+                    "rule_text": f"Before any suggestion, ask one open question about the situation ({pattern_id}).",
+                    "hypothesis": "Scripted.", "prediction": "Scripted."})
+            return schema.model_validate({
+                "considered": [{"tool": "edit_rule", "rejected_because": "scripted"},
+                               {"tool": "set_examples", "rejected_because": "scripted"}],
+                "tool": "add_skill_card", "card_op": "add", "card_name": f"Ask first ({pattern_id})",
+                "when_to_use": "the person describes a problem", "when_not_to_use": "they ask a direct question",
+                "steps": ["Reflect what they said", "Ask one open question"], "source_urls": urls[:1],
+                "hypothesis": "Scripted.", "prediction": "Scripted."})
         raise TypeError(f"FakeLLM has no answer for {schema.__name__}")
 
     def structured_with_search(self, system: str, user: str, schema: type[T],
