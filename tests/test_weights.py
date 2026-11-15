@@ -158,7 +158,7 @@ def test_weight_settings_refuse_unknown_keys_and_wrong_types(tmp_path):
 # ---------- the whole step ----------
 
 
-def _setup(tmp_path, candidate_reply, *, noise_measured=True):
+def _setup(tmp_path, candidate_reply, *, noise_measured=True, needs_export=True):
     root = tmp_path / "root"
     log = DecisionLog(root)
     for n in (1, 2, 3):
@@ -172,8 +172,8 @@ def _setup(tmp_path, candidate_reply, *, noise_measured=True):
                               max_turns=3, seed=1)
 
     class Loader(FakeAdapterLoader):
-        def load(self, name, adapter_dir):
-            super().load(name, adapter_dir)
+        def load(self, name, sampler_path, adapter_dir):
+            super().load(name, sampler_path, adapter_dir)
             return FakeClient(lambda s, m: candidate_reply)
 
     in_use = {}
@@ -184,9 +184,9 @@ def _setup(tmp_path, candidate_reply, *, noise_measured=True):
 
     backend = FakeBackend()
     settings = WeightSettings(method="dpo", base_model="fake-base", prompts=4)
-    step = WeightStep(settings=settings, backend_factory=lambda: backend, loader=Loader(), gate_deps=deps, log=log,
-                      root=root, start_policy=POLICY, validation_ids=["fixture-0001", "fixture-0002"], noise=0.2,
-                      seed=7, use_helper=use_helper, out=lambda s: None)
+    step = WeightStep(settings=settings, backend_factory=lambda: backend, loader=Loader(needs_export), gate_deps=deps,
+                      log=log, root=root, start_policy=POLICY, validation_ids=["fixture-0001", "fixture-0002"],
+                      noise=0.2, seed=7, use_helper=use_helper, out=lambda s: None)
     return root, step, in_use, backend
 
 
@@ -283,3 +283,41 @@ def test_the_weight_step_is_metered(tmp_path):
     run = driver._metered(lambda r: seen.append(current()), Meter(tmp_path))
     run(3)
     assert seen[0][1] == "weights" and seen[0][0] is not None
+
+
+def test_served_from_tinker_nothing_is_exported_and_the_checkpoint_is_the_model(tmp_path):
+    long_reply = "It sounds like this has been weighing on you for a long while now. What feels heaviest today?"
+    root, step, in_use, _ = _setup(tmp_path, long_reply, needs_export=False)
+    event = step.after_round(3)
+    assert event.outcome == "kept", event.reason
+    assert event.adapter_dir is None and event.adapter_sha256 is None
+    assert event.served_as == event.sampler_path == "fake://adapter-01/sampler" == in_use["name"]
+    assert not (root / "adapters" / "adapter-01" / "peft").exists()
+    in_use.clear()
+    assert step.restore() == "adapter-01" and in_use["name"] == event.sampler_path
+
+
+def test_the_tinker_loader_asks_tinker_for_the_checkpoint(monkeypatch):
+    from puddles.eval.judge import TINKER_BASE_URL
+    from puddles.weights.serving import TinkerAdapterLoader
+
+    monkeypatch.setenv("TINKER_API_KEY", "k")
+    monkeypatch.setenv("PUDDLES_TINKER_EXTRA_BODY", '{"reasoning_effort": false}')
+    monkeypatch.delenv("PUDDLES_TINKER_BASE_URL", raising=False)
+    loader = TinkerAdapterLoader.from_env()
+    client = loader.load("x", "tinker://run-1/sampler_weights/adapter-01", None)
+    path = "tinker://run-1/sampler_weights/adapter-01"
+    assert (client.base_url, client.model, client.api_key) == (TINKER_BASE_URL, path, "k")
+    assert client.extra_body == {"reasoning_effort": False}
+    with pytest.raises(RuntimeError):
+        loader.load("x", None, None)
+    monkeypatch.delenv("TINKER_API_KEY")
+    with pytest.raises(ConfigError):
+        TinkerAdapterLoader.from_env()
+
+
+def test_serve_must_be_tinker_or_vllm(tmp_path):
+    p = tmp_path / "run.toml"
+    p.write_text("[weights]\nserve = \"modal\"\n")
+    with pytest.raises(ConfigError):
+        load_weight_settings(p)

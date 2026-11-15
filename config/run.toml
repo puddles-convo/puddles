@@ -71,6 +71,7 @@ conversations_per_round = 5
 
 [weights]
 method = "auto"            # auto: DPO first, GRPO after a DPO adapter is reverted
+serve = "tinker"           # tinker: Tinker serves each adapter (no server of ours); vllm: export, load on HELPER_URL
 # base_model =             # Tinker's name for the helper's model, e.g. "Qwen/Qwen3.5-9B"
 rank = 16
 max_training_runs = 3      # the weekend budget in the README

@@ -182,7 +182,7 @@ def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter
     """The between-rounds training step, with the adapter in force (after a restart) put back in front."""
     from puddles.config import DEFAULT_PATH
     from puddles.weights.backend import Backend, FakeBackend, TinkerBackend
-    from puddles.weights.serving import AdapterLoader, FakeAdapterLoader, VLLMAdapterLoader
+    from puddles.weights.serving import AdapterLoader, FakeAdapterLoader, TinkerAdapterLoader, VLLMAdapterLoader
     from puddles.weights.step import WeightStep, load_weight_settings
 
     settings = load_weight_settings(Path(os.environ.get("PUDDLES_CONFIG") or DEFAULT_PATH))
@@ -191,7 +191,7 @@ def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter
     factory: Callable[[], Backend]
     loader: AdapterLoader
     if args.fake:
-        factory, loader = FakeBackend, FakeAdapterLoader()
+        factory, loader = FakeBackend, FakeAdapterLoader(needs_export=settings.serve == "vllm")
     else:
         if not settings.base_model:
             raise ConfigError("weights.base_model is not set in the config file")
@@ -200,7 +200,10 @@ def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter
         def factory() -> Backend:
             return TinkerBackend(settings.base_model, settings.rank)
 
-        loader = VLLMAdapterLoader.from_env(helper_client)  # type: ignore[arg-type]
+        if settings.serve == "tinker":
+            loader = TinkerAdapterLoader.from_env()
+        else:
+            loader = VLLMAdapterLoader.from_env(helper_client)  # type: ignore[arg-type]
     base_price = meter.prices.models.get(model_name(helper_client))
 
     def use_helper(client: ChatClient, name: str) -> None:

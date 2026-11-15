@@ -33,6 +33,7 @@ class WeightSettings:
     """The [weights] table of config/run.toml."""
 
     method: Method = "auto"  # auto: DPO first, GRPO after a DPO adapter is reverted
+    serve: str = "tinker"  # tinker: the adapter is served by Tinker; vllm: exported and loaded on HELPER_URL
     base_model: str = ""  # Tinker's name for the helper's model, e.g. Qwen/Qwen3.5-9B
     rank: int = 16
     max_training_runs: int = 3
@@ -64,6 +65,8 @@ def load_weight_settings(path: Path) -> WeightSettings:
         setattr(s, key, value)
     if s.method not in ("dpo", "grpo", "auto"):
         raise ConfigError(f"{path}: weights.method must be dpo, grpo or auto")
+    if s.serve not in ("tinker", "vllm"):
+        raise ConfigError(f"{path}: weights.serve must be tinker or vllm")
     return s
 
 
@@ -117,13 +120,14 @@ class WeightStep:
     def restore(self) -> Optional[str]:
         """After a restart: put the adapter in force back in front of the helper."""
         kept = ledger.in_force(self.root)
-        if kept is None or kept.adapter_dir is None:
+        if kept is None:
             return None
         problems = ledger.check(self.root)
         if problems:
             raise ConfigError("adapter log check failed: " + "; ".join(problems))
         name = kept.served_as or kept.adapter_id
-        self.use_helper(self.loader.load(name, self.root / kept.adapter_dir), name)
+        folder = self.root / kept.adapter_dir if kept.adapter_dir else None
+        self.use_helper(self.loader.load(name, kept.sampler_path, folder), name)
         return kept.adapter_id
 
     def after_round(self, round_: int) -> Optional[AdapterEvent]:
@@ -180,11 +184,12 @@ class WeightStep:
                     dataset_sha256=ledger.sha256_file(dataset) if dataset.exists() else None,
                     reason="the judge did not separate the sampled replies enough to train on"))
             saved = backend.save(adapter_id)
-            peft = backend.export(saved, folder)
-            adapter_sha = ledger.sha256_dir(peft)
-            # Unique per adapter's bytes, so roots sharing one helper server never pick up each other's.
-            served = f"{adapter_id}-{adapter_sha[:12]}"
-            candidate = self.loader.load(served, peft)
+            peft = backend.export(saved, folder) if self.loader.needs_export else None
+            adapter_sha = ledger.sha256_dir(peft) if peft is not None else None
+            # Unique per adapter: its bytes on our server, its checkpoint path on Tinker. Roots sharing
+            # one helper server never pick up each other's adapters.
+            served = f"{adapter_id}-{adapter_sha[:12]}" if adapter_sha else saved.sampler_path
+            candidate = self.loader.load(served, saved.sampler_path, peft)
             current = rule_gate.current_scores(self.gate_deps, policy_path, self.validation_ids)
             verdict = gate_adapter(self.gate_deps, candidate, policy_path=policy_path, current_scores=current,
                                    validation_ids=self.validation_ids, noise=self.noise, round_=round_,
@@ -200,7 +205,8 @@ class WeightStep:
         event = AdapterEvent(
             **base, groups=groups_n, pairs=pairs_n, dataset_sha256=ledger.sha256_file(dataset),
             sampler_path=saved.sampler_path, state_path=saved.state_path,
-            adapter_dir=peft.relative_to(self.root).as_posix(), adapter_sha256=adapter_sha,
+            adapter_dir=peft.relative_to(self.root).as_posix() if peft is not None else None,
+            adapter_sha256=adapter_sha,
             served_as=served, metrics=metrics, outcome="kept" if verdict.kept else "reverted",
             failed_checks=verdict.failed,
             quality_before=verdict.before.quality if verdict.before else None,
