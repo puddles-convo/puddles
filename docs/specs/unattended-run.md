@@ -175,8 +175,29 @@ must reword that same rule again, and nothing counts how often that has failed.
   rule; reword or remove it instead of adding" does not apply when that rule is parked, so the
   proposer always has a legal move.
 - **5.5 Limits, stated.** The critic can describe an old weakness under a new name; then 5.3 does not
-  fire, and 5.4 still keeps the parked rule from being edited. A new rule that restates a rejected
-  rewording in other words is not detected.
+  fire, and 5.4 still keeps the parked rule from being edited. (A new rule that restates a rejected
+  rewording was a limit here until 5.7.)
+- **5.6 A clearly worse result is remembered for the whole run.** Added at 05:45, after round 8's keep
+  emptied the list while C9's stricter wording had been rejected twice at about 0.65 below the policy
+  in force. A failed try is *clearly worse* when both qualities are logged, `scores.noise` is logged,
+  and `scores.after.quality` is lower than `scores.before.quality` by more than `scores.noise`. The
+  rule and the pattern of a clearly worse failed try are parked on every later policy version of the
+  run as well, whatever is kept in between. Everything else in 5.2 stays per version.
+- **5.7 The same idea in other words is not tried again.** With the setting on, and only when there
+  is at least one *rejected edit to compare with*, the proposer's answer gets one more check after
+  its coded checks pass. The rejected edits to compare with are: every failed try on the policy in
+  force, and every clearly worse failed try of the run (5.6). The check is one structured model call
+  on the proposer's own model: it is given the proposed edit (action, rule, text) and each rejected
+  edit (ID, action, rule, text, measured result), and answers whether the proposed edit would change
+  the helper's behaviour in the same way as one of them, and which. The answer's schema has
+  `same_as_edit_id` (an ID from the list, or null) and `reason`.
+  - A non-null `same_as_edit_id` that is in the list fails the proposer's check with a reason naming
+    that edit and its result and asking for a different idea. The usual single retry applies.
+  - Anything else lets the edit through: null, an ID not in the list, an invalid answer, or a failed
+    call (`AgentFailed` or a provider error). The gatekeeper remains the guard; this check only saves
+    a round.
+  - The call is made inside the proposer's step, so its tokens are counted with the proposer's.
+  - The system prompt for this call is a new file beside the other agents' prompts.
 
 ## Knowingly left out tonight
 
