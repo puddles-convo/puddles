@@ -25,7 +25,10 @@ The critic, researcher and proposer already follow both rules: each has a `rende
 - [ ] Every attempt counts: a retry after a failed check, and a schema fallback, each add their own tokens.
 - [ ] A `Usage` tally keyed by agent name: tokens in and out, calls, estimated calls, and for the researcher the number of Exa searches.
 - [ ] A prices table in the run's config file: dollars per million input and output tokens for each model, and dollars per Exa search. **Whoever holds each account fills it in from the provider's price page.** No price is assumed in code; a model with no price stops the run.
-- [ ] **Every model call and every Exa search writes to `<root>/log/usage.jsonl` twice.** Before the request goes out: a `sent` line with a call ID, the round, the agent, the model, and the most the call can cost (the prompt's estimated tokens plus the output limit). When the answer arrives: a `done` line with the same call ID and the real tokens and cost. Spend is the sum of the `done` lines, plus the `sent` estimate for any call that has no `done` line, because a request cut off by a crash may still be billed.
+- [ ] **Every model call has an output limit.** `loop.llm` already sends `max_tokens`. `puddles.llm.OpenAILLM` sends none, in `_parse` or in `structured_with_search`: add one, set per agent in the run's config. Without a limit the most a call can cost is unknown.
+- [ ] **Every model call writes to `<root>/log/usage.jsonl` twice.** Before the request goes out: a `sent` line with a call ID, the round, the agent, the model, and the most the call can cost (the prompt's estimated tokens plus its output limit, at the model's prices). When the answer arrives: a `done` line with the same call ID and the real tokens and cost.
+- [ ] **Every Exa request writes the same two lines,** with the configured price per search as the cost on both. An Exa line has no model and no tokens. `puddles.exa.search` tries a failed request a second time; each try is its own request with its own two lines.
+- [ ] Spend is the sum of the `done` lines, plus the `sent` figure for any call that has no `done` line, because a request cut off by a crash may still be billed.
 - [ ] When an agent fails twice, a `failed` line names the round and the agent. Stage 6 reads this file after a restart to know what has been spent and which rounds failed.
 - [ ] At the end of a round the graph logs the totals to MLflow (`tokens_in.<agent>`, `tokens_out.<agent>`, `cost_usd`).
 
@@ -62,6 +65,7 @@ All offline.
 8. A model with no entry in the prices table stops the run before the first call.
 9. The `done` lines for a round in `<root>/log/usage.jsonl` add up to the spans.
 10. A batch killed in the middle of `converse` leaves a `done` line for every call that had finished. A `sent` line with no `done` line is counted at its estimate.
+11. A request made through `OpenAILLM` carries the configured output limit. An Exa search leaves a `sent` and a `done` line with the per-search price and no token fields.
 
 ## Unknowns to settle with one real call each
 
