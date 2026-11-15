@@ -1,0 +1,346 @@
+{
+  "frames": [
+    "/Users/moamen/Documents/puddles/figures/fig2-preview-0.5.png",
+    "/Users/moamen/Documents/puddles/figures/fig2-preview-4.png",
+    "/Users/moamen/Documents/puddles/figures/fig2-preview-16.png"
+  ],
+  "script_disabled_svg": true,
+  "nested_clocks_verified": true,
+  "fixed_note_bank_coordinates": true,
+  "bank_fonts": [
+    {
+      "text": "Situation",
+      "box": [
+        399.31658935546875,
+        1125.1368408203125,
+        73.79745483398438,
+        21.1942138671875
+      ],
+      "font": "34px"
+    },
+    {
+      "text": "People",
+      "box": [
+        506.4893493652344,
+        1125.1368408203125,
+        59.047210693359375,
+        21.1942138671875
+      ],
+      "font": "34px"
+    },
+    {
+      "text": "What helps",
+      "box": [
+        598.9119262695312,
+        1125.1368408203125,
+        94.862548828125,
+        21.1942138671875
+      ],
+      "font": "34px"
+    },
+    {
+      "text": "Goals",
+      "box": [
+        399.31658935546875,
+        1169.0059814453125,
+        49.537811279296875,
+        21.1942138671875
+      ],
+      "font": "34px"
+    },
+    {
+      "text": "Follow-up",
+      "box": [
+        482.2297058105469,
+        1169.0059814453125,
+        82.20498657226562,
+        21.1942138671875
+      ],
+      "font": "34px"
+    },
+    {
+      "text": "Preferences",
+      "box": [
+        597.81005859375,
+        1169.0059814453125,
+        102.2423095703125,
+        21.1942138671875
+      ],
+      "font": "34px"
+    }
+  ],
+  "icon_phase_samples": [
+    0.1,
+    0.8,
+    1.9,
+    2.4
+  ],
+  "semantic_icons_changed": {
+    "mic": true,
+    "listener": true,
+    "keyword": true,
+    "checker": true,
+    "helper": true,
+    "release": true,
+    "speaker": true,
+    "playback": true,
+    "no_cloud": true,
+    "offline": true,
+    "memory": true,
+    "session_end": true,
+    "note_taker": true,
+    "apply": true
+  },
+  "paths_sampled": 16,
+  "wire_crossings": [],
+  "shared_segments": [],
+  "block_intrusions": [],
+  "all_links_dashed": true,
+  "titles": [
+    {
+      "text": "Puddles \u00b7 listening, responding, remembering",
+      "x": 51.5710334777832,
+      "y": 65.86084747314453,
+      "width": 413.0341491699219,
+      "height": 21.28083038330078,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Microphone",
+      "x": 101.24293518066406,
+      "y": 232.6817169189453,
+      "width": 107.45536804199219,
+      "height": 21.194229125976562,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Listener / STT",
+      "x": 101.24293518066406,
+      "y": 444.6240234375,
+      "width": 125.39083862304688,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Keyword check",
+      "x": 413.57891845703125,
+      "y": 232.6817169189453,
+      "width": 139.12249755859375,
+      "height": 21.280838012695312,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Crisis checker",
+      "x": 413.57891845703125,
+      "y": 444.6240234375,
+      "width": 129.90289306640625,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Helper",
+      "x": 413.57891845703125,
+      "y": 658.741455078125,
+      "width": 59.25469970703125,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Release \u00b7 code",
+      "x": 728.6849975585938,
+      "y": 407.47833251953125,
+      "width": 132.8076171875,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Speaker",
+      "x": 1060.560546875,
+      "y": 444.6240234375,
+      "width": 74.0306396484375,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Robot playback",
+      "x": 1372.8966064453125,
+      "y": 444.6240234375,
+      "width": 141.1966552734375,
+      "height": 21.28082275390625,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "No cloud",
+      "x": 1060.560546875,
+      "y": 723.4954223632812,
+      "width": 81.1124267578125,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Offline audio",
+      "x": 1372.8966064453125,
+      "y": 723.4954223632812,
+      "width": 115.8814697265625,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Private memory \u00b7 fixed live-note bank",
+      "x": 455.6344299316406,
+      "y": 1005.7132568359375,
+      "width": 336.1811218261719,
+      "height": 21.2808837890625,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Session end",
+      "x": 101.24293518066406,
+      "y": 1384.5322265625,
+      "width": 111.70542907714844,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Note-taker",
+      "x": 413.57891845703125,
+      "y": 1384.5322265625,
+      "width": 94.02102661132812,
+      "height": 21.1942138671875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Apply actions \u00b7 code",
+      "x": 753.764892578125,
+      "y": 1384.5322265625,
+      "width": 185.447265625,
+      "height": 21.28076171875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Private means private",
+      "x": 1094.1951904296875,
+      "y": 1011.0676879882812,
+      "width": 196.0587158203125,
+      "height": 21.19415283203125,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "Integration boundary",
+      "x": 1087.299560546875,
+      "y": 1384.5322265625,
+      "width": 189.6324462890625,
+      "height": 21.28076171875,
+      "font": "34px",
+      "projected": 18.96325636942675
+    },
+    {
+      "text": "One turn is parallel \u00b7 memory changes only after the session",
+      "x": 51.5710334777832,
+      "y": 1621.96337890625,
+      "width": 544.83251953125,
+      "height": 21.2808837890625,
+      "font": "34px",
+      "projected": 18.96325636942675
+    }
+  ],
+  "truncated_titles": [],
+  "text_box_overlaps": [],
+  "icons_left_aligned": [
+    {
+      "id": "mic",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "listener",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "keyword",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "checker",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "helper",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "release",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "speaker",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "playback",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "no_cloud",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "offline",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "memory",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "session_end",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "note_taker",
+      "left": true,
+      "aligned": true
+    },
+    {
+      "id": "apply",
+      "left": true,
+      "aligned": true
+    }
+  ],
+  "script_disabled_normal_playback": true,
+  "player_embedded_bytes_equal": true,
+  "player_initial_motion": true,
+  "replay_bytes_equal": true,
+  "player_post_replay_motion": true,
+  "svg_sha256": "35a44c3e6b01abc25189f4f0dbe3d8e43d13dfe798d39ecc54302c2a2bc6447d",
+  "prior_figure_files_unchanged": true,
+  "prior_files_checked": 150,
+  "passed": true
+}

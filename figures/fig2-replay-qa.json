@@ -1,0 +1,6 @@
+{
+  "early_vs_replay_mean_difference": 3.104364326375712,
+  "early_vs_late_mean_difference": 10.535104364326376,
+  "replay_resets_phase": true,
+  "method": "Keyword scanner icon crop, initial 0.5s vs late 1.8s vs replay 0.5s; identical clipping; unmodified exported SVG image."
+}

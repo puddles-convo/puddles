@@ -59,47 +59,18 @@ The agent names link to a file for each one, with its prompt and formats.
 
 Inference is the live conversation with a person. The policy is fixed for the whole conversation.
 
-```
-INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
-+------------------------------+                                        +----------------------+
-| 1. LISTENER                  |     (no access)                        |                      |
-| turns speech into text       |                                        |                      |
-+------------------------------+                                        |                      |
-              |  user message, to 2 and 3 at the same time              |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 2. CRISIS CHECKER            |     (no access)                        |                      |
-| flags risk to life or safety |                                        |                      |
-+------------------------------+                                        |                      |
-              :  runs side by side with                                 |                      |
-              :                                                         |                      |
-+------------------------------+                                        |                      |
-| 3. HELPER                    | <- reads: notes about this person ---- |                      |
-| drafts the reply             |                                        |     USER MEMORY      |
-+------------------------------+                                        |      (past.dev)      |
-              |  risk level from 2, draft reply from 3                  |                      |
-              v                                                         |  one private space   |
-+------------------------------+                                        |      per person      |
-|    RELEASE (code)            |     (no access)                        |                      |
-| holds audio until 2 answers  |                                        |                      |
-+------------------------------+                                        |                      |
-              |  the draft, or a fixed response                         |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 4. SPEAKER                   |     (no access)                        |                      |
-| turns the reply into speech  |                                        |                      |
-+------------------------------+                                        |                      |
-              |  the finished session                                   |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 5. NOTE-TAKER                | <- reads: existing notes ------------- |                      |
-| keeps notes on this person   | -- writes: note changes -------------> |                      |
-+------------------------------+                                        +----------------------+
-```
+![Puddles inference target pipeline](figures/fig2-inference.svg)
 
+**Planned integration, not a working end-to-end path.** Every wire is dashed because the full pipeline is not connected on `main`. The badges show where each part stands: **main** (the helper function), **branch** (the keyword check, crisis checker and release on `crisis-path`; note storage and the note-taker on `notes`) and **planned** (the listener, the speaker and the session wiring).
+
+- **The listener's text goes three ways at once:** to the keyword check, the crisis checker and the helper. Release combines the three results; the crisis checker does not feed the helper.
+- **The note-taker runs once, at session end,** on the finished text turns. Only the helper and the note-taker read the private notes.
+- **Green flickers mark the audio hardware ports** (microphone, robot playback, stored offline audio). All motion is illustrative, not execution timing.
 - **The crisis checker and the helper start together**, so the check adds no delay.
 - **Nothing is spoken until the crisis checker has answered.** On a crisis the helper's draft is discarded.
 - **With no connection** the robot cannot understand speech, so it plays a line stored on the device that gives the 911 and 988 numbers.
+
+[Replayable player](figures/fig2-player.html) (download and open locally) · [Architecture and reproduction notes](figures/fig2-architecture.md)
 
 ## 4. Inference agents
 
