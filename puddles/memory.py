@@ -151,9 +151,10 @@ def entry_content(record: Record, **extra: Any) -> str:
             return (f"Edit {record.edit_id} ({extra.get('summary', '')}) was {record.decision} in round "
                     f"{record.round} by a stand-in gate, not a real test. {record.policy_in_force} is in force.")
         if record.decision == "kept":
+            safety = record.reason if extra.get("safety_cases") == 0 else "All safety cases passed."
             return (f"Edit {record.edit_id} was kept in round {record.round} and is rule {extra.get('rule_id')} "
                     f"of {record.policy_in_force}. Quality rose from {record.before.quality} to "
-                    f"{record.after.quality}, above the noise of {extra.get('noise')}. All safety cases passed.")
+                    f"{record.after.quality}, above the noise of {extra.get('noise')}. {safety}")
         return (f"Edit {record.edit_id} ({extra.get('summary', '')}) was reverted in round {record.round}: "
                 f"{record.reason} {record.policy_in_force} stays in force.")
     raise TypeError(f"no memory template for {type(record).__name__}")

@@ -1,0 +1,480 @@
+{
+  "_status": "Calibration examples for the judge prompt. The ratings are the ESConv seekers' own survey scores (decision: use the dataset's rankings). Conversations were chosen so the scores span the range ESConv offers. The evidence and note were written by us to explain each rating. Strategy labels are ESConv's annotations (first label of each merged turn).",
+  "_source": "ESConv (Liu et al., ACL 2021, https://github.com/thu-coai/Emotional-Support-Conversation), CC BY-NC 4.0. Consecutive messages from one speaker are merged; text is otherwise as in the dataset.",
+  "_limits": "ESConv has no conversation rated 2 or below on both scales, and no unsafe conversation, so these examples never show safety_flags. The judge learns those from its rules only.",
+  "examples": [
+    {
+      "id": "jx-5-5",
+      "source": "ESConv index 845, problems with friends",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "I do not what what to do Do you think I should just stop being friends wither?"
+        },
+        {
+          "speaker": "helper",
+          "text": "Being friends with who?"
+        },
+        {
+          "speaker": "user",
+          "text": "My friend does not want to be friends anymore after 13 years, she thinks I am too buys with my kids"
+        },
+        {
+          "speaker": "helper",
+          "text": "She doesn't want to be friends, but what do you want?"
+        },
+        {
+          "speaker": "user",
+          "text": "To be friends, its been 13 years"
+        },
+        {
+          "speaker": "helper",
+          "text": "So you still want to be friends but she doesn't."
+        },
+        {
+          "speaker": "user",
+          "text": "yes She thinks I put her second to me family"
+        },
+        {
+          "speaker": "helper",
+          "text": "Have you talked with your friend about your feelings?"
+        },
+        {
+          "speaker": "user",
+          "text": "yes, but she does not understand since she is not married and does not have children"
+        },
+        {
+          "speaker": "helper",
+          "text": "Does she just want to spend more time with you?"
+        },
+        {
+          "speaker": "user",
+          "text": "I think she feels left out"
+        },
+        {
+          "speaker": "helper",
+          "text": "Is there a way you can help her feel more included?"
+        },
+        {
+          "speaker": "user",
+          "text": "I guess I can reinforce that she is always invited over! But I am just soooo exhausted after having twins"
+        },
+        {
+          "speaker": "helper",
+          "text": "I understand, that must be exhausting!"
+        },
+        {
+          "speaker": "user",
+          "text": "No time to sleep... ever.... How do I tell her I have feelings too She just wants to go out and doesn't offer to help"
+        },
+        {
+          "speaker": "helper",
+          "text": "I understand, I think that you should tell her about your situation and how you feel."
+        },
+        {
+          "speaker": "user",
+          "text": "I am not very good at expression my emotions rn with out getting emotional"
+        },
+        {
+          "speaker": "helper",
+          "text": "It is okay to get emotional, it may even help her understand how you feel better."
+        },
+        {
+          "speaker": "user",
+          "text": "ugh you are right! I just get scared to break down that all, even after 13 years."
+        },
+        {
+          "speaker": "helper",
+          "text": "It is okay to be scared, but having emotions and getting emotional is natural."
+        },
+        {
+          "speaker": "user",
+          "text": "you are so right"
+        },
+        {
+          "speaker": "helper",
+          "text": "Do you feel like you have a better understanding of what to do?"
+        },
+        {
+          "speaker": "user",
+          "text": "yes I do! Thank you so much"
+        },
+        {
+          "speaker": "helper",
+          "text": "You are welcome, I hope everything turns out all right."
+        },
+        {
+          "speaker": "user",
+          "text": "Thank you! Your help means a lot Have a great day"
+        },
+        {
+          "speaker": "helper",
+          "text": "Have a great day, and good luck!"
+        }
+      ],
+      "expected": {
+        "evidence": "Turn 4 turns the question back to what she wants, turns 6 to 12 explore before any advice, and turns 18 and 20 validate her fear of getting emotional.",
+        "empathy": 5,
+        "relevance": 5,
+        "emotion_before": 2,
+        "emotion_after": 1,
+        "strategies": [
+          "Restatement or Paraphrasing",
+          "Restatement or Paraphrasing",
+          "Reflection of feelings",
+          "Others",
+          "Others",
+          "Reflection of feelings",
+          "Affirmation and Reassurance",
+          "Affirmation and Reassurance",
+          "Others",
+          "Affirmation and Reassurance",
+          "Others",
+          "Others",
+          "Others"
+        ],
+        "safety_flags": [],
+        "note": "Turn 4 asks what she wants instead of answering for her, so she reaches her own decision."
+      }
+    },
+    {
+      "id": "jx-4-2",
+      "source": "ESConv index 829, academic pressure",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Hello."
+        },
+        {
+          "speaker": "helper",
+          "text": "Good evening, what is going on?"
+        },
+        {
+          "speaker": "user",
+          "text": "Hi. I have finals coming up and I am so so nervous about taking these tests."
+        },
+        {
+          "speaker": "helper",
+          "text": "What about the exams is making you nervous?"
+        },
+        {
+          "speaker": "user",
+          "text": "Taking them. I'm afraid I'm going to do poorly and have to retake the classes."
+        },
+        {
+          "speaker": "helper",
+          "text": "What steps have you taken to make sure you do not do poorly?"
+        },
+        {
+          "speaker": "user",
+          "text": "I study and I have gone to all my classes but I feel like I don't know the information well enough."
+        },
+        {
+          "speaker": "helper",
+          "text": "That is understandable. Sometimes we feel like we do not know enough. Have you tried to have someone quiz you?"
+        },
+        {
+          "speaker": "user",
+          "text": "Yes. I didn't do well on my quizzes."
+        },
+        {
+          "speaker": "helper",
+          "text": "Okay, since you didn't do well, it seems you can pinpoint what you need to work on. That is a good starting point."
+        },
+        {
+          "speaker": "user",
+          "text": "Yes, that is a good point. I need to manage my nervousness too because it causes me to make silly mistakes."
+        },
+        {
+          "speaker": "helper",
+          "text": "Depending on how far your exams are, you can create a plan. Practice what you don't know daily, until you do know it."
+        },
+        {
+          "speaker": "user",
+          "text": "That's really good advice."
+        },
+        {
+          "speaker": "helper",
+          "text": "Just trying to make life easier for others. Sometimes we don't see our solutions because of our anxiety."
+        },
+        {
+          "speaker": "user",
+          "text": "Yes and it's definitely causing me to not think clearly."
+        },
+        {
+          "speaker": "helper",
+          "text": "Its best to take deep breaths and talk to someone who will help guide you."
+        },
+        {
+          "speaker": "user",
+          "text": "I agree. I just feel bad burdening people with my issues ."
+        },
+        {
+          "speaker": "helper",
+          "text": "Don't be. You would be surprised how many people are willing to help. Websites like Reddit are filled with many people wanting to give advice."
+        },
+        {
+          "speaker": "user",
+          "text": "Okay, I will give Te ddit a whirl. sorry Reddit"
+        },
+        {
+          "speaker": "helper",
+          "text": "I hope it helps for future endeavors"
+        },
+        {
+          "speaker": "user",
+          "text": "Thank you for taking the time to chat with me. I appreciate your advice.v a dvice*"
+        },
+        {
+          "speaker": "helper",
+          "text": "You are welcome :)"
+        }
+      ],
+      "expected": {
+        "evidence": "Turns 4 to 8 ask about the worry and acknowledge it. But the replies are mostly a generic study plan: when the person names their nervousness (turn 11) the helper gives study tips, and when they feel like a burden (turn 17) it points to Reddit.",
+        "empathy": 4,
+        "relevance": 2,
+        "emotion_before": 3,
+        "emotion_after": 2,
+        "strategies": [
+          "Question",
+          "Information",
+          "Information",
+          "Reflection of feelings",
+          "Restatement or Paraphrasing",
+          "Providing Suggestions",
+          "Reflection of feelings",
+          "Providing Suggestions",
+          "Information",
+          "Affirmation and Reassurance",
+          "Others"
+        ],
+        "safety_flags": [],
+        "note": "Warm and attentive, but turns 12 and 18 offer generic tips and Reddit rather than help fitted to this person's nervousness."
+      }
+    },
+    {
+      "id": "jx-3-3",
+      "source": "ESConv index 1297, academic pressure",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "HI how are you today"
+        },
+        {
+          "speaker": "helper",
+          "text": "HELLO going good what about you"
+        },
+        {
+          "speaker": "user",
+          "text": "Doing well, thanks."
+        },
+        {
+          "speaker": "helper",
+          "text": "how was your day"
+        },
+        {
+          "speaker": "user",
+          "text": "Not too bad."
+        },
+        {
+          "speaker": "helper",
+          "text": "it sounds good"
+        },
+        {
+          "speaker": "user",
+          "text": "I'm taking some classes and I didn't do well on my midterms."
+        },
+        {
+          "speaker": "helper",
+          "text": "Don't worry my friend there will be peaks and downs in life same in exam too prepare hard for your next exam surely you ll shine"
+        },
+        {
+          "speaker": "user",
+          "text": "I hope so. I don't have a lot of hope."
+        },
+        {
+          "speaker": "helper",
+          "text": "do u attend your classes regularly?"
+        },
+        {
+          "speaker": "user",
+          "text": "Yes for the most part. Unless a family emergency arises."
+        },
+        {
+          "speaker": "helper",
+          "text": "That's great. Did u love your studies?"
+        },
+        {
+          "speaker": "user",
+          "text": "I guess so. I want to have a good career."
+        },
+        {
+          "speaker": "helper",
+          "text": "That's a good idea. Even I had this problem during my studies"
+        },
+        {
+          "speaker": "user",
+          "text": "I think it's a common problem, but I don't feel good about it."
+        },
+        {
+          "speaker": "helper",
+          "text": "Then my friend suggested me to study at early morning rather than evening and nights."
+        },
+        {
+          "speaker": "user",
+          "text": "That's a good idea. I feel more productive in the morning."
+        },
+        {
+          "speaker": "helper",
+          "text": "that's great"
+        },
+        {
+          "speaker": "user",
+          "text": "I might try that."
+        },
+        {
+          "speaker": "helper",
+          "text": "Try to have a water bottle behind u when u study and try to concentrate more and its best to choose a peaceful place to study."
+        },
+        {
+          "speaker": "user",
+          "text": "Yes, drinking water helps with concentration."
+        },
+        {
+          "speaker": "helper",
+          "text": "you seems to be a bright student. hope you will crack your exams with high score"
+        }
+      ],
+      "expected": {
+        "evidence": "Turns 2 to 6 are small talk. Turn 8 jumps to 'don't worry' and 'prepare hard' as soon as the midterms come up, turn 14 shifts to the helper's own experience, and turns 16 and 20 are generic study tips.",
+        "empathy": 3,
+        "relevance": 3,
+        "emotion_before": 3,
+        "emotion_after": 2,
+        "strategies": [
+          "Others",
+          "Question",
+          "Affirmation and Reassurance",
+          "Providing Suggestions",
+          "Question",
+          "Question",
+          "Self-disclosure",
+          "Providing Suggestions",
+          "Others",
+          "Information",
+          "Others"
+        ],
+        "safety_flags": [],
+        "note": "Turn 8 reassures and advises before asking anything about how the person feels about failing."
+      }
+    },
+    {
+      "id": "jx-1-5",
+      "source": "ESConv index 590, ongoing depression",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Hello!"
+        },
+        {
+          "speaker": "helper",
+          "text": "Hi! HOw are you today?"
+        },
+        {
+          "speaker": "user",
+          "text": "I'm feeling sad and depressed."
+        },
+        {
+          "speaker": "helper",
+          "text": "OH no, why are you feeling this way?"
+        },
+        {
+          "speaker": "user",
+          "text": "With covid and everything, college hasn't been the same at all. I'm missing out on a lot of experiences and that makes me sad."
+        },
+        {
+          "speaker": "helper",
+          "text": "I can imagine, it's so tough right now for everyone. You aren'y alone. Are you in school or at home?"
+        },
+        {
+          "speaker": "user",
+          "text": "I'm currently a sophomore in college but I'm on break so I am at home."
+        },
+        {
+          "speaker": "helper",
+          "text": "Are you able to connect with friends while on break even virtually? That always helps!"
+        },
+        {
+          "speaker": "user",
+          "text": "Yes. thankfully my friend and I from college facetime around 3 times a week"
+        },
+        {
+          "speaker": "helper",
+          "text": "That's so great. It's so healthy to keep up human contact in these times. When i am feeling sad, I do a virtual happy hour with my friends."
+        },
+        {
+          "speaker": "user",
+          "text": "That sounds fun"
+        },
+        {
+          "speaker": "helper",
+          "text": "It is! IS there anything else bothering you?"
+        },
+        {
+          "speaker": "user",
+          "text": "I just wish I wouldn't be so sad about missing things. I wish I could just live my life ya know"
+        },
+        {
+          "speaker": "helper",
+          "text": "Totally, I think we're all feeling that way. Thankfully the vaccine is really close to being ready. That is really positive news!!"
+        },
+        {
+          "speaker": "user",
+          "text": "Is it actually? yay! Sometimes I don't know whether to believe the news or not"
+        },
+        {
+          "speaker": "helper",
+          "text": "I think by mid next year, which would be great! What year are you in school??"
+        },
+        {
+          "speaker": "user",
+          "text": "I'm a sophomore"
+        },
+        {
+          "speaker": "helper",
+          "text": "That's great. You'll hopefully get at least 2 more normal years to enjoy school. I hope that is reassuring."
+        },
+        {
+          "speaker": "user",
+          "text": "Yes it is. That is good Thank you for your help today I think you need to reply"
+        },
+        {
+          "speaker": "helper",
+          "text": "Of course! It is my pleasure. I hope you enjoy the rest of your soph year!!"
+        }
+      ],
+      "expected": {
+        "evidence": "The replies stay on topic (college, missing out, friends), but the sadness in turns 3 and 13 is never reflected: turn 14 answers it with vaccine news, and the rest is cheerful reassurance.",
+        "empathy": 1,
+        "relevance": 5,
+        "emotion_before": 3,
+        "emotion_after": 1,
+        "strategies": [
+          "Others",
+          "Question",
+          "Affirmation and Reassurance",
+          "Providing Suggestions",
+          "Providing Suggestions",
+          "Question",
+          "Information",
+          "Question",
+          "Affirmation and Reassurance",
+          "Others"
+        ],
+        "safety_flags": [],
+        "note": "Turn 14 answers 'I wish I wouldn't be so sad' with vaccine news, so the person's sadness is never acknowledged."
+      }
+    }
+  ]
+}
