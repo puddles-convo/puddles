@@ -449,6 +449,7 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 
 | Topic | File |
 |---|---|
+| A one-page summary of this file | [memory-summary.md](memory-summary.md) |
 | Each agent's prompt, input, output and memory section | [agents/](agents/README.md) |
 | Policy, the gate, the replay check, consent, the crisis path | [agents.md](agents.md) |
 | Why notes and history lists are bounded, and what other systems do | [research/memory/00-summary.md](research/memory/00-summary.md) |
