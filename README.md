@@ -161,7 +161,7 @@ Which model plays each agent. These are starting choices and none has been bench
 |---|---|---|
 | [1. Simulated user](docs/agents/t1-simulated-user.md) | Qwen3.6-35B-A3B. A different model from the helper, so the helper is not talking to itself | Tinker |
 | [2. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, thinking mode off | Modal |
-| [3. Judge](docs/agents/t3-judge.md) | The strongest OpenAI model the credits allow, version pinned, temperature 0 | OpenAI API |
+| [3. Judge](docs/agents/t3-judge.md) | Three pinned OpenAI judges, each rating and then re-checking its own rating, and Astra (the strongest pinned OpenAI model), who writes the final score. Temperature 0 | OpenAI API |
 | [4. Critic](docs/agents/t4-critic.md) | The same OpenAI model as the judge | OpenAI API |
 | [5. Researcher](docs/agents/t5-researcher.md) | The same OpenAI model, with Exa search as its one tool | OpenAI API and Exa |
 | [6. Proposer](docs/agents/t6-proposer.md) | The same OpenAI model as the judge | OpenAI API |

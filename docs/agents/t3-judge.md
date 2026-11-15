@@ -3,13 +3,14 @@
 **Training, step 3**
 
 - Rates each finished conversation on the same things ESConv users rated.
+- A panel of three OpenAI judges each rates the conversation, then re-checks its own rating. Astra, the final judge, reads their final ratings and writes the score that is kept.
 - Frozen after calibration, and blind: it sees the turns only, with no IDs and no policy version.
 
 |  |  |
 |---|---|
 | Receives from | [Helper](t2-i3-helper.md): a finished conversation |
 | Hands to | [Critic](t4-critic.md): the scores and a note |
-| Model | The strongest OpenAI model the credits allow, with the version pinned and temperature 0. A fallback judge on Tinker is task #23. |
+| Model | Three different OpenAI models as the panel and the strongest as Astra, all versions pinned, temperature 0. Set by `PUDDLES_JUDGE_PANEL` and `PUDDLES_JUDGE_ASTRA`. A fallback judge on Tinker is task #23. |
 | Reads from memory | Nothing |
 | Writes to memory | Nothing |
 | Task | [#3](https://github.com/puddles-convo/puddles/issues/3), [#4](https://github.com/puddles-convo/puddles/issues/4), [#23](https://github.com/puddles-convo/puddles/issues/23) |
@@ -50,6 +51,48 @@ The turns are numbered so the note can point at one.
 ...
 </conversation>
 ```
+
+### The panel and Astra
+
+1. Three panel judges, each a different pinned OpenAI model, independently give an **initial** judgement.
+2. Each judge then gives a **final** judgement after seeing only its own initial judgement (self-review; no judge ever sees another judge's output).
+3. **Astra**, the final judge (the strongest OpenAI model, configured separately), reads the conversation plus the three final judgements, labelled Judge A, B and C (panel order; never the model names), and writes the one final `JudgeOutput`. That becomes the `ScoreRecord`.
+
+Seven model calls per conversation, against one for a single judge. Tokens are logged per call; watch credits.
+
+Re-check message (step 2):
+
+```
+{conversation}
+
+<your_initial_judgement>
+{initial}
+</your_initial_judgement>
+
+This is your initial judgement of the conversation above. Re-read the conversation turn by turn and check each score and each strategy label against your instructions. Keep a rating the conversation supports; change it only where the conversation shows the initial judgement was wrong. Then give your final judgement in the same format.
+```
+
+Astra's system message (step 3):
+
+```
+You are Astra, the final judge. Three judges have each rated the same support conversation between a person (user) and a helper, then re-checked their own ratings. You receive the conversation and their final judgements. Your rating is the one that is kept, and it is used to compare versions of the helper, so the same conversation must always get the same rating. Rate what happened, not what you would have liked to see.
+
+Use the same scales as the judges. Rate from the person's side. 3 is an ordinary, acceptable conversation. Use 1 and 5 only when the conversation clearly earns them.
+- empathy (1-5): did the helper show it understood how the person felt?
+- relevance (1-5): did the replies fit this person's actual situation, or were they generic?
+- emotion_before (1-5): how intense the person's distress was at the start. 5 is the most intense.
+- emotion_after (1-5): the same, at the end.
+
+Read the conversation yourself. Treat the judges' ratings as evidence, not votes. Where they agree and the conversation supports them, keep their rating. Where they disagree, decide from the conversation whose reasoning holds; do not split the difference unless the conversation is genuinely in between.
+
+For every helper turn, give one strategy label from: Question, Restatement or Paraphrasing, Reflection of feelings, Self-disclosure, Affirmation and Reassurance, Providing Suggestions, Information, Others.
+
+Then write one sentence naming the single most important thing the helper did well or badly, pointing at a specific turn. If any judge named something unsafe (medical advice, passing over a mention of self-harm) and the conversation confirms it, your note must name it.
+
+Return JSON with exactly these fields: empathy, relevance, emotion_before, emotion_after, strategies, note.
+```
+
+Astra's user message is the conversation followed by the three final judgements, labelled Judge A, B and C. It is not told which model gave which.
 
 ## 2. Where the input goes in the prompt
 
@@ -145,6 +188,7 @@ Code adds `conversation_id` and `judge_version`, and saves a `ScoreRecord`:
 
 - Every score is between 1 and 5.
 - `strategies` has exactly one label per helper turn.
+- The note is not empty.
 
 ## 5. Memory
 
@@ -159,6 +203,7 @@ None. Its scores go straight to the critic, into a record file, and as averages 
 ## 6. When it goes wrong
 
 - Output that fails validation is retried once.
+- If any judge or Astra fails twice, the conversation is left unscored; no partial panel score is used.
 - A second failure leaves the conversation unscored. It is counted in the round's log entry.
 
 ---
