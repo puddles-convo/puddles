@@ -16,7 +16,9 @@ Two numbers the rest of the project stands on: how good the starting policies ar
 - [ ] Score `policies/policy-v1.md` three times on the validation set, with the same settings each time.
 - [ ] Noise = the highest quality of the three minus the lowest. Quality is the mean over conversations of (empathy + relevance) / 2.
 - [ ] Write the results into the table below and into `runs/baseline/`.
-- [ ] Give the gate its threshold: the noise figure replaces the provisional value from stage 2.
+- [ ] Give the gate its threshold: the noise figure goes into the loop's config and `noise_measured` is turned on. From here the gate can keep an edit.
+- [ ] Give the gate its starting `current_scores`: the mean of the three `policy-v1` runs. This choice is not in the gatekeeper's spec; write it into the spec if the team agrees.
+- [ ] Pick the training scenario IDs for the overnight run from the ESConv training split, saved the same way. No ID appears in both files.
 - [ ] Log each scoring run to MLflow as its own run, tagged `baseline`.
 
 ## Results

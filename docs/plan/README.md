@@ -9,12 +9,14 @@ Written for people and for coding agents. Take one stage file, do what its check
 | 0 | [stage-0-skeleton.md](stage-0-skeleton.md) | One round as a LangGraph graph with MLflow tracing, dummy agents where real ones are missing | 18:00 |
 | 1 | [stage-1-client-and-io.md](stage-1-client-and-io.md) | Token counts, traced model calls, schema output on every endpoint, markdown inputs | 19:00 |
 | 2 | [stage-2-real-agents.md](stage-2-real-agents.md) | Judge and gatekeeper built; every prompt tuned on hand-checked cases | 21:00 |
-| 3 | [stage-3-training-small.md](stage-3-training-small.md) | One real round on 5 scenarios, measured | 22:00 |
+| 3 | [stage-3-training-small.md](stage-3-training-small.md) | Real rounds on 5 scenarios, measured, with nothing promoted | 22:00 |
 | 4 | [stage-4-inference.md](stage-4-inference.md) | Crisis checker, release step and note-taker, run as text in and text out | 22:00 |
 | 5 | [stage-5-baselines-noise.md](stage-5-baselines-noise.md) | Baseline scores and the noise figure the gate needs | 23:00 |
 | 6 | [stage-6-overnight-loop.md](stage-6-overnight-loop.md) | The loop running unattended with caps, and the plots | Start 23:30 |
 
-Stage 4 runs alongside stages 2 and 3. Everything else is in order.
+Stages 0, 1, 2, 3, 5 and 6 are in order. The crisis path in stage 4 can be built alongside stages 2 and 3. Its note-taker waits for a format change that has not landed (see stage 4).
+
+This plan was reviewed against the code by a second model on 14 November and corrected. The corrections are in these files.
 
 ## What exists today
 
@@ -22,13 +24,14 @@ Stage 4 runs alongside stages 2 and 3. Everything else is in order.
 |---|---|---|
 | Simulated user, helper, conversation runner, batch command | `loop/` | Built, tested offline. `python -m loop.run_batch --fake ...` runs with no keys. |
 | Critic, researcher, proposer | `puddles/agents/` | Built, tested offline with a scripted model. |
-| past.dev memory, record files, decision log, policy edits | `puddles/memory.py`, `records.py`, `decision_log.py`, `policy.py` | Built, tested offline. |
+| past.dev memory for the training agents, record files, decision log, policy edits | `puddles/memory.py`, `records.py`, `decision_log.py`, `policy.py` | Built, tested offline. |
 | Steps 4 to 6 of a round, log entry, copies into memory | `puddles/round.py`, `scripts/run_round.py` | Built. Uses a stand-in gate. |
 | Judge | | Not built (issues #3, #4) |
 | Gatekeeper and safety cases | | Not built (issues #5, #20) |
+| Where each rule came from (`policies/<version>.meta.json`) | | Not built. The format `PolicyMeta` exists; nothing writes it. |
 | ESConv loader | | Not built (issue #2). `fixtures/scenarios.jsonl` has 5 hand-written scenarios. |
 | Graph, tracing, loop command | | Not built (stages 0, 1, 6) |
-| Crisis checker, release step, note-taker | | Not built (stage 4) |
+| Crisis checker, release step, note-taker, storage for a person's notes | | Not built (stage 4) |
 
 `python -m pytest` runs 409 tests offline and skips one that needs `PAST_API_KEY`.
 
@@ -39,19 +42,36 @@ Stage 4 runs alongside stages 2 and 3. Everything else is in order.
 | Purpose | `loop/` | `puddles/` | Use tonight |
 |---|---|---|---|
 | Model client | `llm.py`: `ChatClient.complete()` returns text; plain HTTP to any OpenAI-compatible server | `llm.py`: `LLM.structured()` returns a validated model; OpenAI library | Both. Text for the helper and simulated user, structured for everything else. |
-| Policy | `policy.py`: `load_policy(path)` gives version, text, Safety text, rules | `policy.py`: `parse_policy`, `apply_edit`, `render_policy` | Both. Loading in `loop`, editing in `puddles`. |
+| Policy | `policy.py`: `load_policy(path)` gives a `Policy` with `version`, `text`, `safety_text`, `rules` | `policy.py`: `parse_policy(text)` gives a `Policy` with separate `safety` and `conversation` rules; `apply_edit`, `render_policy` | Both. Loading in `loop`, editing in `puddles`. They are two different classes; pass the file path between them, not the object. |
 | Decision log | `decision_log.py`: append, read, render a table | `decision_log.py`: `DecisionLog`, with the history the agents need | **Only `puddles.decision_log.DecisionLog` writes the log.** `loop.decision_log.render_table` may read it. |
 
 Do not merge the two packages tonight. The graph in stage 0 imports from both.
 
+**A policy rule is one line.** `puddles.policy` accepts a rule that wraps onto a second line; `loop.policy` raises "is not a rule" on the same file. `render_policy` writes one line per rule, so files written by code load in both. A file edited by hand must keep to one line per rule. Stage 0 adds the test.
+
 ## Rules for every agent
 
 1. **Output is a schema.** A model's answer is a Pydantic model in `schemas.py`, requested with `LLM.structured(system, user, Schema)`, then checked by code and retried once with the reasons (`puddles.llm.call_checked`). The helper and the simulated user are the exceptions: they return plain text, because one is spoken aloud and the other plays a person.
-2. **Input is markdown.** Code builds an input model, and `render_user(inp)` turns it into the markdown the model reads. The helper and the simulated user receive the conversation as chat turns instead.
+2. **Input is markdown.** Code builds an input model, and `render_user` turns it into the markdown the model reads. The helper and the simulated user receive the conversation as chat turns instead.
 3. **Explanation before verdict.** In a new or changed output model, put the reasoning field before the scores or the decision. A model writes fields in order.
 4. **A model never supplies IDs, dates, versions or who the user is.** Code adds them when it makes the record.
-5. **Each agent module has the same five functions:** `build_input`, `render_user`, `check`, `run`, `to_record`. See `puddles/agents/critic.py`.
+5. **Each agent module has the same shape:** `build_input`, `render_user`, `check`, `run`, `to_record`. See `puddles/agents/critic.py`. The proposer differs in two places: its `render_user(inp, base_version)` takes the policy version, and it has `apply(...)`, which returns the edit and the candidate file, in place of `to_record`.
 6. **Prompts live in one place.** The system prompts for the critic, researcher and proposer are read from `docs/agents/*.md`. The helper and simulated user prompts are in `loop/prompts/*.txt`, and must match their files in `docs/agents/`.
+
+### When an agent's answer fails twice
+
+`call_checked` raises `AgentFailed` after the second failure. Each graph node catches it and does what the agent's spec says. A failure is always counted and logged.
+
+| Agent | After the second failure | Source |
+|---|---|---|
+| Simulated user, helper | The conversation is marked failed and the batch goes on | `loop.runner.run_batch`, built |
+| Judge | That conversation is left unscored and counted in the round's log entry | [t3-judge.md](../agents/t3-judge.md) |
+| Critic | The round ends as `no_pattern`, with the failure in the reason | [t4-critic.md](../agents/t4-critic.md) |
+| Researcher | Not stated in its spec. Proposed: the round ends as `no_evidence`, with the failure in the reason | To confirm on issue #1 |
+| Proposer | The round ends with no edit, and the pattern stays open | [t6-proposer.md](../agents/t6-proposer.md) |
+| Gatekeeper | A test run that crashes, or a conversation left failed or unscored, reverts the candidate | [t7-gatekeeper.md](../agents/t7-gatekeeper.md) |
+
+**Open format question.** A round event's outcome is one of `kept`, `reverted`, `no_pattern`, `no_evidence`. None of them means "a pattern and sources, but no edit". `finish_round` would log such a round as `no_pattern`. Settle on issue #1 whether to add an outcome or to log it as `no_evidence` with the reason; stage 0 needs the answer.
 
 ## Rules for every change
 
@@ -72,15 +92,17 @@ Do not merge the two packages tonight. The graph in stage 0 imports from both.
 
 Stages 0 to 2 add `MLFLOW_TRACKING_URI` and a variable for the judge model.
 
+**Use a separate past.dev project for development,** with its own `PAST_API_KEY`. The training audience name `training-agents` is fixed in `puddles/memory.py`, so a second audience in the same project is not an option without a code change.
+
 ## What we track and plot
 
-There is no single accuracy number. There are four measures.
+There is no single accuracy number. There are four measures. Each plot needs a saved file, and each file needs an owner.
 
-| Measure | How it is computed | Where it is shown |
-|---|---|---|
-| Judge agreement with real users | Rank correlation and mean absolute error against the ratings ESConv users gave their own conversations | Scatter of judge score against user score |
-| Quality per round | Mean over validation conversations of (empathy + relevance) / 2 | Line by round, with the noise band and a mark for kept or reverted |
-| Final result | Final policy against the plain and hand-written baselines on held-out test scenarios | Three bars with the spread |
-| Safety | Pass rate on the safety cases; crisis checker misses and false alarms | Table |
+| Measure | How it is computed | Where it is shown | File it is drawn from | Produced by |
+|---|---|---|---|---|
+| Judge agreement with real users | Rank correlation and mean absolute error against the ratings ESConv users gave their own conversations | Scatter of judge score against user score | Pairs of scores, no conversation text | Stage 2, lane A (#4) |
+| Quality per round | Mean over validation conversations of (empathy + relevance) / 2 | Line by round, with the noise band and a mark for kept or reverted | The decision log: `scores` in each round event | Stages 2 and 6 |
+| Final result | Final policy against the plain and hand-written baselines on held-out test scenarios | Three bars with the spread | Final evaluation results | Issue #7, Sunday |
+| Safety | Pass rate on the safety cases; crisis checker misses and false alarms; the outside sets | Table | The decision log: `safety` in each round event; crisis checker results; outside-set results | Stage 2 lane B; issues #6 and #7 |
 
-Also logged every round: tokens, cost and seconds per agent, conversations that failed, and how often each agent's first answer failed its checks.
+Also logged every round: tokens, cost and seconds per agent, conversations that failed, conversations left unscored, and how often each agent's first answer failed its checks.

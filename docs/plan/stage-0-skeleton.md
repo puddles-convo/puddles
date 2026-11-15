@@ -2,6 +2,8 @@
 
 **Target:** 18:00. **Owner:** unassigned. **Needs:** nothing. **Blocks:** every later stage.
 
+Issue: [#30](https://github.com/puddles-convo/puddles/issues/30).
+
 ## Goal
 
 One training round runs as a LangGraph graph, from conversations to the log entry, with an MLflow trace of every step. Agents that do not exist yet are dummies. Nothing calls a real model.
@@ -10,13 +12,13 @@ One training round runs as a LangGraph graph, from conversations to the log entr
 
 | Node | Calls | Real or dummy now |
 |---|---|---|
-| `converse` | `loop.runner.run_batch(helper_client, user_client, policy, scenarios, round=..., max_turns=..., seed=...)` | Real code, `loop.llm.FakeClient` for both models |
+| `converse` | `loop.runner.run_batch(helper_client, user_client, policy, scenarios, round=..., max_turns=..., seed=..., out_path=...)`, which returns a `BatchResult` with `records`, `failures` and `round` | Real code, `loop.llm.FakeClient` for both models |
 | `judge` | A stub that turns each `ConversationRecord` into a `ScoredConversation` with fixed scores | Dummy until stage 2 |
 | `critic` | `puddles.agents.critic`: `build_input`, `run`, `to_record` | Real code, `ScriptedLLM` |
 | `researcher` | `puddles.agents.researcher`: `build_input`, `run`, `to_record`, `save_search_log` | Real code, `ScriptedLLM` and `FakeSearch` |
 | `proposer` | `puddles.agents.proposer`: `build_input`, `run`, `apply` | Real code, `ScriptedLLM` |
 | `gate` | `puddles.round.stand_in_gate(result, decision)` | Dummy until stage 2 |
-| `finish` | `puddles.round.finish_round(result, gate, log, memory, root)` | Real code, `puddles.memory.FakeMemory` |
+| `finish` | `puddles.round.finish_round(result, gate, log, memory, root)`, which returns the `RoundEvent` | Real code, `puddles.memory.FakeMemory` |
 
 ```
 START -> converse -> judge -> critic --(pattern)--> researcher --(sources)--> proposer -> gate -> finish -> END
@@ -24,16 +26,30 @@ START -> converse -> judge -> critic --(pattern)--> researcher --(sources)--> pr
                                  +---(no pattern)--------+---(no sources)-----------------------> finish
 ```
 
+On the two short paths the gate has not run, so `finish` calls `finish_round(result, None, ...)`. The existing function already handles that; do not make up a gate result.
+
+## What the state carries
+
+| Key | Set by | What it is |
+|---|---|---|
+| `round`, `policy_path`, `scenarios`, `max_turns`, `seed` | The caller | The round's settings |
+| `records`, `failures` | `converse` | From the `BatchResult`. Keep the failures; later stages count them. |
+| `scored` | `judge` | `list[ScoredConversation]` |
+| `result` | `critic`, `researcher`, `proposer` | `puddles.round.RoundResult`. Its `outcome` is only `candidate`, `no_pattern` or `no_evidence`. |
+| `gate` | `gate` | `GateOutcome`, or `None` if the gate did not run |
+| `event` | `finish` | The `RoundEvent`. **The round's final outcome is `event.outcome`**, not `result.outcome`. |
+
 ## Checklist
 
 - [ ] Add `langgraph` and `mlflow` to `pyproject.toml` and `requirements.txt`.
 - [ ] Split `puddles.round.run_agents` into three functions, one per agent, at its two early returns. Keep `run_agents` as a wrapper that calls the three, so `tests/test_memory_wiring.py` passes unchanged.
 - [ ] `puddles/graph.py`: `build_round_graph(deps)` returns the compiled graph. `deps` carries the two chat clients, the structured model, the search function, the memory, the log and the root folder, so tests can pass fakes.
-- [ ] The state holds the round number, the policy path, the conversation records, the scored conversations and the `RoundResult`. `converse` loads the policy with `loop.policy.load_policy`; the agents read the same file as text.
-- [ ] Call `puddles.round.retry_pending` before the graph starts, as `scripts/run_round.py` does.
+- [ ] `converse` loads the policy with `loop.policy.load_policy(path)` and passes `out_path=root / "conversations" / "round-NN.jsonl"`, so the conversations are saved. `run_batch` writes the failures file beside it. The agents read the same policy file as text and parse it with `puddles.policy.parse_policy`.
+- [ ] Each agent node catches `puddles.llm.AgentFailed` and follows the table in the [plan README](README.md#when-an-agents-answer-fails-twice). The open question there, about a round with no edit, needs an answer before the proposer node is finished.
+- [ ] Before the graph starts, call `memory.ensure_training_audience()` and then `puddles.round.retry_pending(log, memory, root)`, as `scripts/run_round.py` does.
 - [ ] `puddles/tracing.py`: `setup()` sets the tracking address from `MLFLOW_TRACKING_URI` (default `sqlite:///runs/mlflow.db`) and calls `mlflow.langchain.autolog()` and `mlflow.openai.autolog()`.
 - [ ] `TracedClient` in `puddles/tracing.py`: wraps any `ChatClient` and opens one span per `complete()` call. `loop.llm` uses plain HTTP, so MLflow's automatic OpenAI tracing does not see those calls.
-- [ ] One MLflow run per round: the policy version as a parameter, the outcome as a tag, conversations run and failed as metrics.
+- [ ] One MLflow run per round: the policy version as a parameter, `event.outcome` as a tag, conversations run and failed as metrics.
 - [ ] `scripts/run_graph_round.py --fake --root runs/dev`: one round with every fake, no keys.
 - [ ] The same script without `--fake` takes `--policy`, `--scenarios` and `--max-turns`, and builds the real clients from the environment. Stage 3 uses it.
 - [ ] `tests/test_graph.py`, listed below.
@@ -42,11 +58,15 @@ START -> converse -> judge -> critic --(pattern)--> researcher --(sources)--> pr
 
 All offline, in `tests/test_graph.py`.
 
-1. A scripted round that reaches the proposer ends with one `round` event in the log and outcome `kept` or `reverted`, matching the stand-in gate.
+1. A scripted round that reaches the proposer ends with one `round` event in the log and `event.outcome` of `kept` or `reverted`, matching the stand-in gate.
 2. A critic answer with `found: false` ends as `no_pattern`. The researcher and proposer are never called.
 3. A researcher answer with no sources ends as `no_evidence`. The proposer is never called.
 4. Each of the three runs leaves one MLflow trace that has a span for every node that ran, and the model-call spans sit under the `converse` span.
 5. Two rounds in a row give round numbers 1 and 2 from `DecisionLog.next_round()`.
+6. A batch in which one scenario fails still finishes the round. The failure is in the state, in the failures file and in the MLflow metric.
+7. The conversations file for the round exists and holds one line per finished conversation.
+8. Each agent failing twice gives the outcome in the README table, and the failure is in the event's reason.
+9. Both policy loaders agree: the candidate file the proposer writes loads with `loop.policy.load_policy`, and its Safety text is byte-for-byte the Safety text of the file it was made from. A policy with a rule wrapped onto a second line fails this test, by design.
 
 `python -m pytest` still passes in full.
 
@@ -77,14 +97,15 @@ b.add_edge("finish", END)
 graph = b.compile()
 ```
 
-The spike ended the two short paths at `END`. Routing them through `finish` is new here, so that those rounds are logged too.
+The spike ended the two short paths at `END` and had no `finish` node. Routing them through `finish`, the failure handling and the saved conversations file are new here and have not been run.
 
 ## Not in this stage
 
 - No checkpointer. A stopped loop resumes from the decision log (stage 6).
 - No real model calls.
 - No merging of `loop/` and `puddles/`.
+- No saved scores, and no `scores` or `safety` in the round event. Those arrive with the real judge and gate in stage 2.
 
 ## Done when
 
-`python -m scripts.run_graph_round --fake --root runs/dev` prints the round's outcome, `runs/dev/log/decisions.jsonl` has the event, and `mlflow ui --backend-store-uri sqlite:///runs/mlflow.db` shows the trace.
+`python -m scripts.run_graph_round --fake --root runs/dev` prints the round's outcome, `runs/dev/log/decisions.jsonl` has the event, `runs/dev/conversations/` has the round's file, and `mlflow ui --backend-store-uri sqlite:///runs/mlflow.db` shows the trace.

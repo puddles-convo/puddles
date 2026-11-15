@@ -1,6 +1,12 @@
 # Stage 4: inference end to end
 
-**Target:** 22:00. **Owner:** unassigned, with the robot pair. **Needs:** stage 1 for schema output on the helper endpoint. **Runs alongside** stages 2 and 3.
+**Target:** 22:00. **Owner:** unassigned, with the robot pair.
+
+| Part | Needs | Can start |
+|---|---|---|
+| A. Crisis checker, release step, one turn | Stage 1, for `complete_json` with a deadline | Alongside stages 2 and 3 |
+| B. Storage for a person's notes, and the note-taker | The note format change, which has not landed | When it lands |
+| Final check | The helper prompt frozen at the end of stage 2, lane D | After that |
 
 ## Goal
 
@@ -18,50 +24,108 @@ person's text
      +--> helper (model, plain text)  ---------------------+
 ```
 
-The checker and the helper start together. The release step holds the helper's draft until the checker has answered.
+The checker and the helper start together. The release step holds the helper's draft until the checker has answered for **that turn**.
 
-## Checklist
+## Part A checklist: the crisis path
 
 - [ ] `puddles/inference/keywords.py`: the keyword list as a versioned file, matched without regard to case. A match forces a crisis. No match clears nothing.
-- [ ] `puddles/inference/crisis.py`: the five functions. Input is the message and the last few turns. Output is `risk`, `category` and `reason`; code makes the `CheckedMessage`. Called through `complete_json` on the helper's endpoint.
-- [ ] `puddles/inference/release.py`: code only. Keyword match or `crisis` gives the fixed response for the category. `none` or `concern` gives the helper's draft. A failed, late (over 3 seconds) or unreadable check gives the holding line; two in a row give the stored offline line.
+- [ ] `puddles/inference/crisis.py`: the five functions. Input is the message and the last few turns. Output is `risk`, `category` and `reason`; code adds `session_id` and `turn` and makes the `CheckedMessage`. Called through `complete_json` on the helper's endpoint, with 3 seconds for the whole call, retry included.
+- [ ] `puddles/inference/release.py`: code only. It returns a `HelperReply`.
+  - Keyword match, or `crisis`: the fixed response for the category. `fixed_handoff_response` is true.
+  - A keyword match with no category from the checker is treated as `unsure`.
+  - `none` or `concern`: the helper's draft.
+  - A failed, late or unreadable check: the holding line.
+  - The helper failed and the checker says there is no crisis: the holding line.
+  - Two failed checks in a row: the stored offline line. A check that succeeds resets the count.
+- [ ] `puddles/inference/turn.py`: `run_turn(session, text)`, the one function that runs a turn. It starts the keyword check, the checker and the helper, and calls the release step.
+  - A check is used only if its `session_id` and `turn` match the turn being released.
+  - An answer that arrives after the deadline is discarded, even if it says `none`.
+  - A crisis response is spoken whether or not the helper answered.
+  - One turn at a time per session: a new message waits for the turn before it.
 - [ ] The helper is `loop.helper.helper_reply`, unchanged, with the person's notes passed as `user_notes`. Training and the robot must run the same function.
-- [ ] `puddles/inference/notes.py`: the note-taker. It may add or replace only if the person agreed to be remembered. It may always delete. "Forget everything" clears the index of live notes and ignores every add from that session.
 - [ ] `scripts/chat.py`: type a line, read the reply. Flags for the policy file, a user ID, and the two consent answers. Prints the risk level and the time each step took.
-- [ ] Each turn's timings go into the session record, in the `ConversationRecord` format with `source` set to `live`.
 
-**The note format is changing.** A newer `schemas.py` with note kinds and limits is being written and is not in this repo yet. Build the crisis checker and release step first, and start the note-taker once that change has landed.
+## What is kept after a session
+
+The person answers two questions at the start: may the robot remember them, and may the conversation be used to improve it. They are separate.
+
+| Remember me | Use for training | Kept |
+|---|---|---|
+| No | No | Nothing new |
+| Yes | No | Notes about the person only. No transcript. |
+| No | Yes | The session record. No new notes. |
+| Yes | Yes | Both |
+
+- [ ] **With training use off, the person's words are never written to disk and never traced.** That covers the session record, MLflow traces of the helper and the checker, and traces of the note-taker's own model calls. The conversation is held in memory for the session, given to the note-taker if "remember me" is on, then dropped.
+- [ ] With training use on, each turn is saved as it happens: the `CheckedMessage` and the `HelperReply`, one line each, in `<root>/sessions/<session_id>.jsonl`. Those two existing formats carry the text, the risk level, the category and whether the response was fixed. A `ConversationRecord` with `source` set to `live` is built from them at the end, for the loop.
+- [ ] Timings have no field in either format. `scripts/chat.py` prints them. Where they are stored is a question for issue #1.
+
+## Part B checklist: notes
+
+Wait for the note format change before starting.
+
+- [ ] `puddles/inference/note_store.py`. `puddles.memory.Memory` today only sets up the training audience, writes, waits and recalls. It cannot delete and has no private audience. The store adds:
+  - one audience and one identity per person, set up on first use;
+  - the index of live notes, kept by our code;
+  - recall as that person, **filtered through the index**, so a note that past.dev has not yet deleted is never returned;
+  - delete, retried until past.dev confirms.
+- [ ] `puddles/inference/notes.py`: the note-taker, with the five functions.
+  - "Remember me" off: every add and replace is dropped. Deletes are applied.
+  - "Forget everything": the index is cleared, and every add **and replace** from that session is dropped.
+  - Every `note_id` it names must be one of that person's existing notes.
+  - Order: take replaced and deleted IDs off the index first, then write the new notes, then delete the old ones from past.dev.
+  - A second failed answer changes nothing: no notes added, none lost.
 
 ## Tests that must pass
 
 All offline, with scripted models.
 
+**The crisis path**
+
 1. A message with a keyword phrase gives the fixed response, whatever the checker says.
 2. Indirect wording with no keyword, and a checker answer of `crisis`, gives the fixed response.
-3. Each of the three categories (`self`, `danger`, `unsure`) gives its own response.
-4. A checker that takes longer than 3 seconds gives the holding line.
+3. Each of the three categories (`self`, `danger`, `unsure`) gives its own response. A keyword match with no category gives the `unsure` response.
+4. A checker that takes longer than 3 seconds, retry included, gives the holding line.
 5. A checker reply that does not fit the schema gives the holding line.
-6. Two failed checks in a row give the offline line.
-7. With "remember me" off, the note-taker's adds are dropped and its deletes are applied.
-8. After "forget everything", the index of live notes is empty.
-9. One person's notes never appear in another person's prompt.
+6. Two failed checks in a row give the offline line. A good check between two failures does not.
+7. A late `none` from turn 3 does not release the draft for turn 4.
+8. The helper fails and the checker says `none`: the holding line.
+9. The helper fails and the checker says `crisis`: the fixed response.
+10. Across every combination of keyword match, checker result (`none`, `concern`, `crisis`, failed, late, unreadable) and helper result (draft, failed), the helper's draft is returned only when there is no keyword match and a `none` or `concern` check for the same session and turn.
 
-Then, with real models: a 10-turn conversation through `scripts/chat.py`, and one crisis message.
+**Consent**
+
+11. All four combinations in the table above leave exactly what the table says on disk and in the trace store. With training use off, a search of the root folder and the MLflow store for a phrase the person typed finds nothing.
+
+**Notes**
+
+12. With "remember me" off, adds and replaces are dropped and deletes are applied.
+13. After "forget everything", the index is empty, and an add or a replace from the same session is not stored.
+14. A note taken off the index is not returned by recall, even while the fake past.dev still holds it.
+15. A `note_id` that is unknown, or that belongs to another person, is refused.
+16. A delete that fails is retried.
+17. One person's notes never appear in another person's prompt, and a training identity cannot recall them.
+
+Then, with real models and the frozen helper prompt: a 10-turn conversation through `scripts/chat.py`, and one crisis message.
 
 ## Rules that are easy to break
 
 - **The helper never receives the risk level.** It starts before the level is known.
 - **Recall as the person, not as the helper.** A past.dev recall returns everything the reading identity can reach, so the identity must be one per person.
 - **Send the audience on every write.** A past.dev re-send without it makes the note visible to the whole project.
-- **No tracing of live turns unless the person agreed to training use.** A trace stores every word.
-- **The fixed responses are drafts with no clinical review.** The evaluation lead owns the wording.
+- **The fixed responses are drafts with no clinical review.** The evaluation lead owns the wording, the keyword list and the tests.
 
 ## What to hand the robot pair
 
 - The crisis checker prompt, the keyword file and the fixed responses.
-- The function to call for one turn, and what it returns.
+- `run_turn`, and what it returns.
 - What their helper endpoint must support for schema output (from stage 1).
+- The consent rule above. Their cloud brain keeps logs too.
+
+## Still to measure
+
+The plan promises crisis checker misses and false alarms. No stage here produces that number. It needs a labelled set of messages, which belongs with the outside sets (issue #6) and the evaluation lead.
 
 ## Done when
 
-`scripts/chat.py` holds a 10-turn conversation with the real helper model, the crisis message gets the fixed response, and the session record validates against `schemas.py`.
+`scripts/chat.py` holds a 10-turn conversation with the real helper model and the frozen prompt, the crisis message gets the fixed response, and with training use on the session file round-trips: every turn's released text, risk level, category and fixed-response flag read back as written.

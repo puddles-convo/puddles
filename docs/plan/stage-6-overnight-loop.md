@@ -13,13 +13,47 @@ The loop runs round after round with nobody watching, stops itself at its caps, 
 **The loop**
 
 - [ ] `scripts/run_loop.py`: reads a config file, then runs the stage 0 graph once per round until a cap is reached.
-- [ ] Config: `max_rounds`, `conversations_per_round`, `max_turns`, `spend_limit_usd`, the validation ID file, the seed, the judge and its fallback. Values come from stages 3 and 5.
-- [ ] Each round starts from `puddles.round.policy_in_force` and `DecisionLog.next_round()`, so a restart continues where the log ends.
-- [ ] `puddles.round.retry_pending` runs at the start of every round. It already stops the loop when a memory copy is still pending after three attempts.
-- [ ] A running total of spend from the token counts. The loop stops before a round it cannot afford.
-- [ ] Three rounds in a row that fail on the same agent stop the loop with that agent's name.
-- [ ] After every round, run the check that the policy file and the log agree: replay the kept edits from the log and compare with the policy in force, rule by rule. A mismatch stops the loop.
+- [ ] Config: `max_rounds`, `conversations_per_round`, `conversations_for_critic`, `max_turns`, `spend_limit_usd`, the prices table, the training scenario ID file, the validation ID file, the seed, the judge version, the noise. Values come from stages 3 and 5.
+- [ ] A fresh root folder and the real past.dev project. Not `runs/small`.
 - [ ] One line printed per round: number, outcome, quality before and after, cost so far.
+
+**Which scenarios a round uses**
+
+- [ ] Training scenarios come from the ESConv training split. Each round draws `conversations_per_round` of them with a sampler seeded by the seed and the round number, so a re-run of a round draws the same ones.
+- [ ] The validation IDs and the training IDs share nothing. The loop checks this at start and refuses to run otherwise.
+- [ ] The critic gets the `conversations_for_critic` lowest-scoring conversations (`select_for_critic`, stage 2).
+
+**Starting again after a stop**
+
+The code as it stands does not restart safely. Three things need building.
+
+- [ ] **The policy in force comes from the log.** `puddles.round.policy_in_force` picks the newest policy file by its modified time. Replace that: take `policy.in_force` from the last round event, and check the file's hash against the event.
+- [ ] **An interrupted promotion is undone.** `finish_round` writes the promoted policy file before it appends the round event. A crash between the two leaves a policy file the log knows nothing about. At start, a promoted policy file with no round event is removed, and the round is run again.
+- [ ] **A round number is written once.** `DecisionLog.append` does not refuse a second event for the same round. Add the guard.
+- [ ] `DecisionLog.next_round()` gives the next number; that part works today.
+
+**Copies into memory**
+
+- [ ] `puddles.round.retry_pending` checks the three-attempt limit before it retries. A copy that fails its third attempt lets the round go ahead, and the loop stops one round later. Check the limit again after the retries.
+- [ ] A crash after the round event but before a copy leaves no `pending` entry, so nothing resends it. At start, compare the records each round event points to with the copy events, and send any that are missing.
+
+**Spend**
+
+- [ ] Spend so far is the sum of `<root>/log/usage.jsonl` (stage 1), so it survives a restart. It includes failed attempts, the gate's conversations and Exa searches.
+- [ ] Before each round: stop if spend so far plus the most a round has cost so far, times 1.5, is over the limit. Before round 1, use the cost per round measured in stage 3, scaled to the overnight settings.
+- [ ] past.dev credits are not counted. Check the dashboard before leaving.
+
+**Stopping on repeated failure**
+
+- [ ] Three rounds in a row that fail on the same agent stop the loop with that agent's name. The failing agent is read from the round's line in `usage.jsonl`.
+
+**The end-of-round check**
+
+Run after every round. Any failure stops the loop.
+
+- [ ] Replay the kept edits from the log and compare with the policy in force: same rule IDs, same text, nothing extra.
+- [ ] The Safety section's hash equals the starting policy's.
+- [ ] The `.meta.json` (written in stage 2) agrees: every rule is a base rule or links to a kept edit in the log.
 
 **If a round is too slow**
 
@@ -27,24 +61,39 @@ The loop runs round after round with nobody watching, stops itself at its caps, 
 
 **If OpenAI credits run low**
 
-- [ ] Switch to the fallback judge (#23), re-score the policy in force with it before comparing anything, and record the switch in the log.
+A different judge gives different numbers, so its scores cannot be compared with the first judge's.
+
+- [ ] Default: the loop stops, and the policy in force is the result.
+- [ ] To carry on with the fallback judge (#23), start a new stretch of rounds: calibrate the fallback, measure the baselines and the noise again with it (stage 5), score the policy in force with it, and record the switch in the log. Plots mark the two stretches separately and never join their lines.
 
 **The plots**
 
-- [ ] `scripts/plots.py`, from the decision log and the baseline runs, into `docs/results/`:
-  - quality by round, with the noise band and a mark for each kept and reverted edit;
-  - final policy against both baselines, as three bars with the spread;
-  - judge score against user score, from the calibration run;
-  - a table of every round: pattern, source, edit, outcome, reason.
+- [ ] `scripts/plots.py`, into `docs/results/`:
+
+  | Plot | Drawn from |
+  |---|---|
+  | Quality by round, with the noise band and a mark for each kept and reverted edit | `scores` in the round events; the noise from stage 5 |
+  | A table of every round: pattern, source, edit, outcome, reason | The round events and record files |
+  | Judge score against user score | `runs/calibration/pairs.jsonl` (stage 2, lane A) |
+  | Final policy against both baselines, three bars with the spread | The final evaluation results (issue #7). The format is agreed with the evaluation lead before Sunday. |
+
+- [ ] Small made-up input files for all four plots under `tests/`, so the script can be tested before the real data exists.
 - [ ] Every number in a plot comes from a file in the repo or in `runs/`.
 
 ## Tests that must pass
 
 1. A fake loop of five rounds stops at `max_rounds`.
-2. A fake loop with a low spend limit stops before the round that would pass it.
-3. Kill the process during round 3 and start it again: the log has rounds 1, 2, 3 once each.
-4. A policy file edited by hand between rounds stops the loop at the next check.
-5. `scripts/plots.py` runs on the log from stage 3 without real data from the overnight run.
+2. A fake loop with a low spend limit stops before the round that would pass it. Restarted, it still knows what was spent.
+3. Kill the process during round 3's conversations and start it again: the log has rounds 1, 2, 3 once each.
+4. Kill it after the promoted policy is written and before the log entry: on restart the stray policy file is gone and the round runs again.
+5. A log whose last line is cut off half-way is reported, not read as a round.
+6. A second event for an existing round number is refused.
+7. A memory copy that fails three times stops the loop before the next round starts.
+8. A round event with a record that has no copy event gets its copy sent at the next start.
+9. A policy file edited by hand between rounds, a changed Safety section, and a missing `.meta.json` each stop the loop at the next check.
+10. A validation ID that also appears in the training file stops the loop at start.
+11. The same seed and round number draw the same training scenarios.
+12. `scripts/plots.py` draws all four plots from the made-up files.
 
 ## Before leaving it
 
@@ -56,13 +105,13 @@ The loop runs round after round with nobody watching, stops itself at its caps, 
 ## Sunday morning
 
 - [ ] 08:00: read the log. Count kept, reverted, `no_pattern` and `no_evidence` rounds.
-- [ ] 09:00: hand the policy in force to the robot pair, and to the evaluation lead for the held-out test (#7).
+- [ ] 09:00: hand the policy in force to the robot pair, and to the evaluation lead for the held-out test and the outside sets (#6, #7).
 - [ ] Run the plots. Pick one kept round and one reverted round to show.
 - [ ] Freeze at 12:30. Submissions close at 14:00.
 
 ## Not in this stage
 
-- No change to the judge, the validation set or the gate rule once the loop has started. A change makes earlier rounds impossible to compare with later ones.
+- No change to the judge, the validation set, the noise or the gate rule within a stretch of rounds. A change makes earlier rounds impossible to compare with later ones.
 
 ## Done when
 
