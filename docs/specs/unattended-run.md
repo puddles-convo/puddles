@@ -181,8 +181,9 @@ must reword that same rule again, and nothing counts how often that has failed.
   emptied the list while C9's stricter wording had been rejected twice at about 0.65 below the policy
   in force. A failed try is *clearly worse* when both qualities are logged, `scores.noise` is logged,
   and `scores.after.quality` is lower than `scores.before.quality` by more than `scores.noise`. The
-  rule and the pattern of a clearly worse failed try are parked on every later policy version of the
-  run as well, whatever is kept in between. Everything else in 5.2 stays per version.
+  rule and the pattern of a clearly worse failed try on version B are parked on B and on every
+  version the run reaches from B through keeps, whatever is kept in between. (In a run every new
+  version comes from a keep, so this is every later version.) Everything else in 5.2 stays per version.
 - **5.7 The same idea in other words is not tried again.** With the setting on, and only when there
   is at least one *rejected edit to compare with*, the proposer's answer gets one more check after
   its coded checks pass. The rejected edits to compare with are: every failed try on the policy in

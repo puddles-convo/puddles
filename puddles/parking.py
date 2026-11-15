@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from pydantic import BaseModel
+
 from puddles.decision_log import DecisionLog
 
 SETTING = "PUDDLES_PARK_REVERTED"
@@ -26,15 +28,26 @@ class FailedTry:
     pattern_id: Optional[str]  # the pattern's identity
     before: Optional[float]
     after: Optional[float]
+    base: str = ""
+    noise: Optional[float] = None
+    rule_text: Optional[str] = None  # a removal has none
 
     @property
     def negative(self) -> bool:
         return self.before is not None and self.after is not None and self.after < self.before
 
+    @property
+    def clearly_worse(self) -> bool:
+        """5.6: quality fell by more than the round's logged noise."""
+        return self.negative and self.noise is not None and self.before - self.after > self.noise  # type: ignore[operator]
+
+    @property
+    def measured(self) -> str:
+        return (f"quality {self.before:.3g} -> {self.after:.3g}"
+                if self.before is not None and self.after is not None else "quality not logged")
+
     def describe(self) -> str:
-        measured = (f"quality {self.before:.3g} -> {self.after:.3g}"
-                    if self.before is not None and self.after is not None else "quality not logged")
-        return f"round {self.round}: {self.edit_id} ({self.action} {self.rule_id}) was reverted, {measured}"
+        return f"round {self.round}: {self.edit_id} ({self.action} {self.rule_id}) was reverted, {self.measured}"
 
 
 @dataclass
@@ -48,22 +61,47 @@ def _is_parked(tries: list[FailedTry]) -> bool:
     return len(tries) >= 2 or any(t.negative for t in tries)
 
 
-def failed_tries(log: DecisionLog, version: str) -> list[FailedTry]:
+def _all_failed_tries(log: DecisionLog) -> list[FailedTry]:
     out = []
     for r in log.rounds():
-        if r.outcome != "reverted" or r.edit is None or r.policy.base != version:
+        if r.outcome != "reverted" or r.edit is None:
             continue
         before = r.scores.before.quality if r.scores else None
         after = r.scores.after.quality if r.scores else None
         out.append(FailedTry(round=r.round, edit_id=r.edit.id, action=r.edit.action, rule_id=r.edit.rule_id,
                              pattern_id=r.pattern.pattern_id if r.pattern else None,
-                             before=before, after=after))
+                             before=before, after=after, base=r.policy.base,
+                             noise=r.scores.noise if r.scores else None, rule_text=r.edit.rule_text))
     return out
 
 
+def failed_tries(log: DecisionLog, version: str) -> list[FailedTry]:
+    return [t for t in _all_failed_tries(log) if t.base == version]
+
+
+def _later_versions(log: DecisionLog, base: str, from_round: int) -> set[str]:
+    """`base` and every version the run moved to from it by keeps, from round `from_round` on."""
+    reached = {base}
+    for r in log.rounds():
+        if r.round >= from_round and r.outcome == "kept" and r.policy.base in reached:
+            reached.add(r.policy.in_force)
+    return reached
+
+
+def carried_over(log: DecisionLog, version: str) -> list[FailedTry]:
+    """5.6: clearly worse failed tries of the run on an earlier version that `version` came from."""
+    return [t for t in _all_failed_tries(log)
+            if t.clearly_worse and t.base != version and version in _later_versions(log, t.base, t.round)]
+
+
+def to_compare(log: DecisionLog, version: str) -> list[FailedTry]:
+    """5.7: every failed try on `version`, plus every clearly worse failed try of the run."""
+    return [t for t in _all_failed_tries(log) if t.base == version or t.clearly_worse]
+
+
 def parked(log: DecisionLog, version: str) -> Parked:
-    """5.2: the rules and patterns parked on `version`, each with the failed tries behind it."""
-    tries = failed_tries(log, version)
+    """5.2 and 5.6: the rules and patterns parked on `version`, each with the failed tries behind it."""
+    tries = sorted(failed_tries(log, version) + carried_over(log, version), key=lambda t: t.round)
     by_rule: dict[str, list[FailedTry]] = {}
     by_pattern: dict[str, list[FailedTry]] = {}
     for t in tries:
@@ -78,3 +116,9 @@ def parked(log: DecisionLog, version: str) -> Parked:
 
 def tries_text(tries: list[FailedTry]) -> str:
     return "; ".join(t.describe() for t in tries)
+
+
+class SameEdit(BaseModel):
+    """5.7: the answer of the same-idea check."""
+    same_as_edit_id: Optional[str] = None
+    reason: str

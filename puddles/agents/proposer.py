@@ -19,6 +19,7 @@ from schemas import (
 )
 
 SYSTEM = system_prompt("t6-proposer.md")
+SAME_EDIT_SYSTEM = system_prompt("t6b-same-edit-check.md")  # spec 5.7
 IDENTITY = "proposer"
 
 
@@ -75,7 +76,8 @@ def render_user(inp: ProposerInput, base_version: str, log: DecisionLog | None =
             f"<earlier_edits>\n{bullet_lines(edits)}{summary}\n</earlier_edits>{parked_block}")
 
 
-def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: DecisionLog) -> list[str]:
+def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: DecisionLog,
+          llm: LLM | None = None) -> list[str]:
     problems = []
     rules = parked_rules(policy.version, log) or {}
     if out.action in ("reword", "remove") and out.rule_id in rules:
@@ -107,13 +109,38 @@ def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: Decision
         if (r.edit.action, r.edit.rule_id if out.action != "add" else None, norm(r.edit.rule_text)) == \
                 (out.action, out.rule_id, norm(out.rule_text)):
             problems.append(f"this is the same edit as {r.edit.id}, which was reverted")
+    if not problems and llm is not None and parking.enabled():
+        problems += same_idea(out, policy.version, log, llm)
     return problems
+
+
+def _edit_line(action: str, rule_id: str | None, text: str | None) -> str:
+    return f"{action} {rule_id or 'a new rule'}: {text.strip() if text else '(no text: a removal)'}"
+
+
+def same_idea(out: ProposerOutput, version: str, log: DecisionLog, llm: LLM) -> list[str]:
+    """Spec 5.7: one model call asks whether the edit is the same idea as a rejected one. Only a known ID fails it."""
+    tries = parking.to_compare(log, version)
+    if not tries:
+        return []
+    rejected = [f"{t.edit_id}: {_edit_line(t.action, t.rule_id, t.rule_text)} "
+                f"(round {t.round}, reverted, {t.measured})" for t in tries]
+    user = (f"Proposed edit:\n{_edit_line(out.action, out.rule_id, out.rule_text)}\n\n"
+            f"Rejected edits:\n{bullet_lines(rejected)}")
+    try:
+        answer = llm.structured(SAME_EDIT_SYSTEM, user, parking.SameEdit)
+    except Exception:  # an invalid answer or a failed call lets the edit through; the gatekeeper still guards
+        return []
+    match = next((t for t in tries if t.edit_id == answer.same_as_edit_id), None)
+    if match is None:
+        return []
+    return [f"this is the same idea as {match.describe()} ({answer.reason.strip()}); propose a different idea"]
 
 
 def run(inp: ProposerInput, base_version: str, policy: Policy, log: DecisionLog, llm: LLM) -> ProposerOutput:
     user = render_user(inp, base_version, log)
     return call_checked(lambda fb: llm.structured(SYSTEM, user + fb, ProposerOutput),
-                        lambda out: check(out, inp, policy, log), "proposer")
+                        lambda out: check(out, inp, policy, log, llm), "proposer")
 
 
 def apply(out: ProposerOutput, policy_text: str, log: DecisionLog, pattern: FailurePattern,
