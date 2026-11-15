@@ -1,6 +1,7 @@
 """Proposer (step 6): turns the pattern and research into exactly one policy edit."""
 from pathlib import Path
 
+from puddles import parking
 from puddles.agents import bullet_lines, system_prompt
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, call_checked
@@ -46,7 +47,22 @@ def build_input(policy_text: str, pattern: FailurePattern, research: ResearchNot
         sources=research.sources, earlier_edits=edits, older_edits_summary=summary)
 
 
-def render_user(inp: ProposerInput, base_version: str) -> str:
+def parked_rules(version: str, log: DecisionLog | None) -> dict[str, list[parking.FailedTry]] | None:
+    """Spec 5.4: the rules parked on the policy in force; None when the setting is off."""
+    if log is None or not parking.enabled():
+        return None
+    return parking.parked(log, version).rules
+
+
+def render_user(inp: ProposerInput, base_version: str, log: DecisionLog | None = None) -> str:
+    rules = parked_rules(base_version, log)
+    parked_block = ""
+    if rules:
+        lines = [f"{rid}: {parking.tries_text(tries)}" for rid, tries in rules.items()]
+        parked_block = (f'\n\n<parked_rules policy="{base_version}">\n'
+                        f"These rules were edited and rejected on this policy. Do not reword or remove one; "
+                        f"edit a different rule or add a new one.\n"
+                        f"{bullet_lines(lines)}\n</parked_rules>")
     sources = [f"{s.technique} ({s.url})" for s in inp.sources]
     edits = [f"{e.id} for {e.pattern_id}: {e.action} {e.rule_id}, {e.outcome}. {e.summary}"
              for e in inp.earlier_edits]
@@ -56,11 +72,15 @@ def render_user(inp: ProposerInput, base_version: str) -> str:
             f'<failure_pattern id="{inp.pattern.id}" status="{inp.pattern.status}">\n'
             f"{inp.pattern.name}: {inp.pattern.description}\n</failure_pattern>\n\n"
             f"<sources>\n{bullet_lines(sources)}\n</sources>\n\n"
-            f"<earlier_edits>\n{bullet_lines(edits)}{summary}\n</earlier_edits>")
+            f"<earlier_edits>\n{bullet_lines(edits)}{summary}\n</earlier_edits>{parked_block}")
 
 
 def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: DecisionLog) -> list[str]:
     problems = []
+    rules = parked_rules(policy.version, log) or {}
+    if out.action in ("reword", "remove") and out.rule_id in rules:
+        problems.append(f"{out.rule_id} is parked on this policy ({policy.version}): "
+                        f"{parking.tries_text(rules[out.rule_id])}; edit a different rule or add a new one")
     if out.rule_id and out.rule_id.startswith("S"):
         problems.append(f"{out.rule_id} is a safety rule and cannot be edited")
     if out.rule_id in PROTECTED_RULE_IDS:
@@ -75,7 +95,7 @@ def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: Decision
         problems.append("a removal has no rule_text")
     if out.rule_text and "\n" in out.rule_text.strip():
         problems.append("rule_text must be one line")
-    if inp.pattern.status in ("fixed", "recurring") and out.action == "add":
+    if inp.pattern.status in ("fixed", "recurring") and out.action == "add" and inp.pattern.rule_id not in rules:
         problems.append("this pattern already has an active rule; reword or remove it instead of adding")
     if inp.at_length_limit:
         if out.action == "add":
@@ -91,7 +111,7 @@ def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: Decision
 
 
 def run(inp: ProposerInput, base_version: str, policy: Policy, log: DecisionLog, llm: LLM) -> ProposerOutput:
-    user = render_user(inp, base_version)
+    user = render_user(inp, base_version, log)
     return call_checked(lambda fb: llm.structured(SYSTEM, user + fb, ProposerOutput),
                         lambda out: check(out, inp, policy, log), "proposer")
 

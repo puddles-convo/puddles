@@ -158,6 +158,14 @@ def _remeasure_kept() -> bool:
     raise ConfigError(f"environment variable PUDDLES_GATE_REMEASURE_KEPT is {value!r}: it must be 1, 0 or unset")
 
 
+def _check_park_reverted() -> None:
+    """Spec 5.1: PUDDLES_PARK_REVERTED is 1 (on), 0 or unset (off); anything else is refused.
+    The agents read it themselves (puddles.parking.enabled)."""
+    value = os.environ.get("PUDDLES_PARK_REVERTED")
+    if value not in (None, "0", "1"):
+        raise ConfigError(f"environment variable PUDDLES_PARK_REVERTED is {value!r}: it must be 1, 0 or unset")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
     if args.gate == "kept" and not args.fake:
@@ -169,6 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(args.root)
     try:
         remeasure_kept = _remeasure_kept()  # before any model call
+        _check_park_reverted()
         cfg = load_loop_config()
         if args.max_rounds is not None:
             cfg.max_rounds = args.max_rounds
