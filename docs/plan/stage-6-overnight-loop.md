@@ -121,9 +121,15 @@ A different judge gives different numbers, so its scores cannot be compared with
   meters judge usage via `Meter.note_done`).
 - `puddles/config.py`: `LoopConfig` + `load_loop_config` for the `[loop]` table; refuses to run
   without `max_rounds` or `spend_limit_usd` (config or `--max-rounds`).
-- `scripts/run_loop.py`: `--fake` end-to-end, `--check` pre-flight, `--gate fake|stand-in`
-  (`--gate real` exits: `puddles/gate.py` is lane B). Real mode requires the frozen judge
-  (`check_frozen`) and priced models before any call.
+- `scripts/run_loop.py`: `--fake` end-to-end, `--check` pre-flight, `--gate real` (the gatekeeper,
+  built as `scripts/run_graph_round.py` builds it; without `--fake` it needs `loop.noise_measured`
+  and a `loop.noise` above 0), `--gate kept|reverted` stand-ins (without `--fake`, `kept` is refused
+  and `reverted` is a pilot). Real mode gives the judge to the round as `judge_panel`, requires a
+  frozen panel judge (`check_frozen`; the fallback judge needs none), refuses a judge other than
+  `loop.judge_version`, and checks prices before any call. A round's exception costs that round
+  (`round_error` in `log/loop.jsonl`); three in a row, or three rounds with nothing scored, stop the
+  loop; every stop writes a `stopped` line there (exit 0 for a cap, 3 for failures).
+  Rules: `docs/specs/unattended-run.md` section 1.
 - Plumbing: judge signature is `judge(records, round)`; `select_for_critic` feeds the critic the
   lowest-scoring conversations; `RoundDeps.start_policy` turns on `.meta.json` + the end-of-round
   replay check; `DecisionLog` reports a truncated last line as `DecisionLogError`.
@@ -131,7 +137,7 @@ A different judge gives different numbers, so its scores cannot be compared with
   marks, rounds table, judge-vs-user scatter, final-vs-baselines bars. Missing inputs skip.
 - Tests: `tests/test_loop.py` (26), `tests/test_plots.py` (4); suite 730 passed, 1 skipped.
 
-Still needed before the overnight run: real gate (lane B), stage-3 round-cost measurement to set
+Still needed before the overnight run: stage-3 round-cost measurement to set
 `max_rounds`/`spend_limit_usd`/`round_cost_estimate_usd`, the stage-5 noise numbers, API keys,
 `calibration/frozen.json`, and one watched real round.
 

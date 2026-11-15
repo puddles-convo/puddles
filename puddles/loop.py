@@ -1,7 +1,8 @@
 """Stage 6: the overnight loop's logic — scenario draws, spend and failure accounting, the driver.
 
 `run_loop` runs one round at a time until a cap stops it: `max_rounds`, the spend limit, or
-three rounds in a row failing on the same agent. Everything it needs survives a restart —
+three rounds in a row failing on the same agent, raising an error, or scoring nothing
+(docs/specs/unattended-run.md section 1). Why it stopped goes to `log/loop.jsonl`. Everything it needs survives a restart —
 the decision log, `usage.jsonl` and the policy files — so a crashed run picks up where it
 stopped. The round itself is `puddles.graph.run_round`; this module only decides *whether*
 to start the next one and *which* scenarios it draws.
@@ -9,15 +10,19 @@ to start the next one and *which* scenarios it draws.
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from loop.errors import ConfigError
+from puddles import replay
 from puddles.baselines import load_id_file
 from puddles.config import LoopConfig
 from puddles.decision_log import DecisionLog
+from puddles.graph import NO_CONVERSATION_REASON, NOTHING_SCORED_REASON
 from puddles.llm import AgentFailed
 from puddles.memory import Memory
 from puddles.round import prepare_round
@@ -25,6 +30,10 @@ from puddles.usage import Meter, read_usage, spend_by_round
 from schemas import ConversationRecord, RoundEvent, Scenario, ScoredConversation
 
 FAILURE_STREAK_LIMIT = 3
+ROUND_ERROR_LIMIT = 3  # round errors in a row (spec 1.6)
+NOTHING_SCORED_LIMIT = 3  # rounds in a row with no scored training conversation (spec 1.7)
+ERROR_CHARS = 300
+LOOP_LOG = "log/loop.jsonl"
 SPEND_MARGIN = 1.5  # stop when spend so far + 1.5 x the worst round so far would pass the limit
 USAGE_PATH = "log/usage.jsonl"
 SCORES_DIR = "scores"
@@ -108,6 +117,8 @@ class LoopSummary:
     rounds: list[tuple[int, str]] = field(default_factory=list)
     stop_reason: str = ""
     spend_usd: float = 0.0
+    failed: bool = False  # stopped by failures (round errors, nothing scored, same-agent streak), not a cap
+    policy_in_force: Optional[str] = None
 
 
 RoundRunner = Callable[[Path, list[Scenario], int], RoundEvent]
@@ -115,6 +126,43 @@ RoundRunner = Callable[[Path, list[Scenario], int], RoundEvent]
 
 def _spend(lines: Sequence[dict]) -> float:
     return sum(spend_by_round(lines).values())
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def append_loop_line(root: Path, line: dict) -> None:
+    """One JSON line appended to `log/loop.jsonl`."""
+    path = Path(root) / LOOP_LOG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+
+
+def policy_in_force_or_none(log: DecisionLog, root: Path, start_policy: Path) -> Optional[str]:
+    """The policy file in force per the log (the replay check, as `--check` gives it), or None
+    when the log cannot say; the stop line is written either way."""
+    try:
+        return str(replay.check(log, Path(root), Path(start_policy)))
+    except Exception:
+        return None
+
+
+def write_stopped(root: Path, summary: LoopSummary, log: DecisionLog, start_policy: Path,
+                  out: Callable[[str], None] = print) -> None:
+    """Spec 1.8: one `stopped` line in `log/loop.jsonl`, and the same printed."""
+    summary.policy_in_force = policy_in_force_or_none(log, root, start_policy)
+    append_loop_line(root, {"event": "stopped", "reason": summary.stop_reason, "rounds": len(summary.rounds),
+                            "spend_usd": summary.spend_usd, "policy_in_force": summary.policy_in_force,
+                            "at": _now()})
+    out(f"stopped: {summary.stop_reason} — {len(summary.rounds)} rounds, ${summary.spend_usd:.4f} spent, "
+        f"policy in force: {summary.policy_in_force}")
+
+
+def nothing_scored(event: RoundEvent) -> bool:
+    """The round ended with no scored training conversation: the judge node's two reasons."""
+    return event.outcome == "no_pattern" and event.reason in (NO_CONVERSATION_REASON, NOTHING_SCORED_REASON)
 
 
 def run_loop(
@@ -132,39 +180,73 @@ def run_loop(
     one round and returns its RoundEvent — the script passes `graph.run_round` wrapped.
 
     `max_rounds` counts round events in the log, so a restarted loop keeps the same budget.
+    An `Exception` from one round (its `prepare_round` included) costs that round only: a
+    `round_error` line goes to `log/loop.jsonl` and the next turn starts as a restart does.
+    Every stop writes a `stopped` line there (`write_stopped`).
     """
     usage_file = Path(root) / USAGE_PATH
     summary = LoopSummary()
-    while True:
-        lines = read_usage(usage_file)
-        spent = _spend(lines)
-        if cfg.max_rounds is not None and len(log.rounds()) >= cfg.max_rounds:
-            summary.stop_reason = f"max_rounds ({cfg.max_rounds})"
-            break
-        if cfg.spend_limit_usd is not None:
-            per_round = spend_by_round(lines)
-            estimate = cfg.round_cost_estimate_usd or 0.0
-            worst = max(per_round.values(), default=estimate)
-            if spent + SPEND_MARGIN * worst > cfg.spend_limit_usd:
-                summary.stop_reason = (
-                    f"spend limit ${cfg.spend_limit_usd:.2f}: ${spent:.2f} spent, worst round ${worst:.2f}"
-                )
+    errors_in_a_row = 0
+    nothing_scored_in_a_row = 0
+    try:
+        while True:
+            lines = read_usage(usage_file)
+            spent = _spend(lines)
+            summary.spend_usd = spent
+            if cfg.max_rounds is not None and len(log.rounds()) >= cfg.max_rounds:
+                summary.stop_reason = f"max_rounds ({cfg.max_rounds})"
                 break
-        stuck = repeated_failure(lines)
-        if stuck is not None:
-            summary.stop_reason = f"{stuck} failed in {FAILURE_STREAK_LIMIT} rounds in a row"
-            break
-        round_ = log.next_round()
-        policy_path = prepare_round(log, memory, root, start_policy)
-        drawn = draw_scenarios(scenarios, cfg.conversations_per_round, cfg.seed, round_)
-        event = run_one(policy_path, drawn, round_)
-        summary.rounds.append((event.round, event.outcome))
-        spent = _spend(read_usage(usage_file))
-        summary.spend_usd = spent
-        line = f"round {event.round}: {event.outcome}. {event.reason}"
-        if event.scores is not None:
-            line += f" quality {event.scores.before.quality:.2f} -> {event.scores.after.quality:.2f}"
-        out(f"{line} — spent ${spent:.4f}")
+            if cfg.spend_limit_usd is not None:
+                per_round = spend_by_round(lines)
+                estimate = cfg.round_cost_estimate_usd or 0.0
+                worst = max(per_round.values(), default=estimate)
+                if spent + SPEND_MARGIN * worst > cfg.spend_limit_usd:
+                    summary.stop_reason = (
+                        f"spend limit ${cfg.spend_limit_usd:.2f}: ${spent:.2f} spent, worst round ${worst:.2f}"
+                    )
+                    break
+            stuck = repeated_failure(lines)
+            if stuck is not None:
+                summary.stop_reason = f"{stuck} failed in {FAILURE_STREAK_LIMIT} rounds in a row"
+                summary.failed = True
+                break
+            if errors_in_a_row >= ROUND_ERROR_LIMIT:
+                summary.stop_reason = f"{ROUND_ERROR_LIMIT} round errors in a row"
+                summary.failed = True
+                break
+            if nothing_scored_in_a_row >= NOTHING_SCORED_LIMIT:
+                summary.stop_reason = f"no training conversation scored in {NOTHING_SCORED_LIMIT} rounds in a row"
+                summary.failed = True
+                break
+            round_ = log.next_round()
+            try:
+                policy_path = prepare_round(log, memory, root, start_policy)
+                drawn = draw_scenarios(scenarios, cfg.conversations_per_round, cfg.seed, round_)
+                event = run_one(policy_path, drawn, round_)
+            except Exception as exc:  # KeyboardInterrupt and SystemExit are not Exceptions: they still stop
+                errors_in_a_row += 1
+                error = f"{type(exc).__name__}: {str(exc)[:ERROR_CHARS]}"
+                append_loop_line(root, {"event": "round_error", "round": round_, "error": error, "at": _now()})
+                out(f"round {round_}: error. {error}")
+                continue
+            errors_in_a_row = 0
+            nothing_scored_in_a_row = nothing_scored_in_a_row + 1 if nothing_scored(event) else 0
+            summary.rounds.append((event.round, event.outcome))
+            spent = _spend(read_usage(usage_file))
+            summary.spend_usd = spent
+            line = f"round {event.round}: {event.outcome}. {event.reason}"
+            if event.scores is not None:
+                line += f" quality {event.scores.before.quality:.2f} -> {event.scores.after.quality:.2f}"
+            out(f"{line} — spent ${spent:.4f}")
+    except BaseException as exc:  # escaped outside a round, or KeyboardInterrupt: still written down
+        summary.stop_reason = f"{type(exc).__name__}: {str(exc)[:ERROR_CHARS]}"
+        summary.failed = True
+        try:
+            write_stopped(root, summary, log, start_policy, out)
+        except Exception:
+            pass  # the original error is the one to see
+        raise
+    write_stopped(root, summary, log, start_policy, out)
     return summary
 
 

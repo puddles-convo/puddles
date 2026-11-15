@@ -6,8 +6,9 @@
 
 A real run needs HELPER_* and SIMUSER_* for the conversation, OPENAI_API_KEY plus
 PUDDLES_JUDGE_PANEL and PUDDLES_JUDGE_ASTRA for the panel judge, and a prices table in
-config/run.toml that covers every model used. The judge must be frozen:
-calibration/frozen.json must match its version (`check_frozen`).
+config/run.toml that covers every model used. A panel judge must be frozen:
+calibration/frozen.json must match its version (`check_frozen`). The single-model judge
+(PUDDLES_JUDGE=fallback) needs no frozen file (docs/specs/unattended-run.md, rule 1.5).
 
 --fake runs offline with scripted clients and a scripted judge: no keys, no network.
 It resolves IDs against --scenarios (the fixture file by default).
@@ -125,7 +126,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             from puddles.eval.judge import judge_from_env
 
             judge = judge_from_env()
-            check_frozen(judge)
+            if getattr(judge, "kind", None) == "panel":
+                check_frozen(judge)  # the fallback judge's calibration is parked: no frozen file
             scenarios = load_esconv("validation")
             helper_client, user_client = client_from_env("HELPER"), client_from_env("SIMUSER")
             meter = Meter(root, load_config().prices)

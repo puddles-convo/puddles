@@ -452,9 +452,10 @@ def test_critic_conversations_limits_what_the_critic_reads(tmp_path, traced):
 # ---------- the script ----------
 
 
-def test_gate_real_is_refused(tmp_path, capsys):
+def test_gate_real_is_refused_on_unmeasured_noise(tmp_path, capsys):
+    # docs/specs/unattended-run.md 1.4 replaces "not built yet": the repo's config has noise_measured = false
     assert run_loop_main(["--root", str(tmp_path), "--gate", "real"]) == 2
-    assert "lane B" in capsys.readouterr().err
+    assert "noise_measured" in capsys.readouterr().err
 
 
 def test_check_passes_on_a_fresh_fake_root(tmp_path, capsys):
