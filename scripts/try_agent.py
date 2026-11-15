@@ -52,7 +52,9 @@ def blank(value: Any) -> bool:
 
 def _not_applied(name: str, values: dict[str, Any], allowed_removal: bool) -> Optional[str]:
     """Why a non_empty line does not apply to this answer, or None when it does."""
-    if name == "rule_text" and allowed_removal:  # a removal has no replacement text
+    # A removal has no replacement text. Only null or "" count as none: the proposer's check and apply_edit
+    # both refuse a removal whose rule_text is truthy, and "   " is truthy, so it gets the line and is EMPTY.
+    if name == "rule_text" and allowed_removal and values.get("rule_text") in (None, ""):
         return "not applied to a removal"
     if name == "rule_id" and values.get("action") == "add":  # ProposerOutput: an addition has no rule ID yet
         return "not applied to an addition"

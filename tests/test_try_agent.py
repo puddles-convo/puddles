@@ -283,6 +283,16 @@ def test_an_allowed_removal_needs_no_rule_text(case_id, removal):
     assert misses("proposer", case, removal) == []
 
 
+@pytest.mark.parametrize("text", ["   ", " \t "])
+@pytest.mark.parametrize("case_id, rule_id", [("proposer-02", "C15"), ("proposer-04", "C5")])
+def test_an_allowed_removal_with_all_space_text_exits_1(case_id, rule_id, text, capsys):
+    # proposer.check ("a removal has no rule_text") and apply_edit both refuse it, so it is not a good answer.
+    bad = {"action": "remove", "rule_id": rule_id, "rule_text": text, "summary": "Remove it."}
+    assert run("proposer", "--case", case_id, llm=scripted("proposer", [bad])) == 1
+    out = capsys.readouterr().out
+    assert "EMPTY non_empty rule_text" in out and "0 of 1 cases met their expectations" in out
+
+
 def test_a_removal_where_none_is_allowed_still_needs_rule_text():
     case = load("proposer")[0]
     removal = {"action": "remove", "rule_id": "C1", "summary": "x"}
@@ -388,12 +398,10 @@ ALLOWED = {
         "examples are examples: conv-hand-004, the one the case names, is still there, and seen_in is unchanged",
     **{("critic-06", field, how): _UNUSED_WHEN_NOT_FOUND
        for field in ("name", "description", "same_as_pattern_id") for how in ('""', '"   "')},
-    ("proposer-02 removal", "rule_text", '""'): "a removal carries no text; empty text is no text",
-    ("proposer-04 removal", "rule_text", '""'): "a removal carries no text; empty text is no text",
-    ("proposer-02 removal", "rule_text", '"   "'):
-        "a removal carries no text and apply() strips it; the agent's check would ask again (see the report)",
-    ("proposer-04 removal", "rule_text", '"   "'):
-        "a removal carries no text and apply() strips it; the agent's check would ask again (see the report)",
+    ("proposer-02 removal", "rule_text", '""'):
+        'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
+    ("proposer-04 removal", "rule_text", '""'):
+        'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
 }
 
 

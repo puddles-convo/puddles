@@ -10,6 +10,20 @@ Hand-written cases for tuning the three training agents' prompts (stage 2, lane 
 | `researcher.json` | 5 | One pattern each; four of them give earlier queries that must not be run again. |
 | `proposer.json` | 5 | An open pattern; one at the length limit (`at_length_limit` true, with a policy long enough that `puddles.policy.at_length_limit` agrees); one where an earlier edit for the same pattern (removing C5) was reverted; a recurring pattern with an active rule; and one next to safety rule S2. |
 
+## What "met its expectations" means, and what it does not
+
+The script checks an answer against the expectations written in its case, and nothing else. Those are the six kinds below: `must_mention`, `must_not_mention`, `fields`, `non_empty`, `one_of` and `max_chars`.
+
+It does **not** run the agents' own checks, the ones that make an agent ask the model again in a real round. Those checks need a decision log or a record of the searches made, and the script has neither. These are the checks it skips:
+
+- **Researcher** (`researcher.check`): a URL that no search returned; a query that was never searched; fewer than 1 or more than 3 queries; a query already run in an earlier round (caught only where the case lists it under `must_not_mention`); a technique that runs to more than one line.
+- **Proposer** (`proposer.check`): an addition that names a rule ID; a rewording or removal of a rule that is not in the policy (caught only where the case's `one_of` or `fields` lists the allowed rules, which every case does); a removal that carries text other than spaces; `rule_text` that runs to more than one line; an edit that repeats one already reverted (caught only as far as the case's `one_of` excludes it); an addition for a pattern that already has an active rule, and a rewording at the length limit that is not shorter (caught only by the case's `one_of` and `max_chars`).
+- **Critic** (`critic.check`): an example conversation ID that is not in the input (caught only where a `must_mention` misses it); `seen_in`, `out_of` and `same_as_pattern_id` out of range or unknown (caught only by the case's `fields` and `one_of`, which every case with `found` true now has).
+
+So **"N of M cases met their expectations" does not mean the agent's own code would accept the answers.** For example, a researcher answer that cites a URL no search returned, and for which no search was made at all, still shows as met when it meets the case's expectations. Check anything on the list above by hand. `scripts/run_round.py` does apply the checks, but it runs a whole round on its own inputs, not these cases, and it writes to the decision log and memory.
+
+The script prints nothing about this at run time. The spec fixes `N of M cases met their expectations` as the last line of the output (docs/specs/case-files.md, section 2), so no line can follow it.
+
 ## What a case is
 
 ```json
@@ -33,7 +47,7 @@ Hand-written cases for tuning the three training agents' prompts (stage 2, lane 
 - `fields` compares a top-level field of the answer exactly; `null` matches a field that is empty.
 - `non_empty`: each field must be there and not be null, `""`, spaces or `[]` (printed `EMPTY` otherwise). `one_of`: the field's value must be in the list (`NOT ONE OF`). `max_chars`: the field must be text of at most that many characters (`TOO LONG`); null text meets it only when `one_of` allows `remove` and the answer is a removal.
 - Blank means null, empty or spaces, **all the way down**: a list or object is blank when it is empty or when any value in it, at any depth, is blank. So `["  "]` and `["x", ""]` are as empty as `[]`, and one researcher source with a blank `url`, `title` or `technique` makes `sources` empty.
-- Every proposer case lists `rule_id` and `rule_text` in `non_empty`. The `rule_id` line is not applied to an addition (`ProposerOutput` gives an addition no rule ID); the `rule_text` line is not applied to a removal in a case whose `one_of` allows `remove`. Where an addition is allowed, `one_of.rule_id` lists `null` and the Conversation rules, so a blank rule ID on an addition, or a rule that is not in the policy, is `NOT ONE OF`.
+- Every proposer case lists `rule_id` and `rule_text` in `non_empty`. The `rule_id` line is not applied to an addition (`ProposerOutput` gives an addition no rule ID); the `rule_text` line is not applied to a removal in a case whose `one_of` allows `remove`, as long as its `rule_text` is null or `""`. A removal whose `rule_text` is spaces gets the line and is `EMPTY`, because the proposer's own check and `apply_edit` both refuse a removal that carries any text, and spaces count as text there. Where an addition is allowed, `one_of.rule_id` lists `null` and the Conversation rules, so a blank rule ID on an addition, or a rule that is not in the policy, is `NOT ONE OF`.
 - Every critic case with `found` true also lists `example_conversation_ids` in `non_empty`, fixes `same_as_pattern_id` (null where there is no earlier pattern) and fixes or bounds `seen_in`, because the critic's own check refuses a count of 0.
 - `tests/test_try_agent.py` takes each case's passing answer and replaces every field, list item and field of an item in turn with null, `""` and spaces, and removes it: each must miss an expectation, except the few on its allow-list, each with its reason.
 - **A case whose expectations cannot fail does not load** (exit code 2): an empty list or object under any key, or a blank phrase or field name anywhere in `expect`, is refused even when other checks in the same case are real.
