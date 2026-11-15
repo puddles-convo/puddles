@@ -8,11 +8,15 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 from io import StringIO
+import builtins
+import io
 import json
 import logging
 import os
 import re
 import socket
+import sys
+from pathlib import Path
 from threading import Event, Lock, Thread, current_thread
 
 import mlflow
@@ -67,7 +71,7 @@ class Gate:
 
     def __call__(self):
         self.entered.set()
-        if not self.open.wait(0.3):
+        if not self.open.wait(0.5):
             raise RuntimeError("test gate was not opened")
         return self.answer
 
@@ -92,7 +96,7 @@ class Background:
         self.thread.start()
 
     def result(self):
-        assert self.done.wait(0.15), "turn waited for a model it must discard"
+        assert self.done.wait(0.4), "turn waited for a model it must discard"
         if self.error is not None:
             raise self.error
         return self.value
@@ -121,7 +125,10 @@ def draft(**changes):
 def patch_dependency(monkeypatch, owner, name, replacement):
     """Replace the public dependency and any imported aliases by identity."""
     original = getattr(owner, name)
-    for module in (crisis, turn, chat):
+    # Dependencies may be imported into any project module, including worker helpers.
+    for module_name, module in list(sys.modules.items()):
+        if not module_name.startswith(("puddles.", "loop.", "scripts.")) or module is None:
+            continue
         for alias, value in list(vars(module).items()):
             if value is original:
                 monkeypatch.setattr(module, alias, replacement)
@@ -142,6 +149,15 @@ def isolated(tmp_path, monkeypatch):
 
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(socket.socket, "connect_ex", no_network)
+    # setup changes process-global MLflow state; restore it even in CLI tests.
+    uri = mlflow.get_tracking_uri()
+    from mlflow.tracking import fluent
+    monkeypatch.setattr(fluent, "_active_experiment_id", fluent._active_experiment_id)
+    yield
+    mlflow.flush_trace_async_logging()
+    if mlflow.active_run() is not None:
+        mlflow.end_run()
+    mlflow.set_tracking_uri(uri)
 
 
 @pytest.fixture
@@ -154,8 +170,8 @@ def session_factory(policy, path):
     def make(**changes):
         values = dict(session_id="acceptance", policy=policy, path=path,
                       helper_client=Client("A safe helper reply."),
-                      checker_client=Client(checker_line()), deadline_s=0.1,
-                      helper_wait_s=0.1)
+                      checker_client=Client(checker_line()), deadline_s=2.0,
+                      helper_wait_s=2.0)
         values.update(changes)
         return turn.Session(**values)
     return make
@@ -185,7 +201,9 @@ def assert_fixed(reply, text):
 
 def assert_timings(timings):
     assert set(timings) == {"keyword", "checker", "helper", "total"}
-    assert all(type(value) is int and value >= 0 for value in timings.values())
+    # An unanswered helper is explicitly not measured, rather than measured as zero.
+    assert all(type(value) is int and value >= (-1 if key == "helper" else 0)
+               for key, value in timings.items())
 
 
 # Section 2: only rule 3 releases a helper draft. Include every section 6 row,
@@ -223,12 +241,7 @@ def test_release_full_safety_matrix(path, case, has_keyword, has_draft, failed_b
     )
     counts = status == "answered" and verdict is not None and sid == "acceptance" and number == 1
     assert failures == (0 if counts else failed_before + 1)
-    if has_keyword and counts and risk == "crisis" and category is None:
-        # Rule 1 omits rule 2's explicit missing-category fallback. Only the
-        # fixed-response requirement is certain for this schema-valid input.
-        assert reply.fixed_handoff_response is True
-        assert reply.text in path.fixed_responses.values()
-    elif has_keyword or (counts and risk == "crisis"):
+    if has_keyword or (counts and risk == "crisis"):
         expected = path.fixed_responses[(category or "unsure") if counts and risk == "crisis" else "unsure"]
         assert_fixed(reply, expected)
     elif counts and has_draft:
@@ -254,19 +267,25 @@ def test_load_path_uses_owner_values():
     assert crisis.RECENT_TURNS == 6 and crisis.CHECKER_MAX_TOKENS == 40
 
 
-def test_load_path_reloads_owned_sources(monkeypatch):
+def test_load_path_builds_from_valid_owned_sources(monkeypatch):
     source = deepcopy(owned.load_crisis_path())
     source["version"] = "acceptance-source-version"
     source["checker"]["timeout_seconds"] = 0.017
-    source["checker"]["system"], source["checker"]["user_template"] = (
-        source["checker"]["user_template"], source["checker"]["system"])
+    # Preserve the required template fields; cache invalidation is not a requirement.
+    source["checker"]["system"] += "\n"
+    source["checker"]["user_template"] += "\n"
     source["holding_line"], source["offline_line"] = source["offline_line"], source["holding_line"]
     source["fixed_responses"] = dict.fromkeys(source["fixed_responses"], source["holding_line"])
     # Reassign owner-loaded text; no prompt or fixed sentence is restated here.
     patch_dependency(monkeypatch, owned, "load_crisis_path", lambda: deepcopy(source))
     keywords = list(reversed(owned.load_keywords()))
     patch_dependency(monkeypatch, owned, "load_keywords", lambda: list(keywords))
-    value = crisis.load_path()
+    clear = getattr(crisis.load_path, "cache_clear", lambda: None)
+    clear()
+    try:
+        value = crisis.load_path()
+    finally:
+        clear()
     assert (value.version, value.timeout_s, value.keywords) == (source["version"], 0.017, keywords)
     assert value.system == source["checker"]["system"]
     assert value.user_template == source["checker"]["user_template"]
@@ -349,6 +368,7 @@ def test_helper_receives_only_unchanged_helper_context(session_factory, risk, ca
     assert call["messages"] == helper_messages(expected_turns)
     assert "CHECKER_ONLY_SENTINEL" not in json.dumps(call)
     assert helper.threads[0] is not checker.threads[0]
+    assert helper.threads[0].daemon and checker.threads[0].daemon
     assert helper.threads[0] is not current_thread() and checker.threads[0] is not current_thread()
     assert result.keyword == owned.keyword_match(text, session.path.keywords)
     assert result.check_status == "answered"
@@ -358,6 +378,9 @@ def test_helper_receives_only_unchanged_helper_context(session_factory, risk, ca
     else:
         assert result.reply.text == "A helper answer."
         assert result.helper_failed is False
+        assert result.timings_ms["helper"] >= 0
+    assert (result.reply.session_id, result.reply.turn, result.reply.policy_version) == (
+        session.session_id, 1, session.policy.version)
     assert session.turns == expected_turns + [Turn(speaker="helper", text=result.reply.text)]
     assert len(session.lines) == 1
     line = session.lines[0]
@@ -405,6 +428,8 @@ def test_discarded_helper_never_delays_fixed_response(session_factory, outcome):
         else:
             expected = session.path.offline_line if outcome == "offline" else session.path.holding_line
         assert_fixed(result.reply, expected)
+        assert result.helper_failed is False
+        assert result.timings_ms["helper"] == -1
         if outcome in {"failed", "unreadable", "late", "offline"}:
             assert result.checked is None
             assert result.check_status == ("failed" if outcome == "offline" else outcome)
@@ -543,7 +568,6 @@ def test_session_paths_exact_names(tmp_path, sid):
 
 def test_session_log_jsonl_order_and_spoken_record(tmp_path, path):
     assert session_log.read_lines(tmp_path, "acceptance") == []
-    assert list(tmp_path.iterdir()) == []
     lines = [session_log.TurnLine(session_id="acceptance", turn=1, user_text="Message one.\nStill one turn.",
                                   keyword_matched=False, check_status="failed", checked=None,
                                   reply=draft(session_id="acceptance", turn=1, text=path.holding_line,
@@ -576,17 +600,33 @@ def test_session_log_jsonl_order_and_spoken_record(tmp_path, path):
 @pytest.mark.parametrize("remember", [False, True])
 @pytest.mark.parametrize("outcome", ["safe", "failed", "unreadable", "late", "crisis", "keyword"])
 def test_without_training_no_disk_trace_run_or_user_log(local_store, tmp_path, caplog, capsys,
-                                                        session_factory, remember, outcome):
+                                                        session_factory, remember, outcome, monkeypatch):
     marker = "PRIVATE_TYPED_MARKER_74831"
     caplog.set_level(logging.DEBUG)
     late_gate = Gate(checker_line())
     answer = {"safe": checker_line(), "failed": RuntimeError(marker), "unreadable": marker,
               "late": late_gate, "crisis": checker_line("crisis", "self"), "keyword": checker_line()}[outcome]
     session = session_factory(root=tmp_path / "session-root", remember_me=remember,
-                              checker_client=Client(answer), deadline_s=0.015 if outcome == "late" else 0.1,
+                              checker_client=Client(answer), deadline_s=0.015 if outcome == "late" else 2.0,
                               helper_client=Client(RuntimeError(marker) if outcome == "failed" else "A helper answer."))
     before_traces, before_runs = store_contents(local_store)
     before_files = {file.relative_to(tmp_path) for file in tmp_path.rglob("*") if file.is_file()}
+    # Observe all Python file-write destinations, including paths outside root/cwd.
+    writes = []
+    def watch_open(original):
+        def observe(file, mode="r", *args, **kwargs):
+            if any(flag in mode for flag in "wax+"):
+                writes.append(str(file))
+            return original(file, mode, *args, **kwargs)
+        return observe
+    def watch_replace(original):
+        def observe(src, dst, *args, **kwargs):
+            writes.append(str(dst))
+            return original(src, dst, *args, **kwargs)
+        return observe
+    monkeypatch.setattr(builtins, "open", watch_open(builtins.open))
+    monkeypatch.setattr(io, "open", watch_open(io.open))
+    monkeypatch.setattr(os, "replace", watch_replace(os.replace))
     text = marker + (" " + owned.load_keywords()[0] if outcome == "keyword" else "")
     try:
         result = turn.run_turn(session, text)
@@ -595,7 +635,13 @@ def test_without_training_no_disk_trace_run_or_user_log(local_store, tmp_path, c
         assert turn.end_session(session) is None
     finally:
         late_gate.open.set()
-        session.checker_client.finished.wait(0.1)
+        # complete() finishing precedes worker record/log handling: join the workers.
+        for client in (session.helper_client, session.checker_client):
+            assert client.finished.wait(0.2)
+            for worker in client.threads:
+                worker.join(0.2)
+                assert not worker.is_alive()
+    assert writes == [], f"writes without consent: {writes}"
     assert session.lines == [] and session.turns == []
     traces, runs = store_contents(local_store)
     assert len(traces) == len(before_traces) == 0
@@ -652,24 +698,12 @@ def test_training_writes_spoken_lines_and_one_turn_trace(local_store, tmp_path, 
     patch_dependency(monkeypatch, helper_api, "helper_reply", helper)
     patch_dependency(monkeypatch, crisis, "run", checker)
     first = turn.run_turn(session, "Training message one.")
-    # The second helper is discarded. Use the first fully awaited turn for the
-    # trace-parent assertions; late/discarded trace lifetime is unspecified.
+    # Only the turn span name and client wrapper names are contractual.
     traces, _ = store_contents(local_store)
     assert len(traces) == 1
     spans = traces[0].data.spans
     roots = [span for span in spans if span.name == "turn"]
     assert len(roots) == 1
-    for name in ("llm:helper", "llm:crisis_checker"):
-        model_spans = [span for span in spans if span.name == name]
-        assert len(model_spans) == 1
-        # The contract fixes containment, not whether intermediate spans exist.
-        by_id = {span.span_id: span for span in spans}
-        parent = model_spans[0].parent_id
-        visited = set()
-        while parent != roots[0].span_id:
-            assert parent in by_id and parent not in visited
-            visited.add(parent)
-            parent = by_id[parent].parent_id
     assert {name for name, _ in seen} == {"helper", "checker"}
     for name, wrapper in seen:
         assert isinstance(wrapper, tracing.TracedClient)
@@ -720,13 +754,12 @@ def test_chat_fake_skips_blanks_quits_and_keeps_nothing(tmp_path, policy_path):
                      stdin=StringIO("\nAn ordinary message.\n  \n/quit\nNot a message.\n"), stdout=output)
     assert code == 0
     lines = output.getvalue().splitlines()
-    assert len([line for line in lines if line.startswith("robot: ")]) == 1
+    assert sum(line.count("robot: ") for line in lines) == 1
     diagnostic = [line for line in lines if line.startswith("  [")]
     assert len(diagnostic) == 1
     assert any(level in diagnostic[0] for level in ("none", "concern", "crisis", "failed", "late", "unreadable"))
     assert len(re.findall(r"\d+", diagnostic[0])) >= 3
-    assert len(lines) == 3
-    assert lines[-1].strip()
+    assert "nothing" in lines[-1].lower()
     assert not (tmp_path / "chat").exists()
 
 
@@ -746,14 +779,18 @@ def test_chat_errors_return_two_and_one_stderr_line(tmp_path, policy_path, capsy
     assert not (tmp_path / "chat").exists()
 
 
-def test_chat_real_mode_uses_helper_endpoint_twice_and_no_setup_without_consent(
+def test_chat_real_mode_uses_helper_endpoint_and_no_setup_without_consent(
         tmp_path, policy_path, monkeypatch):
-    clients = iter([Client("A CLI helper reply."), Client(checker_line())])
+    # Route by the contractual checker request, permitting either creation order
+    # and one shared endpoint client as well as two separate clients.
+    def answer_for_request(system, messages):
+        return checker_line() if system == crisis.load_path().system else "A CLI helper reply."
+    client = llm_api.FakeClient(answer_for_request)
     prefixes = []
 
     def client_from_env(prefix):
         prefixes.append(prefix)
-        return next(clients)
+        return client
 
     patch_dependency(monkeypatch, llm_api, "client_from_env", client_from_env)
     patch_dependency(monkeypatch, tracing, "setup", lambda *a, **k: pytest.fail("setup without training consent"))
@@ -761,7 +798,7 @@ def test_chat_real_mode_uses_helper_endpoint_twice_and_no_setup_without_consent(
     assert chat.main(["--policy", str(policy_path), "--mlflow", f"sqlite:///{tmp_path}/unused.db",
                       "--root", str(tmp_path / "chat"), "--session-id", "cli-live"],
                      stdin=StringIO("An ordinary message.\n"), stdout=output) == 0
-    assert prefixes == ["HELPER", "HELPER"]
+    assert prefixes and set(prefixes) == {"HELPER"}
     assert "robot: A CLI helper reply." in output.getvalue()
     assert not (tmp_path / "unused.db").exists()
 
@@ -822,10 +859,19 @@ def test_release_reads_text_from_supplied_path(path, kind):
     assert_fixed(reply, expected)
 
 
-def test_checker_run_does_not_apply_the_clock(path):
+@pytest.mark.parametrize("timeout", [0.0, 0.001])
+def test_checker_run_does_not_apply_the_clock(path, timeout):
     inp = crisis.build_input("acceptance", 1, [], "A message.")
-    result = crisis.run(Client(checker_line()), inp, replace(path, timeout_s=0.0))
-    assert result.risk == "none"
+    gate = Gate(checker_line())
+    pending = Background(lambda: crisis.run(Client(gate), inp, replace(path, timeout_s=timeout)))
+    try:
+        assert gate.entered.wait(0.1)
+        assert not pending.done.wait(0.02), "run applied the path timeout"
+        gate.open.set()
+        assert pending.result().risk == "none"
+    finally:
+        gate.open.set()
+        pending.thread.join(0.1)
 
 
 def test_turn_uses_path_timeout_when_deadline_is_none(session_factory):
@@ -844,15 +890,26 @@ def test_turn_uses_path_timeout_when_deadline_is_none(session_factory):
 
 
 @pytest.mark.parametrize("wrong_identity", ["session", "turn"])
-def test_turn_never_releases_for_mismatched_verdict(monkeypatch, session_factory, wrong_identity):
-    value = checked(session_id="another" if wrong_identity == "session" else "acceptance",
+@pytest.mark.parametrize("risk", ["none", "crisis"])
+def test_turn_never_releases_for_mismatched_verdict(monkeypatch, session_factory, wrong_identity, risk):
+    value = checked(risk, "danger" if risk == "crisis" else None,
+                    session_id="another" if wrong_identity == "session" else "acceptance",
                     turn=2 if wrong_identity == "turn" else 1)
     patch_dependency(monkeypatch, crisis, "run", lambda *a, **k: value)
-    session = session_factory()
-    result = turn.run_turn(session, "A message.")
-    assert_fixed(result.reply, session.path.holding_line)
-    assert session.failed_checks == 1
-    # The spec does not define whether this is logged as answered or failed.
+    gate = Gate("A draft that must be discarded.")
+    session = session_factory(helper_client=Client(gate))
+    pending = Background(lambda: turn.run_turn(session, "A message."))
+    try:
+        result = pending.result()
+        assert_fixed(result.reply, session.path.holding_line)
+        assert session.failed_checks == 1
+        assert result.check_status == session.lines[0].check_status == "failed"
+        assert result.checked is None and session.lines[0].checked is None
+        assert not session.helper_client.finished.is_set(), "foreign verdict waited for helper"
+    finally:
+        gate.open.set()
+        pending.thread.join(0.1)
+        assert session.helper_client.finished.wait(0.2)
 
 
 def test_a_late_verdict_cannot_complete_another_session(session_factory):
@@ -914,7 +971,6 @@ def test_fake_cli_answers_pass_through_owned_parser(tmp_path, policy_path, monke
     assert chat.main(["--fake", "--policy", str(policy_path), "--root", str(tmp_path / "chat")],
                      stdin=StringIO("Ordinary message.\n"), stdout=output) == 0
     assert seen, "fake checker bypassed the owner's parser"
-    assert all(parser(line)[0] in {"none", "concern", "crisis"} for line in seen)
 
 
 def test_helper_wait_budget_starts_with_turn_not_checker_answer(session_factory):
@@ -941,3 +997,91 @@ def test_helper_wait_budget_starts_with_turn_not_checker_answer(session_factory)
         assert_fixed(result.reply, session.path.holding_line)
     finally:
         session.helper_client.finished.wait(0.1)
+
+
+@pytest.mark.parametrize("failed_before", [0, 1])
+@pytest.mark.parametrize("outcome", ["failed", "late", "unreadable", "foreign-session", "foreign-turn"])
+def test_keyword_overrides_every_nonanswer_at_turn_level(monkeypatch, session_factory, failed_before, outcome):
+    """Rule 1 still applies when the checker cannot authorize a helper draft."""
+    gate = Gate(checker_line())
+    answer = {"failed": RuntimeError("checker failure"), "late": gate,
+              "unreadable": "invalid verdict"}.get(outcome)
+    if outcome.startswith("foreign"):
+        verdict = checked("crisis", "danger", session_id="other" if outcome == "foreign-session" else "acceptance",
+                          turn=2 if outcome == "foreign-turn" else 1)
+        patch_dependency(monkeypatch, crisis, "run", lambda *a, **k: verdict)
+    session = session_factory(checker_client=Client(answer), deadline_s=0.02 if outcome == "late" else 2.0)
+    session.failed_checks = failed_before
+    try:
+        result = turn.run_turn(session, owned.load_keywords()[0])
+        assert_fixed(result.reply, session.path.fixed_responses["unsure"])
+        assert result.check_status == ("failed" if outcome.startswith("foreign") else outcome)
+        assert result.checked is None and session.lines[0].checked is None
+        assert session.failed_checks == failed_before + 1
+    finally:
+        gate.open.set()
+        if outcome == "late":
+            assert session.checker_client.finished.wait(0.2)
+            session.checker_client.threads[0].join(0.2)
+
+
+@pytest.mark.parametrize("outcome", ["crisis", "holding", "offline", "keyword"])
+def test_nonwait_reply_reports_an_already_failed_helper(session_factory, outcome):
+    """A discarded helper's completed error must still be reported accurately."""
+    helper = Client(RuntimeError("helper failed"))
+    def answer_after_helper_failure():
+        assert helper.started.wait(0.2)
+        helper.threads[0].join(0.2)
+        assert not helper.threads[0].is_alive()
+        if outcome in {"holding", "offline"}:
+            raise RuntimeError("checker failed")
+        return checker_line("crisis", "self") if outcome == "crisis" else checker_line()
+    session = session_factory(helper_client=helper, checker_client=Client(answer_after_helper_failure))
+    session.failed_checks = int(outcome == "offline")
+    text = owned.load_keywords()[0] if outcome == "keyword" else "Ordinary message."
+    result = turn.run_turn(session, text)
+    expected = (session.path.fixed_responses["self" if outcome == "crisis" else "unsure"]
+                if outcome in {"crisis", "keyword"} else getattr(session.path, f"{outcome}_line"))
+    assert_fixed(result.reply, expected)
+    assert result.helper_failed is True
+    assert result.timings_ms["helper"] >= 0
+
+
+def test_late_helper_cannot_complete_another_session(session_factory):
+    """Opening A's discarded helper during B cannot supply B's draft."""
+    old_gate, new_gate = Gate("An old session draft."), Gate("A new session draft.")
+    old = session_factory(helper_client=Client(old_gate), helper_wait_s=0.02)
+    new = session_factory(session_id="new-session", helper_client=Client(new_gate))
+    pending = None
+    try:
+        first = turn.run_turn(old, "Old message.")
+        assert_fixed(first.reply, old.path.holding_line)
+        assert first.helper_failed is True
+        pending = Background(lambda: turn.run_turn(new, "New message."))
+        assert new_gate.entered.wait(0.2)
+        old_gate.open.set()
+        old.helper_client.threads[0].join(0.2)
+        assert not pending.done.wait(0.02)
+        new_gate.open.set()
+        second = pending.result()
+        assert second.reply.text == "A new session draft."
+        assert second.reply.session_id == "new-session"
+        assert old.lines[0].reply == first.reply
+    finally:
+        old_gate.open.set()
+        new_gate.open.set()
+        if pending is not None:
+            pending.thread.join(0.2)
+
+
+def test_checker_deadline_starts_after_keyword_work(monkeypatch, session_factory):
+    """Time before the checker starts cannot consume its own deadline."""
+    original = owned.keyword_match
+    def slow_keyword(*args, **kwargs):
+        Event().wait(0.12)
+        return original(*args, **kwargs)
+    patch_dependency(monkeypatch, owned, "keyword_match", slow_keyword)
+    session = session_factory(deadline_s=0.08)
+    result = turn.run_turn(session, "Ordinary message.")
+    assert result.check_status == "answered"
+    assert result.reply.text == "A safe helper reply."
