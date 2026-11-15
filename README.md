@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/media/puddles-robot.png" alt="The Vibe Therapist robot: a StackChan on an M5Stack CoreS3" width="200"></p>
+<p align="center"><img src="docs/media/puddles-robot.png" alt="The Vibe Therapist robot: a StackChan on an M5Stack CoreS3" width="280"></p>
 
 <h1 align="center">Vibe Therapist</h1>
 
