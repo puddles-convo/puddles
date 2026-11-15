@@ -346,6 +346,24 @@ The full design, including the log format, consent and forgetting, and the crisi
 
 The proposer is the research agent of the loop. Each round it picks **one** action, fills in its arguments, and states what it expects to happen. Code carries the action out, the gatekeeper tests it, and the outcome is logged. Every action can be reverted.
 
+### Version 1: the five tools we build first
+
+| # | Tool | Kind | Build time (h, estimate) | Why it is in version 1 |
+|---|---|---|---|---|
+| 1 | `edit_rule` | Harness | 3–5 | The core loop. Reflective prompt edits took Qwen3-8B from 45.2 to 54.9 in GEPA, the strongest evidence at this model size |
+| 2 | `add_skill_card` | Harness | 4–6 | Turns what the researcher finds with Exa into cited technique cards. A self-updating playbook beat GEPA by 13 points in ACE |
+| 3 | `set_examples` | Harness | 1–2 | The cheapest gain: the loop's own best conversations become few-shot examples |
+| 4 | `train_adapter` with DPO (includes `build_dataset`) | Fine-tuning | 4–6 | The weight update: best and worst reply pairs from the loop's own conversations, with safety data mixed in. Emotional-support precedent at 7 to 9B (CSO, DecoupledESC); more stable than GRPO |
+| 5 | `merge_adapters` | Weight space | 3–5 | Searches the blend between the base model and the adapter, one validation pass per candidate, no retraining. Also a safety dial: it can find the blend that keeps the gains and loses any harm |
+
+**Always on, not a choice:** `project_safe` (Safe LoRA) runs on every adapter before the gate, and the gate compares the adapter with and without it.
+
+**Version 1 escalation:** tools 1 to 3 first. Move to tool 4 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Tool 5 becomes available once an adapter exists. One round in five is reserved for tool 4 or 5, so the loop measures what weight changes are worth.
+
+**Day-1 check:** tools 4 and 5 depend on Tinker's adapter export and vLLM's LoRA path working for Qwen3.5's layer types. If that fails, `set_strategy_rules` replaces them and Qwen3-8B is the fallback model for training.
+
+The full toolbox, including what comes after version 1:
+
 **Harness actions** (minutes per try)
 
 | # | Action | What it changes | Limits enforced by code |
@@ -381,7 +399,7 @@ We do not know how much these improve a 9B support helper; no source tests them 
 - **Keep or revert** stays the rule for what reaches the robot: only the best version in the archive that passed every gate condition.
 - **Training budget for the weekend:** up to 3 adapter runs in total (SFT, DPO or GRPO), unlimited merges and projections (they are cheap).
 
-**When to escalate.** Use actions 1 to 5 first. Move to 6 and 7 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Separately, **one round in five is reserved for an exploratory action** (6 to 11), even while harness changes are still working, so the scoreboard learns what weight changes are worth instead of never trying them.
+**When to escalate (full toolbox, after version 1).** Use actions 1 to 5 first. Move to 6 and 7 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Separately, **one round in five is reserved for an exploratory action** (6 to 11), even while harness changes are still working, so the scoreboard learns what weight changes are worth instead of never trying them.
 
 **What the proposer receives.** The failure pattern and the sources; a lever scoreboard built by code from earlier gate outcomes (for each action: times tried, times kept, average gain, cost); and the remaining budget in rounds, time, spend and training runs.
 
@@ -402,7 +420,7 @@ The gate outcome records whether the prediction came true, so the proposer's cal
 
 **Outside the toolbox.** The proposer can never change the judges, the simulated users or scenarios, the test split, the safety cases, the crisis checker and its fixed responses, the gate rule or the budget.
 
-**Build order.** Actions 1 to 3 first, then 6 and 7 (SFT or DPO) as the escalation path, then 9 and 10 (cheap, no training), then 8 (GRPO, the longest to build), then 4, 5 and 11 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+**Build order.** Version 1 first: actions 1 to 3, then 6 and 7 with DPO, plus `project_safe` (10), then `merge_adapters` (9). After version 1: GRPO (8, the longest to build), then 4, 5 and 11 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 
 ## 8. Handoffs
 
