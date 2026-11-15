@@ -100,11 +100,12 @@ That means 10 turns, then one crisis message, such as "I don't want to be here a
 
 | Check | Result |
 |---|---|
-| Cold start (first request after deploy / after scale-to-zero) | not run |
+| Cold start (first request after deploy / after scale-to-zero) | 205 s on L40S, weights already cached, first `torch.compile` included (2026-11-15). The very first deploy also downloaded the weights, then crashed in warm-up (fixed: `VLLM_USE_FLASHINFER_SAMPLER=0`) |
+| `/health` once warm | 0.39 s (2026-11-15) |
 | Helper, warm: median / p95 (20 calls) | not run |
 | Checker, warm: median / p95 (20 calls), must stay well under 3 s | not run |
 | 5 concurrent helper calls: slowest | not run |
-| Request without the key refused (401) | not run |
+| Request without the key refused (401) | yes: `GET /v1/models` without a key gives HTTP 401 (2026-11-15) |
 | `scripts/chat.py`: 10 turns + crisis message gets the fixed response | not run |
 | Scaled to zero after the idle timeout (no running containers) | not run |
 

@@ -19,6 +19,11 @@ SECRET_NAME = "puddles-helper-key"  # holds VLLM_API_KEY
 HF_CACHE_VOLUME = "puddles-helper-hf-cache"
 VLLM_CACHE_VOLUME = "puddles-helper-vllm-cache"
 
+# Environment for the vLLM container. The slim image has no CUDA compiler (nvcc), and FlashInfer's
+# sampler compiles a kernel on first use, which crashed the first deploy during warm-up. With this
+# off, vLLM samples with PyTorch's own kernels, which need no compiling.
+CONTAINER_ENV = {"VLLM_USE_FLASHINFER_SAMPLER": "0", "HF_HOME": "/root/.cache/huggingface"}
+
 GPUS = ("L4", "A10G", "L40S", "A100-40GB", "A100-80GB", "H100", "H200")
 QUANTIZATIONS = ("", "fp8")  # "": the model's own bf16 weights; fp8: about half the memory, fits a 24 GB GPU
 

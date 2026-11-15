@@ -14,6 +14,7 @@ import modal
 
 from deploy.helper_config import (
     APP_NAME,
+    CONTAINER_ENV,
     HF_CACHE_VOLUME,
     PORT,
     SECRET_NAME,
@@ -28,7 +29,7 @@ settings = HelperSettings.from_env(os.environ)  # read where `modal deploy` runs
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(f"vllm=={VLLM_VERSION}")
-    .env({**settings.as_env(), "HF_HOME": "/root/.cache/huggingface"})  # the container serves what was deployed
+    .env({**settings.as_env(), **CONTAINER_ENV})  # the container serves what was deployed
     .add_local_python_source("deploy")
 )
 
