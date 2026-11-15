@@ -356,7 +356,7 @@ The proposer is the research agent of the loop. Each round it picks **one** acti
 | 4 | `train_adapter` with DPO (includes `build_dataset`) | Fine-tuning | 4–6 | The weight update: best and worst reply pairs from the loop's own conversations, with safety data mixed in. Emotional-support precedent at 7 to 9B (CSO, DecoupledESC); more stable than GRPO |
 | 5 | `merge_adapters` | Weight space | 3–5 | Searches the blend between the base model and the adapter, one validation pass per candidate, no retraining. Also a safety dial: it can find the blend that keeps the gains and loses any harm |
 
-**Why both kinds of tool.** GEPA reports that prompt evolution beats reinforcement learning when rollouts are limited. Giving the proposer both harness and weight tools lets us test that claim on our task instead of assuming it: see the three arms in [section 10](#10-how-we-measure-the-result).
+**Why both kinds of tool.** We let the agent decide what is best for it: improving its harness or updating its weights. What it chooses, and how each choice works out, is reported as a side result in [section 10](#10-how-we-measure-the-result).
 
 **Always on, not a choice:** `project_safe` (Safe LoRA) runs on every adapter before the gate, and the gate compares the adapter with and without it.
 
@@ -472,16 +472,15 @@ The loop's own judge decides what is kept. The headline result is measured separ
 | Part | Proposal |
 |---|---|
 | Question | Does the improved harness (and adapter, if kept) make a 9B model a better and still safe support helper, and how much of the gap to a frontier model does it close? |
-| Hypothesis under test | GEPA reports that reflective prompt evolution beats reinforcement learning under a tight budget: on Qwen3-8B, 54.9 for GEPA with about 1.8k to 7k rollouts against 48.9 for GRPO with 24k ([arXiv 2507.19457](https://arxiv.org/abs/2507.19457)). We test whether that holds for emotional support, and whether an agent given both kinds of tool learns to prefer the better one. Written down before the run. |
-| Arms, same budget | Each arm gets the same number of scored conversations (rollouts) and the same wall-clock time, starts from the same placeholder policy, and is scored on the same held-out test. **(H) harness only:** tools 1 to 3. **(W) weights only:** tool 4 (DPO; GRPO if built in time, which matches GEPA's comparison exactly), then tool 5. **(M) mixed:** the full version 1 toolbox, the proposer choosing. The arms run in parallel on Modal. |
-| What would confirm or refute it | H beats W on the held-out test with a confidence interval that excludes zero: GEPA's finding holds here. W beats H: it does not. M is at least as good as the better of H and W, and its scoreboard shows it moving its budget toward the stronger lever: the proposer learns which lever works. Any outcome is reported. |
 | Test data | ESConv test split; CounselBench-Adv as external validation. Neither is used by the loop. |
 | Baselines | (a) the 5-line placeholder policy; (b) a hand-written policy; (c) the loop without Exa, where edits come from the critic alone; (d) a frontier model with the hand-written policy, as the ceiling. More to come. |
 | Held-out jury | Judges from other model families than the helper and the loop's judge, with distinct roles: the person seeking support, a counsellor, a safety reviewer (veto), and a sceptic looking for empty validation and flattery. Each score is reported separately with the agreement between jurors. |
 | Safety | Crisis handling (VERA-MH, once its licence is checked) and over-refusal on harmless messages, before and after every kept adapter. |
 | Uncertainty | Paired comparison on the same scenarios and seeds, with a bootstrap 95% interval on the difference. |
 | Headline | "Quality on the held-out test rose from X to Y (interval), closing Z% of the gap to the frontier ceiling, with no crisis-handling regression." |
-| Also reported | The gap between the loop's judge and the held-out jury, which shows how much the loop learned to please its own judge; the proposer's prediction accuracy; every reverted action. |
+| Also reported | The gap between the loop's judge and the held-out jury, which shows how much the loop learned to please its own judge; the proposer's prediction accuracy; every reverted action; and which kinds of change the agent chose (next paragraph). |
+
+**Side note: what does the agent choose for itself?** The agent has both kinds of tool, harness changes and weight updates, and decides which to use. We want to see what it picks, and what each choice achieved, from the lever scoreboard and the decision log. For context, GEPA reports that prompt evolution beat reinforcement learning on Qwen3-8B with far fewer rollouts (54.9 against 48.9; [arXiv 2507.19457](https://arxiv.org/abs/2507.19457)). We do not set out to test that claim; we report what our agent did and how it turned out.
 
 ## 11. Data
 
