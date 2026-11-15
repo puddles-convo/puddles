@@ -209,8 +209,8 @@ def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter
     def use_helper(client: ChatClient, name: str) -> None:
         deps.helper_client = client
         gate_deps.helper_client = tracing.TracedClient(client, "helper")
-        if base_price is not None:  # the adapter is priced as the model it was trained from
-            meter.prices.models[name] = base_price
+        if base_price is not None:  # priced as the model it was trained from, under the name it is called by
+            meter.prices.models[model_name(client)] = base_price
 
     step = WeightStep(settings=settings, backend_factory=factory, loader=loader, gate_deps=gate_deps, log=log,
                       root=root, start_policy=start_policy, validation_ids=validation_ids,

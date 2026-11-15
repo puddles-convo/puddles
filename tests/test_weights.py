@@ -321,3 +321,29 @@ def test_serve_must_be_tinker_or_vllm(tmp_path):
     p.write_text("[weights]\nserve = \"modal\"\n")
     with pytest.raises(ConfigError):
         load_weight_settings(p)
+
+
+def test_a_restored_adapter_is_priced_under_the_model_name_it_is_called_by(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from puddles.usage import Meter, ModelPrice, Prices
+
+    root = tmp_path / "root"
+    ledger.append(root, ledger.AdapterEvent(after_round=3, adapter_id="adapter-01", method="dpo", trigger="t",
+                                            base_model="b", policy_version="policy-v1", outcome="kept", reason="r",
+                                            sampler_path="tinker://run/sampler_weights/adapter-01",
+                                            served_as="adapter-01-oldvllmname"))
+    monkeypatch.setenv("TINKER_API_KEY", "k")
+    cfg_path = tmp_path / "run.toml"
+    cfg_path.write_text('[weights]\nserve = "tinker"\nbase_model = "Qwen/Qwen3.5-9B"\n')
+    monkeypatch.setenv("PUDDLES_CONFIG", str(cfg_path))
+    helper = SimpleNamespace(model="helper-base")
+    meter = Meter(root, Prices(models={"helper-base": ModelPrice(1.0, 2.0)}))
+    deps = SimpleNamespace(helper_client=helper)
+    gate_deps = SimpleNamespace(helper_client=helper)
+    args = SimpleNamespace(weights="dpo", fake=False)
+    from puddles.config import LoopConfig
+
+    driver._weight_step(args, LoopConfig(), deps, gate_deps, meter, helper, DecisionLog(root), root, POLICY, [])
+    assert deps.helper_client.model == "tinker://run/sampler_weights/adapter-01"
+    assert meter.prices.models["tinker://run/sampler_weights/adapter-01"] == ModelPrice(1.0, 2.0)
