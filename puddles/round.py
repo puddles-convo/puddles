@@ -54,6 +54,11 @@ class RoundResult:
     # Set by the gate, for the round event. None means not measured, never that it passed.
     scores: Optional[LogScores] = None
     safety: Optional[LogSafety] = None
+    candidate_sha256: Optional[str] = None  # the candidate text the gate tested; finish_round promotes only that
+
+
+class CandidateChanged(RuntimeError):
+    """The candidate file is not the text the gate tested, so it must not be promoted."""
 
 
 def policy_in_force(root: Path, fallback: Path) -> Path:
@@ -226,16 +231,22 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     promoted: Optional[tuple[str, str]] = None
     if gate is not None:
         assert result.candidate_path is not None and result.edit is not None
+        # One reading of the candidate. A kept candidate is promoted only if it is the text the gate
+        # tested; this is checked before the record, the policy file or the event is written.
+        candidate_text = result.candidate_path.read_text()
+        if gate.decision == "kept" and result.candidate_sha256 is not None \
+                and sha256_text(candidate_text) != result.candidate_sha256:
+            raise CandidateChanged(f"{result.candidate_path} changed after the gate tested it; nothing was promoted")
         result.refs["outcome"] = save_record(gate, result.round, root)
         outcome, reason = gate.decision, gate.reason
-        candidate = parse_policy(result.candidate_path.read_text())
+        candidate = parse_policy(candidate_text)
         if gate.decision == "kept":
             candidate.version = gate.policy_in_force
             text = render_policy(candidate)
             promoted = (candidate.version, text)
             policy.new, policy.new_sha256, policy.in_force = candidate.version, sha256_text(text), candidate.version
         else:
-            policy.new, policy.new_sha256 = candidate.version, sha256_text(result.candidate_path.read_text())
+            policy.new, policy.new_sha256 = candidate.version, sha256_text(candidate_text)
     p = result.pattern
     event = RoundEvent(
         round=result.round, outcome=outcome, records=result.refs, policy=policy, reason=reason or outcome,

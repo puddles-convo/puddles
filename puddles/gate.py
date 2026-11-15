@@ -122,6 +122,31 @@ class GateReport:
     log_scores: Optional[LogScores] = None  # None when validation gave no complete scores
     log_safety: Optional[LogSafety] = None  # None when the safety check did not run
     safety: Optional[SafetyResult] = None
+    candidate_sha256: Optional[str] = None  # the hash the checks were made on; None when it could not be read
+
+
+class _Changed(GateError):
+    """A policy file's text differs from the text the checks were made on."""
+
+
+def _read_text(path: Path | str) -> str:
+    """A policy file's text exactly as `loop.policy.load_policy` reads it, so the hashes compare."""
+    return Path(path).read_bytes().decode("utf-8")
+
+
+def _load_tied(path: Path | str, what: str, expected: Optional[str] = None) -> Policy:
+    """Load a policy, hashing the file before and after the load.
+
+    The two hashes and the hash of the loaded text must agree, and equal `expected` when given:
+    otherwise the file changed under the gate, and the evidence would be about other bytes.
+    """
+    before = sha256_text(_read_text(path))
+    policy = check_policy_file(Path(path))
+    after = sha256_text(_read_text(path))
+    first = expected if expected is not None else before
+    if not before == sha256_text(policy.text) == after == first:
+        raise _Changed(f"the {what} changed while it was being tested")
+    return policy
 
 
 # ---------- scores ----------
@@ -165,7 +190,12 @@ def score_policy(deps: GateDeps, policy_path: Path, scenario_ids: list[str], rou
     Both files are saved, the scores even when some or all are missing. Scores are averaged only
     when every conversation finished and was scored: averaging the survivors can look like a gain.
     """
-    policy = check_policy_file(Path(policy_path))
+    return _score(deps, check_policy_file(Path(policy_path)), scenario_ids, round_, tag)
+
+
+def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int, tag: str) -> Evidence:
+    """score_policy on a policy already loaded, so the caller can tie the conversations to the
+    exact text its checks were made on."""
     scenarios = _pick(deps.scenarios, scenario_ids)
     name = f"round-{round_:02d}-{_batch_name(tag)}.jsonl"
     root = Path(deps.root)
@@ -240,16 +270,26 @@ def current_scores(deps: GateDeps, policy_path: Path, scenario_ids: list[str]) -
     Scored as round 0 with the tag `current` unless the file matches every field of the key.
     Incomplete evidence raises GateError and leaves any existing file as it is.
     """
-    policy = check_policy_file(Path(policy_path))
-    key = _cache_key(deps, policy.version, sha256_text(policy.text), scenario_ids)
+    return _current_scores(deps, policy_path, scenario_ids)[0]
+
+
+def _current_scores(deps: GateDeps, policy_path: Path, scenario_ids: list[str]) -> tuple[Scores, str]:
+    """current_scores, with the hash of the text the scores are about.
+
+    The policy is loaded once and that one reading is both scored and hashed into the key, so the
+    hash in current.json is always of the text that was actually scored.
+    """
+    policy = _load_tied(policy_path, "policy in force")
+    sha = sha256_text(policy.text)
+    key = _cache_key(deps, policy.version, sha, scenario_ids)
     saved = _saved_current(deps.root, key)
     if saved is not None:
-        return saved
-    evidence = score_policy(deps, Path(policy_path), scenario_ids, BASELINE_ROUND, CURRENT_TAG)
+        return saved, sha
+    evidence = _score(deps, policy, scenario_ids, BASELINE_ROUND, CURRENT_TAG)
     if not evidence.complete or evidence.scores is None:
         raise GateError(f"the policy in force could not be scored: {evidence.describe()}")
     _write_current(deps.root, key, evidence.scores)
-    return evidence.scores
+    return evidence.scores, sha
 
 
 # ---------- the decision ----------
@@ -313,6 +353,9 @@ class _Run:
     safety: Optional[SafetyResult] = None
     after: Optional[Scores] = None  # set only with complete evidence
     extra: str = ""
+    candidate_sha256: Optional[str] = None  # the candidate text every check and measurement is about
+    current_sha256: Optional[str] = None  # the same for the policy in force
+    expected_current: Optional[str] = None  # the hash of the text the baseline scores are about, if known
 
     def fail(self, name: str, detail: str) -> None:
         self.checks[name], self.details[name] = "failed", detail
@@ -352,7 +395,19 @@ class _Run:
                                    failed_case_ids=[c.case_id for c in safety.cases if not c.passed])
         log_scores = LogScores(before=before, after=self.after, noise=inp.noise) if self.after is not None else None
         return GateReport(outcome=outcome, failed=failed, would_keep=would_keep, checks=dict(self.checks),
-                          log_scores=log_scores, log_safety=log_safety, safety=safety)
+                          log_scores=log_scores, log_safety=log_safety, safety=safety,
+                          candidate_sha256=self.candidate_sha256)
+
+    def changed(self, detail: str) -> GateReport:
+        """The revert for a policy file whose text moved under the gate: nothing it measured counts."""
+        self.after = None
+        self.candidate_version = None
+        for name in ("quality_gain", "dimension_drop"):
+            self.checks[name] = "not_run"
+            self.details.pop(name, None)
+        self.fail("complete_evidence", detail)
+        self.extra = ""
+        return self.report()
 
 
 def _scores_dir(deps: GateDeps) -> Path:
@@ -366,9 +421,13 @@ def _static(run: _Run) -> Optional[tuple[Policy, Policy]]:
     inp = run.inp
     run.running = "candidate_file"
     try:
-        current = check_policy_file(Path(inp.current_policy))
+        candidate = _load_tied(inp.candidate_policy, "candidate")
+        run.candidate_sha256 = sha256_text(candidate.text)
+        current = _load_tied(inp.current_policy, "policy in force", expected=run.expected_current)
         run.current_version = current.version
-        candidate = check_policy_file(Path(inp.candidate_policy))
+        run.current_sha256 = sha256_text(current.text)
+    except _Changed:
+        raise  # not a file that does not load: a file that moved, which run_gate reverts
     except Exception as exc:  # noqa: BLE001  a file that does not load is this check failing
         run.fail("candidate_file", f"{type(exc).__name__}: {exc}")
         return None
@@ -430,6 +489,14 @@ def _safety(run: _Run, candidate: Policy) -> None:
     run.running = None
 
 
+def _recheck(run: _Run) -> None:
+    """Both files must still hold the text the checks were made on."""
+    for path, sha, what in ((run.inp.candidate_policy, run.candidate_sha256, "candidate"),
+                            (run.inp.current_policy, run.current_sha256, "policy in force")):
+        if sha is None or sha256_text(_read_text(path)) != sha:
+            raise _Changed(f"the {what} changed while it was being tested")
+
+
 def _evaluate(run: _Run) -> GateReport:
     inp, deps = run.inp, run.deps
     policies = _static(run)
@@ -444,7 +511,10 @@ def _evaluate(run: _Run) -> GateReport:
     # 3. Validation. It runs whatever the safety check said.
     run.running = "complete_evidence"
     ids = list(inp.validation_scenario_ids)
-    evidence = score_policy(deps, Path(inp.candidate_policy), ids, inp.round, VALIDATION_TAG)
+    # score_policy's steps, on a load tied to the hash the static checks were made on.
+    policy = _load_tied(inp.candidate_policy, "candidate", expected=run.candidate_sha256)
+    evidence = _score(deps, policy, ids, inp.round, VALIDATION_TAG)
+    _recheck(run)  # after the last judge call, before deciding
     clash = _clashes(deps.root, inp.round, ids)
     problems = []
     if not evidence.complete or evidence.scores is None:
@@ -496,6 +566,8 @@ def _save_report(deps: GateDeps, round_: int, report: GateReport) -> None:
 
 def _crashed(run: _Run, exc: BaseException) -> GateReport:
     """The revert for a crash, including a file that could not be saved: the evidence is incomplete."""
+    if isinstance(exc, _Changed):
+        return run.changed(f"{exc}, so the evidence is not about the text that was checked")
     if run.running in STATIC_FOUR and run.checks[run.running] == "not_run":
         run.fail(run.running, f"it could not finish ({type(exc).__name__}: {exc})")
     run.after = None  # nothing measured is shown after a crash
@@ -521,7 +593,19 @@ def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[st
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
     """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
     including a file that could not be saved."""
-    run = _Run(inp=inp, deps=deps)
+    return _run_gate(inp, deps)[0]
+
+
+def _run_gate(inp: GateInput, deps: GateDeps, current_sha256: Optional[str] = None) -> tuple[GateReport, _Run]:
+    """run_gate, also returning its state. `current_sha256` is the hash of the policy text the
+    baseline scores were measured on; the policy in force must still hold that text."""
+    run = _Run(inp=inp, deps=deps, expected_current=current_sha256)
+    report = _gate_report(run)
+    return report, run
+
+
+def _gate_report(run: _Run) -> GateReport:
+    inp, deps = run.inp, run.deps
     try:
         report = _evaluate(run)
         run.running = "saving the gate report"
@@ -553,11 +637,11 @@ class _Gate:
         self.last_report: Optional[GateReport] = None
 
     def __call__(self, result: RoundResult) -> GateOutcome:
-        result.scores, result.safety = None, None
+        result.scores, result.safety, result.candidate_sha256 = None, None, None
         try:
             report = self._gate(result)
         except Exception as exc:  # noqa: BLE001  the candidate is reverted untested
-            result.scores, result.safety = None, None
+            result.scores, result.safety, result.candidate_sha256 = None, None, None
             report = self._untested(result, f"the gate could not run ({type(exc).__name__}: {exc})")
         self.last_report = report
         return report.outcome
@@ -566,25 +650,40 @@ class _Gate:
         if result.edit is None or result.candidate_path is None:
             raise GateError("the round has no candidate to test")
         try:
-            before = current_scores(self.deps, result.base_policy_path, self.ids)
+            before, base_sha = _current_scores(self.deps, result.base_policy_path, self.ids)
         except Exception as exc:  # noqa: BLE001
             return self._untested(result, f"the policy in force could not be scored ({type(exc).__name__}: {exc})")
         inp = GateInput(round=result.round, edit_id=result.edit.id, current_policy=str(result.base_policy_path),
                         candidate_policy=str(result.candidate_path), validation_scenario_ids=self.ids,
                         current_scores=before, noise=self.noise, token_cap=self.token_cap,
                         safety_case_set=self.safety_case_set)
-        report = run_gate(inp, self.deps)
-        result.scores, result.safety = report.log_scores, report.log_safety
+        # The baseline was measured on one text of the policy in force; the gate compares against that text.
+        report, run = _run_gate(inp, self.deps, current_sha256=base_sha)
         if report.outcome.decision == "kept" and report.log_scores is not None:
+            # Read the candidate once more; the promoted scores belong only to the bytes that were tested.
             try:
-                self._keep_current(result.candidate_path, report.outcome.policy_in_force, report.log_scores.after)
-            except Exception:  # noqa: BLE001  a stale or missing file cannot match, so the next round scores again
-                pass
+                text: Optional[str] = _read_text(result.candidate_path)
+            except Exception:  # noqa: BLE001  a candidate that cannot be read again cannot be promoted
+                text = None
+            if text is None or sha256_text(text) != report.candidate_sha256:
+                report = run.changed("the candidate changed after it was tested, so the evidence is not about "
+                                     "the text that would be promoted")
+                try:
+                    _save_report(self.deps, result.round, report)
+                except Exception:  # noqa: BLE001  the decision is already a revert
+                    pass
+            else:
+                try:
+                    self._keep_current(text, report.outcome.policy_in_force, report.log_scores.after)
+                except Exception:  # noqa: BLE001  a stale or missing file cannot match, so the next round scores again
+                    pass
+        result.scores, result.safety = report.log_scores, report.log_safety
+        result.candidate_sha256 = report.candidate_sha256
         return report
 
-    def _keep_current(self, candidate_path: Path, version: str, scores: Scores) -> None:
+    def _keep_current(self, candidate_text: str, version: str, scores: Scores) -> None:
         """current.json for the promoted policy, hashed on the text finish_round will write for it."""
-        promoted = parse_policy(Path(candidate_path).read_text())
+        promoted = parse_policy(candidate_text)
         promoted.version = version
         key = _cache_key(self.deps, version, sha256_text(render_policy(promoted)), self.ids)
         _write_current(self.deps.root, key, scores)
