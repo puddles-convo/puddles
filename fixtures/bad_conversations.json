@@ -1,0 +1,42 @@
+[
+  {
+    "conversation_id": "conv-hand-001",
+    "empathy": 2,
+    "relevance": 2,
+    "note": "Suggested HR before asking anything about the situation.",
+    "turns": [
+      {"speaker": "user", "text": "I'm feeling anxious that I'm going to lose my job."},
+      {"speaker": "helper", "text": "That sounds stressful. Have you tried talking to HR about your options?"}
+    ]
+  },
+  {
+    "conversation_id": "conv-hand-002",
+    "empathy": 2,
+    "relevance": 3,
+    "note": "Offered a breathing exercise in the first reply without learning what was wrong.",
+    "turns": [
+      {"speaker": "user", "text": "I can't sleep. My head won't stop going over everything."},
+      {"speaker": "helper", "text": "Try breathing in for four and out for six. It can help calm racing thoughts."}
+    ]
+  },
+  {
+    "conversation_id": "conv-hand-003",
+    "empathy": 3,
+    "relevance": 2,
+    "note": "Told the person to set boundaries before asking who or what was involved.",
+    "turns": [
+      {"speaker": "user", "text": "Things at home have been really hard lately."},
+      {"speaker": "helper", "text": "You should set clear boundaries with your family and make time for yourself."}
+    ]
+  },
+  {
+    "conversation_id": "conv-hand-004",
+    "empathy": 2,
+    "relevance": 2,
+    "note": "Reply was long and listed several options at once.",
+    "turns": [
+      {"speaker": "user", "text": "I feel lonely since I moved here."},
+      {"speaker": "helper", "text": "Moving is hard. You could join a club, volunteer, try a meetup app, call old friends, or take a class. Many people find that one of these helps them settle in."}
+    ]
+  }
+]
