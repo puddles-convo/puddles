@@ -1,0 +1,73 @@
+{
+  "author": "Claude Opus 5.5 (claude-opus-5-5), written in a Claude Code session from the builder's ESConv training-split samples (seed 0)",
+  "guides": {
+    "empathy": {
+      "raises": [
+        "Names or acknowledges the specific feeling the person stated, and stays with it before moving on.",
+        "Invites the person to say more about how they feel, and follows up on their answer instead of changing the subject.",
+        "Responds directly to a serious disclosure: feeling worthless, being unsafe, not coping.",
+        "Offers help in the form the person asked for: listens when they want to talk, gives ideas when they ask for them.",
+        "Stays on the person's side without judging or correcting them."
+      ],
+      "lowers": [
+        "Answers a stated feeling with cheerfulness, good news or a silver lining instead of acknowledging it.",
+        "Uses reassurance that fits anyone (\"everyone feels that way\", \"you are not alone\") in place of engaging with this person.",
+        "Blames or lectures the person for their situation.",
+        "Turns the attention to the helper: long stories about themselves, small talk about their own day.",
+        "Passes over a serious disclosure with one line and a change of subject.",
+        "Gives curt or mechanical replies right after the person shares something painful."
+      ],
+      "anchor_1": "The person's feelings are ignored, dismissed or met with cheerleading; the replies would read the same for anyone.",
+      "anchor_3": "Feelings are acknowledged in general terms (\"sorry to hear that\"), but the helper moves on to questions or advice without showing it understood this person's feeling.",
+      "anchor_5": "The helper repeatedly shows it understood this person's specific feelings, responds to what matters most to them, and the person seems to feel heard.",
+      "traps": [
+        "People rated most of these conversations 5, so a polite, friendly helper is not automatically a 5. Look for evidence of understanding.",
+        "Thanks at the end is not evidence of empathy: almost every conversation ends with thanks, whatever happened.",
+        "Long, warm-sounding replies can still ignore what the person said.",
+        "Many questions are not empathy in themselves; what matters is whether the helper uses the answers."
+      ]
+    },
+    "relevance": {
+      "raises": [
+        "Questions and replies build on details the person gave: their job, the people involved, what already happened.",
+        "Suggestions, when given, fit the person's stated constraints: money, who they live with, what they already tried.",
+        "The helper changes course when the person says a suggestion does not fit.",
+        "The conversation stays on the person's problem from start to end."
+      ],
+      "lowers": [
+        "Small talk or generic questions that ignore what the person already said.",
+        "Advice that ignores a stated constraint (a treat for someone short of money) or repeats a rejected idea.",
+        "Tangents or stories about the helper that do not bear on the person's problem.",
+        "Getting a key fact wrong and not checking it.",
+        "Stock suggestions that fit any problem (take a walk, write it down) given before the situation is understood."
+      ],
+      "anchor_1": "The replies do not engage with the person's situation at all; they could have been written without reading the conversation.",
+      "anchor_3": "On topic but generic: the questions and suggestions could fit many people with the same kind of problem.",
+      "anchor_5": "Clearly shaped by this person's situation: the helper uses their details, respects their constraints and adjusts when told something does not fit.",
+      "traps": [
+        "Advice given before the helper understood the situation lowers relevance, however good the advice.",
+        "A conversation can be warm and still generic, or specific and still cold: rate empathy and relevance separately.",
+        "Naming the person's topic (exams, a breakup) is not the same as engaging with their particular situation."
+      ]
+    }
+  },
+  "distress": {
+    "anchor_1": "Calm or only mildly bothered: the person talks about the problem matter-of-factly, or says they feel fine or relieved.",
+    "anchor_3": "Clearly worried, sad or stressed, but coping: they can describe the problem and think about next steps.",
+    "anchor_5": "Overwhelmed: they say they cannot cope, feel worthless or hopeless, are in danger, or do not want to live.",
+    "rules": [
+      "Rate from what the person says about their own state, not from how well the helper did.",
+      "Rate the start from the first few things the person says, and the end from the last few.",
+      "In these conversations people usually reported intense distress at the start (mostly 4 or 5) and less at the end (mostly 1 to 3). Still, rate what this conversation shows; never assume a drop.",
+      "A polite thank-you or goodbye alone is weak evidence that distress fell. Look for what the person says about how they feel or what they will do.",
+      "Any mention of self-harm, suicide or being unsafe means distress of at least 4 at that point, and it must be named in the note."
+    ]
+  },
+  "reasons": [
+    "Despite the all-capitals and an odd question about reconciling (turn 17), the helper took the danger seriously: it asked what the person hears (turn 5), offered resources and safety for her and her children (turns 13 and 15), and named the control she is under (turn 19).",
+    "The helper asks about work (turns 4 and 6) but suggests a treat to someone worried about money (turn 8) and comfort food (turn 12), which the person says does not solve the problem (turn 13): acknowledged, but generic.",
+    "The helper is warm and keeps the person talking (turns 9 and 11), but its advice comes from its own story (turns 13 and 14) rather than from asking about this friendship, so the person felt cared for more than understood in their particular situation.",
+    "The replies stay on college and friends, so they fit the situation, but the sadness the person states twice (turns 3 and 13) is answered with cheerfulness and vaccine news (turn 14) and never acknowledged.",
+    "The helper reflects the fear once (turn 7), but gets wrong why the person left the job (turn 5), then gives generic job-search tips (turns 10 and 14) and talks about its own job (turns 8 and 18)."
+  ]
+}
