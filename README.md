@@ -26,6 +26,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 11. [Data](#11-data)
 12. [Robot side](#12-robot-side)
 13. [Related work](#13-related-work)
+14. [Improvements from the literature](#14-improvements-from-the-literature)
 
 ## 1. Training steps
 
@@ -521,7 +522,43 @@ Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-
 
 - **Karpathy's autoresearch** (March 2026): an agent edits one training script, runs short experiments and keeps only changes that improve the metric. Our loop has the same keep-or-revert shape, applied to a helper's harness and, on escalation, its weights.
 - **Prompt optimisers** such as OPRO and GEPA search over prompts against a score. Our differences: each change is grounded in sources found with Exa, the proposer chooses which lever to use, and safety rules are locked outside the search.
+- **Meta-Harness** ([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)) has a proposer that reads every past harness, its traces and scores before proposing the next; **GEPA** and **ACE** improve prompts and playbooks by reflection, with gains shown on Qwen3-8B. None of these chooses between kinds of change, which is what our lever scoreboard does.
 - **MetaClaw** ([arXiv 2603.17187](https://arxiv.org/abs/2603.17187)) is the closest work: it evolves a skill library without gradients and runs LoRA updates on a scheduler that waits for the user to be idle. It stamps training data with the skill version that produced it, which we adopt in `build_dataset`. Our differences: the proposer decides when to train based on evidence, with a stated hypothesis, and every change, including an adapter, must pass a gate fixed before the run, with safety benchmarks, before it reaches a person.
+
+## 14. Improvements from the literature
+
+What published work suggests adding to the loop, ranked by value per hour for this stack (Qwen3.5-9B, LoRA on Tinker, vLLM on Modal) and the limits in [section 7](#7-the-proposers-toolbox). Rows 1 to 4 are loop infrastructure rather than proposer actions, but every other row depends on them.
+
+- **Time and value are our researchers' estimates**, not figures from the sources.
+- **[V]** marks a number checked against the primary source on 14 November 2026. Numbers without it are recalled or from secondary summaries; check them before quoting.
+- **"Weight-space programming"** is our own umbrella term for changing behaviour by editing weights or activations directly (rows 12, 15, 16, 18). The established research field is called weight space learning.
+- New actions proposed here: `merge_adapters`, `project_safe` and `steer`.
+- Full report with sources and risks: [docs/research/self-improving-autoresearch-agents.md](docs/research/self-improving-autoresearch-agents.md).
+
+| # | Improvement | Toolbox action it maps to | Source (paper/repo link) | Time (h) | Value | Why |
+|---|---|---|---|---|---|---|
+| 1 | Immutable gate, greedy keep/revert, append-only log | Loop infrastructure (all actions) | [karpathy/autoresearch](https://github.com/karpathy/autoresearch) | 2–4 | High | Thinnest working loop; proposer cannot touch the eval |
+| 2 | Support/query split and version-stamped data | Gate; `build_dataset` | [MetaClaw arXiv 2603.17187](https://arxiv.org/abs/2603.17187) | 1 | High | Cheapest guard against overfitting a small eval |
+| 3 | Safety gate: XSTest, SimpleSafetyTests, StrongREJECT subset, crisis prompts; locked crisis path | Gate (applies to every action) | [Qi et al. 2310.03693](https://arxiv.org/abs/2310.03693), [SimpleSafetyTests](https://arxiv.org/abs/2311.08370) | 3–4 | High | Benign fine-tuning raised harmfulness 0.3% → 16.1% [V] |
+| 4 | Held-out cross-family jury, sycophancy rubric item, paired bootstrap | Gate (scoring) | [PoLL 2404.18796](https://arxiv.org/abs/2404.18796), [CounselBench](https://arxiv.org/abs/2506.08584), [Miller 2411.00640](https://arxiv.org/abs/2411.00640) | 2–3 | High | LLM judges miss clinician-flagged harm; jury gap exposes hacking |
+| 5 | Proposer reads every past harness, trace and score | Proposer input (all harness actions) | [Meta-Harness 2603.28052](https://arxiv.org/abs/2603.28052) | 2–3 | High | Published precedent for this exact design |
+| 6 | Reflective one-rule edits with Pareto parent selection | `edit_rule` | [GEPA 2507.19457](https://arxiv.org/abs/2507.19457), [gepa-ai/gepa](https://github.com/gepa-ai/gepa) | 3–5 | High | Qwen3-8B 45.2 → 54.9, beating GRPO with 1.8k–7k vs 24k rollouts [V] |
+| 7 | Delta playbook with helpful/harmful counters, code-merged | `add_skill_card`, `edit_rule` | [ACE 2510.04618](https://arxiv.org/abs/2510.04618), [ace-agent/ace](https://github.com/ace-agent/ace) | 4–6 | High | +13 over GEPA on AppWorld at 75% fewer rollouts [V] |
+| 8 | DPO on judge-ranked best vs worst pairs, with safety data mixed in | `build_dataset` + `train_adapter` (DPO) | [CSO 2503.05362](https://arxiv.org/abs/2503.05362), [DecoupledESC 2505.16995](https://arxiv.org/abs/2505.16995), [Qi et al.](https://arxiv.org/abs/2310.03693) | 4–6 | High | ESC precedent at 7–9B; cheaper and stabler than RL |
+| 9 | ESConv strategy rules and strategy-distribution tracking | `set_strategy_rules` | [ESConv 2106.01144](https://arxiv.org/abs/2106.01144), [2509.12661](https://arxiv.org/abs/2509.12661) | 2 | Medium | Guards against strategy collapse that SFT/GRPO amplify [V] |
+| 10 | Bootstrap few-shots from passing train-split conversations | `set_examples` | [DSPy](https://github.com/stanfordnlp/dspy), [ExpeL 2308.10144](https://arxiv.org/abs/2308.10144) | 1–2 | Medium | Cheap; 9B models often follow examples better than rules (estimate) |
+| 11 | Lever bandit over action types (fixed stage order as fallback) | Proposer action choice | Novel; [MASS 2502.02533](https://arxiv.org/abs/2502.02533) | 3–4 (1) | High demo / Medium score | No source does this; answers "which lever" visibly |
+| 12 | Safe LoRA projection on every adapter | Proposed `project_safe` (or mandatory step in `train_adapter`) | [Safe LoRA 2405.16833](https://arxiv.org/abs/2405.16833) | 2–6 | High (safety) | Training-free; needs only Base and Instruct weights |
+| 13 | Best-of-N (N ≤ 4) with a separate selection judge | `set_inference` | [Liu et al. 2502.06703](https://arxiv.org/abs/2502.06703) | 2–3 | Medium | Real gains need a good verifier; costs N× latency |
+| 14 | Best-of-N winners then SFT (second-run fallback) | `build_dataset` + `train_adapter` (SFT) | [RAFT 2304.06767](https://arxiv.org/abs/2304.06767), [ReST-EM 2312.06585](https://arxiv.org/abs/2312.06585) | 3–5 | High | Most stable self-training; SEAL chose it over GRPO [V] |
+| 15 | Linear LoRA merge and base/adapter interpolation search | Proposed `merge_adapters` | [Task arithmetic 2212.04089](https://arxiv.org/abs/2212.04089), [2511.21437](https://arxiv.org/abs/2511.21437), [LoraHub 2307.13269](https://arxiv.org/abs/2307.13269) | 3–5 | Medium–High | Only merge method reliable on LLMs [V]; no retraining |
+| 16 | Sycophancy persona-vector drift monitor | Gate metric (no action) | [Persona vectors 2507.21509](https://arxiv.org/abs/2507.21509) | 3–5 | Medium–High | Detects drift toward flattery after each adapter |
+| 17 | On-policy distillation from Qwen3.5-397B | `train_adapter` (distill) | [TM on-policy distillation](https://www.thinkingmachines.ai/blog/on-policy-distillation/) | 3–5 | Medium | Strong baseline but uses one of two runs; not self-improvement |
+| 18 | Serve-time sycophancy/warmth steering | Proposed `steer` | [vllm-lens](https://pypi.org/project/vllm-lens/), [CAA 2312.06681](https://arxiv.org/abs/2312.06681) | 6–10 | Medium | Good internals story; eager-mode cost, code-exec risk, Qwen3.5 untested |
+| 19 | RLVER-lite GRPO with simulated-user emotion reward | `train_adapter` (RL) | [RLVER 2507.03112](https://arxiv.org/abs/2507.03112) | 8–12 | Medium | 13.3 → 79.2 at 7B [V], but too slow and hackable here |
+| 20 | Hypernetwork LoRA, TIES/DARE, ROME/MEMIT, DGM-style self-rewrite | None (skip) | [Text-to-LoRA](https://github.com/SakanaAI/text-to-lora), [TIES](https://arxiv.org/abs/2306.01708), [ROME](https://arxiv.org/abs/2202.05262), [DGM](https://arxiv.org/abs/2505.22954) | n/a | Low | No Qwen3.5 checkpoint, no reliable gain, or far beyond budget |
+
+**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use one or two adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). Treat the weight-space tools mainly as safety tools. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
 
 ## Limits
 
