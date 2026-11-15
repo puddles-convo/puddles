@@ -61,11 +61,19 @@ EIGHT = tuple(k for k in CHECKS if k != "noise_not_measured")
 NOTHING_ELSE_RAN = "Nothing else was run: no conversation, no judge call, no safety check."
 NOISE_NOTE = "the noise has not been measured, so nothing is promoted"
 NO_SAFETY_CASE = "no safety case was run"
+NO_BASELINE = "the policy in force has no measured scores"
 
 
 def _safety_passed(safety: Optional[SafetyResult]) -> bool:
-    """What the gate states about a safety result: passed only if it says so and ran at least one case."""
-    return bool(safety is not None and safety.passed and safety.cases)
+    """What the gate states about a safety result: passed only if it says so, ran at least one case,
+    and no case in it failed. A result that contradicts itself is not a pass."""
+    return bool(safety is not None and safety.passed and safety.cases
+                and all(c.passed for c in safety.cases))
+
+
+def _measured(scores: Scores) -> bool:
+    """Scores are 1 to 5, so empathy or relevance outside that range was not measured (NOT_MEASURED is 0)."""
+    return 1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5
 
 
 class GateError(RuntimeError):
@@ -275,7 +283,8 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
             return None
         if any(data[name] != value for name, value in key.items()):
             return None
-        return Scores.model_validate(data["scores"])
+        scores = Scores.model_validate(data["scores"])
+        return scores if _measured(scores) else None  # outside 1 to 5: not measured, so scored again
     except Exception:  # noqa: BLE001
         return None
 
@@ -496,9 +505,9 @@ def _safety(run: _Run, candidate: Policy) -> None:
     run.safety = safety
     if not safety.cases:  # a safety check that ran no case did not run, whatever `passed` says
         run.fail("safety_cases", NO_SAFETY_CASE)
-    elif safety.passed:
+    elif _safety_passed(safety):
         run.checks["safety_cases"] = "passed"
-    else:
+    else:  # it says it failed, or it says passed while naming a failed case
         failed_ids = [c.case_id for c in safety.cases if not c.passed]
         which = f" ({', '.join(failed_ids)})" if failed_ids else ""
         run.fail("safety_cases", f"{len(failed_ids)} of {len(safety.cases)} safety cases failed{which}")
@@ -536,6 +545,8 @@ def _evaluate(run: _Run) -> GateReport:
     _recheck(run)  # after the last judge call, before deciding
     clash = _clashes(deps.root, inp.round, ids)
     problems = []
+    if not _measured(inp.current_scores):  # nothing to compare the candidate with: not evidence
+        problems.append(NO_BASELINE)
     if not evidence.complete or evidence.scores is None:
         problems.append(f"of the validation conversations, {evidence.describe()}")
     if clash:  # the files stay where they are; the validation counts as not measured
@@ -612,7 +623,11 @@ def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[st
 
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
     """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
-    including a file that could not be saved."""
+    including a file that could not be saved.
+
+    `inp.current_scores` inside 1 to 5 is trusted as given: it is the caller's precondition that they
+    were measured on `inp.current_policy` (make_gate guarantees it), and invented scores break it.
+    """
     return _run_gate(inp, deps)[0]
 
 

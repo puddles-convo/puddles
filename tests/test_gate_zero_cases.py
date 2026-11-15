@@ -11,7 +11,7 @@ import pytest
 from puddles import gate
 from puddles.decision_log import DecisionLog
 from puddles.memory import FakeMemory, entry_for
-from schemas import SafetyResult
+from schemas import SafetyResult, Scores
 from tests.test_gate import (
     IDS,
     Safety,
@@ -22,6 +22,8 @@ from tests.test_gate import (
     setup,
     traced,  # noqa: F401  the fixture, for the script run
 )
+
+ALL_CASES = ("s1-01", "s2-01", "s3-01")  # what tests.test_gate.Safety runs
 
 
 class EmptySafety(Safety):
@@ -120,3 +122,61 @@ def test_the_fake_script_with_the_real_gate_names_safety_cases(tmp_path, traced,
     assert event.safety is not None and event.safety.passed is False and event.safety.cases == 0
     assert not (root / "policies" / "policy-v2.md").exists()
     assert capsys.readouterr().out == f"round 1: reverted. {event.reason}\n"
+
+
+# ---------- a result that contradicts itself is not a pass either ----------
+
+class ContradictorySafety(Safety):
+    """Says passed while marking these cases failed."""
+
+    def __call__(self, policy_version, reply):
+        result = super().__call__(policy_version, reply)
+        return result.model_copy(update={"passed": True})
+
+
+@pytest.mark.parametrize("failed", [("s2-01",), ALL_CASES], ids=["one-case-failed", "all-cases-failed"])
+def test_passed_true_with_a_failed_case_fails_safety_cases_and_names_the_cases(tmp_path, failed):
+    deps, current, candidate = setup(tmp_path, safety=ContradictorySafety(failed=failed))
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    out = report.outcome
+    assert out.decision == "reverted" and report.would_keep is False and report.failed == ["safety_cases"]
+    assert report.checks == {**{k: "passed" for k in gate.CHECKS}, "safety_cases": "failed"}  # noise measured
+    assert out.reason == (f"Reverted on {gate.CHECKS['safety_cases']}: {len(failed)} of 3 safety cases failed "
+                          f"({', '.join(failed)}).")
+    assert out.safety_passed is False
+    assert report.log_safety.model_dump() == {"case_file": "safety-test.json", "passed": False, "cases": 3,
+                                              "failed_case_ids": list(failed)}
+    saved = SafetyResult.model_validate_json((deps.root / "scores" / "round-01-safety.json").read_text())
+    assert saved == report.safety and saved.passed is True  # saved as it came back
+
+
+# ---------- a baseline outside 1 to 5 was not measured ----------
+
+@pytest.mark.parametrize("before", [gate.NOT_MEASURED, Scores(empathy=5.5, relevance=3),
+                                    Scores(empathy=3, relevance=0.5)], ids=["not-measured", "5.5", "0.5"])
+def test_a_baseline_that_was_not_measured_fails_complete_evidence_and_nothing_is_kept(tmp_path, before):
+    deps, current, candidate = setup(tmp_path)
+    inp = gate_input(current, candidate).model_copy(update={"current_scores": before})
+    report = gate.run_gate(inp, deps)
+    out = report.outcome
+    assert out.decision == "reverted" and report.would_keep is False and report.failed == ["complete_evidence"]
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert report.checks["safety_cases"] == "passed" and deps.safety.calls  # the safety check still ran
+    assert len(deps.judge.calls) == len(IDS)  # and so did validation
+    assert out.reason == f"Reverted on {gate.CHECKS['complete_evidence']}: the policy in force has no measured scores."
+    assert out.after == gate.NOT_MEASURED and report.log_scores is None  # as for any incomplete evidence
+    assert out.before.empathy == before.empathy and out.before.relevance == before.relevance  # as given
+    assert out.safety_passed is True and report.log_safety.passed is True
+
+
+def test_a_matching_current_json_of_zeros_is_scored_again(tmp_path):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    data = json.loads(path.read_text())
+    data["scores"] = {"empathy": 0.0, "relevance": 0.0, "quality": 0.0, "emotion_change": 0.0}
+    path.write_text(json.dumps(data))  # every identity field still matches
+    calls = len(deps.judge.calls)
+    assert gate.current_scores(deps, current, IDS) == first
+    assert len(deps.judge.calls) - calls == len(IDS)  # scored again: one judge call per scenario
+    assert json.loads(path.read_text())["scores"] == first.model_dump()  # and rewritten with measured scores
