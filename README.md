@@ -361,9 +361,27 @@ The proposer is the research agent of the loop. Each round it picks **one** acti
 | # | Action | What it changes | Limits enforced by code |
 |---|---|---|---|
 | 6 | `build_dataset` | A training set from the loop's own conversations: best replies (SFT) or best and worst pairs (DPO) | Train split only; only conversations from the current harness version, each stamped with the version that produced it |
-| 7 | `train_adapter` | A LoRA fine-tune of the helper on Tinker. Method SFT or DPO, rank 16 or 32, 1 or 2 epochs | At most 2 runs; must start by Sunday 06:00; gate condition 7 applies |
+| 7 | `train_adapter` | A LoRA fine-tune of the helper on Tinker. Method SFT, DPO or GRPO (see below), rank 16 or 32, 1 or 2 epochs | Counts against the training budget; must start by Sunday 06:00; gate condition 7 applies |
 
-**When to escalate.** Use actions 1 to 5 first. Move to 6 and 7 only when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change.
+**Exploratory weight-space actions** (value unknown: the loop measures it)
+
+We do not know how much these improve a 9B support helper; no source tests them on this task. In the spirit of Karpathy's autoresearch and the Darwin Gödel Machine, we let the loop try them under a fixed budget and keep only what passes the gate. Their measured value is itself a result.
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 8 | `train_adapter` with method `grpo` | Reinforcement learning on the helper: it samples several replies per turn and is pushed toward the higher-scoring ones. Reward: the loop's judge plus the simulated user's change in emotion, as in RLVER and MetaClaw | One run, fixed wall-clock budget; KL penalty to the base model; safety data mixed in; stopped if its reward rises while the held-out check on the gate falls |
+| 9 | `merge_adapters` | A weighted sum of kept adapters, or a blend between the base model and one adapter, with the weights found by search (CMA-ES, as in LoraHub). No retraining: each candidate costs one validation pass | Only adapters that passed the gate; search scored on half the validation set and checked on the other half |
+| 10 | `project_safe` | Safe LoRA: moves each adapter layer back toward the safety-aligned direction (instruct minus base weights). No training | Applied to every adapter before the gate; the gate compares with and without it |
+| 11 | `steer` | Adds a direction in the model's activations at serve time, for example less flattery, extracted from contrasting replies (persona vectors) | Only if vllm-lens runs Qwen3.5 with LoRA; the steering server is never exposed outside the cloud brain |
+
+**How experiments are run (autoresearch and DGM style)**
+
+- **Fixed budget per experiment**, as in Karpathy's autoresearch: every action gets a set time and spend, so results are comparable and one bad idea cannot eat the night.
+- **An archive, not a single line**, as in the Darwin Gödel Machine: every harness version that passed the gate is kept, and the proposer may start an experiment from any of them, not only the latest. That lets a weight-space branch (for example a GRPO adapter) develop alongside the harness branch.
+- **Keep or revert** stays the rule for what reaches the robot: only the best version in the archive that passed every gate condition.
+- **Training budget for the weekend:** up to 3 adapter runs in total (SFT, DPO or GRPO), unlimited merges and projections (they are cheap).
+
+**When to escalate.** Use actions 1 to 5 first. Move to 6 and 7 when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change. Separately, **one round in five is reserved for an exploratory action** (6 to 11), even while harness changes are still working, so the scoreboard learns what weight changes are worth instead of never trying them.
 
 **What the proposer receives.** The failure pattern and the sources; a lever scoreboard built by code from earlier gate outcomes (for each action: times tried, times kept, average gain, cost); and the remaining budget in rounds, time, spend and training runs.
 
@@ -384,7 +402,7 @@ The gate outcome records whether the prediction came true, so the proposer's cal
 
 **Outside the toolbox.** The proposer can never change the judges, the simulated users or scenarios, the test split, the safety cases, the crisis checker and its fixed responses, the gate rule or the budget.
 
-**Build order.** Actions 1 to 3 first, then 6 and 7 as the one escalation path, then 4 and 5 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+**Build order.** Actions 1 to 3 first, then 6 and 7 (SFT or DPO) as the escalation path, then 9 and 10 (cheap, no training), then 8 (GRPO, the longest to build), then 4, 5 and 11 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 
 ## 8. Handoffs
 
@@ -521,6 +539,7 @@ Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-
 ## 13. Related work
 
 - **Karpathy's autoresearch** (March 2026): an agent edits one training script, runs short experiments and keeps only changes that improve the metric. Our loop has the same keep-or-revert shape, applied to a helper's harness and, on escalation, its weights.
+- **Darwin Gödel Machine** ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)): a coding agent rewrites its own code and keeps an archive of every working variant, starting new attempts from any of them; it raised its SWE-bench score from 20% to 50%. We borrow the archive, so weight-space branches can grow alongside harness branches.
 - **Prompt optimisers** such as OPRO and GEPA search over prompts against a score. Our differences: each change is grounded in sources found with Exa, the proposer chooses which lever to use, and safety rules are locked outside the search.
 - **Meta-Harness** ([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)) has a proposer that reads every past harness, its traces and scores before proposing the next; **GEPA** and **ACE** improve prompts and playbooks by reflection, with gains shown on Qwen3-8B. None of these chooses between kinds of change, which is what our lever scoreboard does.
 - **MetaClaw** ([arXiv 2603.17187](https://arxiv.org/abs/2603.17187)) is the closest work: it evolves a skill library without gradients and runs LoRA updates on a scheduler that waits for the user to be idle. It stamps training data with the skill version that produced it, which we adopt in `build_dataset`. Our differences: the proposer decides when to train based on evidence, with a stated hypothesis, and every change, including an adapter, must pass a gate fixed before the run, with safety benchmarks, before it reaches a person.
@@ -558,7 +577,7 @@ What published work suggests adding to the loop, ranked by value per hour for th
 | 19 | RLVER-lite GRPO with simulated-user emotion reward | `train_adapter` (RL) | [RLVER 2507.03112](https://arxiv.org/abs/2507.03112) | 8–12 | Medium | 13.3 → 79.2 at 7B [V], but too slow and hackable here |
 | 20 | Hypernetwork LoRA, TIES/DARE, ROME/MEMIT, DGM-style self-rewrite | None (skip) | [Text-to-LoRA](https://github.com/SakanaAI/text-to-lora), [TIES](https://arxiv.org/abs/2306.01708), [ROME](https://arxiv.org/abs/2202.05262), [DGM](https://arxiv.org/abs/2505.22954) | n/a | Low | No Qwen3.5 checkpoint, no reliable gain, or far beyond budget |
 
-**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use one or two adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). Treat the weight-space tools mainly as safety tools. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
+**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). GRPO, merging and steering (rows 15, 18, 19) are rated medium or below here because nothing has tested them on this task; we include them as exploratory actions in [section 7](#7-the-proposers-toolbox) so the loop measures their value instead of us guessing it. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
 
 ## Limits
 
