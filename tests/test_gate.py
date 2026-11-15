@@ -1331,3 +1331,149 @@ def test_an_untested_revert_files_no_measurements_and_its_own_reading(tmp_path):
     event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
     assert event.scores is event.safety is None
     assert event.policy.new_sha256 == sha256_text(candidate.read_text())
+
+
+# ---------- a hash is of the file's bytes: what a text-mode read would hide ----------
+
+from loop.errors import PolicyError  # noqa: E402
+from puddles.records import sha256_bytes  # noqa: E402
+
+HIDDEN = {  # each changes the bytes; a text-mode read hides the first, and the strict loader refuses the first three
+    "crlf": lambda b: b.replace(b"\n", b"\r\n"),
+    "bom": lambda b: b"\xef\xbb\xbf" + b,
+    "not_utf8": lambda b: b.replace(b"\n", b" \xff\n", 1),  # a byte that is never valid UTF-8, on line one
+    "newline_added": lambda b: b + b"\n",
+    "newline_removed": lambda b: b.rstrip(b"\n"),
+}
+
+
+def mangle(path, how):
+    original = path.read_bytes()
+    path.write_bytes(HIDDEN[how](original))
+    assert path.read_bytes() != original
+
+
+@pytest.mark.parametrize("how", list(HIDDEN))
+@pytest.mark.parametrize("which", ["base", "candidate"])
+@pytest.mark.parametrize("kept", [False, True])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_finish_round_refuses_a_policy_whose_bytes_changed_in_a_way_text_mode_hides(tmp_path, how, which, kept,
+                                                                                     replay_on):
+    from puddles.round import CandidateChanged, PolicyChanged
+
+    deps, current, candidate = setup(tmp_path, noise_measured=kept)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == ("kept" if kept else "reverted") and result.base_sha256 and result.candidate_sha256
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    mangle(current if which == "base" else candidate, how)  # with replay on the base is also the start
+    refused(tmp_path, PolicyChanged if which == "base" else CandidateChanged, result, out, deps.root, replay_on)
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+@pytest.mark.parametrize("which", ["base", "candidate", "start"])
+def test_with_no_hash_to_compare_finish_round_refuses_a_file_the_strict_loader_refuses(tmp_path, how, which):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)  # the stand-in: no hashes
+    start = tmp_path / "start" / "policy-v1.md"
+    start.parent.mkdir()
+    start.write_bytes(result.base_policy_path.read_bytes())
+    mangle({"base": result.base_policy_path, "candidate": candidate, "start": start}[which], how)
+    before, log = tree(tmp_path), DecisionLog(root)
+    with pytest.raises(PolicyError):
+        from puddles.round import finish_round
+
+        finish_round(result, outcome, log, FakeMemory(), root, start_policy=start)
+    assert tree(tmp_path) == before and log.events() == []
+
+
+@pytest.mark.parametrize("how", ["newline_added", "newline_removed"])
+def test_with_no_hash_to_compare_every_policy_hash_filed_is_of_the_bytes(tmp_path, how):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision="reverted")
+    mangle(candidate, how)
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, start_policy=result.base_policy_path)
+    assert event.policy.new_sha256 == sha256_bytes(candidate.read_bytes())
+    assert event.policy.base_sha256 == sha256_bytes(result.base_policy_path.read_bytes())
+
+
+def test_a_promoted_policy_and_its_meta_are_written_as_the_bytes_that_were_hashed(tmp_path):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    gate.ensure_starting_meta(deps.root, current)
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root, start_policy=current)
+    promoted = deps.root / "policies" / "policy-v2.md"
+    meta = PolicyMeta.model_validate_json((deps.root / "policies" / "policy-v2.meta.json").read_bytes())
+    assert event.outcome == "kept" and b"\r" not in promoted.read_bytes()
+    assert sha256_bytes(promoted.read_bytes()) == event.policy.new_sha256 == meta.policy_sha256
+    start_meta = PolicyMeta.model_validate_json((deps.root / "policies" / "policy-v1.meta.json").read_bytes())
+    assert start_meta.policy_sha256 == sha256_bytes(current.read_bytes()) == event.policy.base_sha256
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+def test_the_starting_meta_is_not_written_for_a_file_the_strict_loader_refuses(tmp_path, how):
+    start = start_policy(tmp_path)
+    mangle(start, how)
+    with pytest.raises(PolicyError):
+        gate.ensure_starting_meta(tmp_path / "root", start)
+    assert not (tmp_path / "root").exists()
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+@pytest.mark.parametrize("which", ["candidate", "current"])
+def test_a_policy_file_the_strict_loader_refuses_is_a_static_revert(tmp_path, how, which):
+    deps, current, candidate = setup(tmp_path)
+    mangle(candidate if which == "candidate" else current, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    reverted(report, "candidate_file")
+    assert deps.safety.calls == [] and deps.judge.calls == []
+
+
+class ReplacingBytesSafety(Safety):
+    """Mangles a file's bytes after the safety check measured, before validation loads it."""
+
+    def __init__(self, path, how):
+        super().__init__()
+        self.path, self.how = path, how
+
+    def __call__(self, policy_version, reply):
+        measured = super().__call__(policy_version, reply)
+        mangle(self.path, self.how)
+        return measured
+
+
+@pytest.mark.parametrize("how", list(HIDDEN))
+def test_a_candidate_whose_bytes_change_during_the_gate_is_a_changed_revert(tmp_path, how):
+    deps, current, candidate = setup(tmp_path)
+    deps.safety = ReplacingBytesSafety(candidate, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    changed_revert(report)
+    assert report.candidate_sha256 == sha256_text(candidate_text())
+
+
+@pytest.mark.parametrize("how", ["bom", "not_utf8"])
+def test_an_unreadable_train_file_is_a_revert_not_a_crash(tmp_path, how):
+    deps, current, candidate = setup(tmp_path)
+    train = deps.root / "conversations" / "round-01-train.jsonl"
+    train.parent.mkdir(parents=True)
+    train.write_bytes(json.dumps({"id": "conv-r01-x"}).encode() + b"\n")
+    mangle(train, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    out = reverted(report, "complete_evidence")
+    assert out.after == gate.NOT_MEASURED and report.log_scores is None
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+def test_a_current_json_that_is_not_the_bytes_the_gate_wrote_counts_as_absent(tmp_path, how):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    mangle(path, how)
+    calls = len(deps.judge.calls)
+    assert gate.current_scores(deps, current, IDS) == first
+    assert len(deps.judge.calls) - calls == len(IDS)  # scored again, and the file rewritten as bytes
+    assert b"\r" not in path.read_bytes() and not path.read_bytes().startswith(b"\xef\xbb\xbf")
