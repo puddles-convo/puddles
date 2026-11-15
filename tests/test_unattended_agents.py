@@ -107,7 +107,26 @@ def test_single_judge_without_flags_records_none():
     assert result.score.safety_flags == [] and result.score.evidence == ""
 
 
-# ---------- 3.3: C8 is protected ----------
+# ---------- 3.3: C8 is protected only with PUDDLES_PROTECT_C8=1 ----------
+
+C8_EDITS = [
+    {"action": "remove", "rule_id": "C8", "summary": "s"},
+    {"action": "reword", "rule_id": "C8", "rule_text": "Keep listening.", "summary": "s"},
+]
+
+
+@pytest.fixture
+def protect_c8(monkeypatch):
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "1")
+
+
+@pytest.fixture(params=["unset", "0"])
+def c8_editable(request, monkeypatch):
+    if request.param == "unset":
+        monkeypatch.delenv("PUDDLES_PROTECT_C8", raising=False)
+    else:
+        monkeypatch.setenv("PUDDLES_PROTECT_C8", request.param)
+
 
 def proposer_setup(tmp_path):
     log, mem = setup(tmp_path)
@@ -121,13 +140,27 @@ def proposer_setup(tmp_path):
 def test_the_protected_set_is_written_in_one_place():
     assert "C8" in PROTECTED_RULE_IDS
     assert proposer.PROTECTED_RULE_IDS is policy_module.PROTECTED_RULE_IDS
+    assert proposer.protected_rule_ids is policy_module.protected_rule_ids
 
 
-@pytest.mark.parametrize("answer", [
-    {"action": "remove", "rule_id": "C8", "summary": "s"},
-    {"action": "reword", "rule_id": "C8", "rule_text": "Keep listening.", "summary": "s"},
-], ids=["remove", "reword"])
-def test_proposer_cannot_remove_or_reword_c8(tmp_path, answer):
+@pytest.mark.parametrize("value", [None, "", "0", "true", "yes", " 1", "1 ", "2"])
+def test_protection_is_off_unless_the_setting_is_exactly_1(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("PUDDLES_PROTECT_C8", raising=False)
+    else:
+        monkeypatch.setenv("PUDDLES_PROTECT_C8", value)
+    assert policy_module.protected_rule_ids() == frozenset()
+
+
+def test_the_setting_is_read_at_each_check(monkeypatch):
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "1")
+    assert policy_module.protected_rule_ids() is PROTECTED_RULE_IDS
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "0")
+    assert policy_module.protected_rule_ids() == frozenset()
+
+
+@pytest.mark.parametrize("answer", C8_EDITS, ids=["remove", "reword"])
+def test_proposer_cannot_remove_or_reword_c8(tmp_path, protect_c8, answer):
     log, p_in = proposer_setup(tmp_path)
     policy = parse_policy(POLICY)
     problems = proposer.check(ProposerOutput.model_validate(answer), p_in, policy, log)
@@ -140,19 +173,36 @@ def test_proposer_cannot_remove_or_reword_c8(tmp_path, answer):
 
 
 @pytest.mark.parametrize("action,text", [("remove", None), ("reword", "Keep listening.")])
-def test_policy_edit_refuses_c8(action, text):
+def test_policy_edit_refuses_c8(protect_c8, action, text):
     policy = parse_policy(POLICY)
-    with pytest.raises(PolicyEditError, match="C8"):
+    with pytest.raises(PolicyEditError, match="rule C8 is protected"):
         apply_edit(policy, action, "C8", text, "policy-v4")
 
 
-def test_other_conversation_rules_can_still_be_removed(tmp_path):
+def test_other_conversation_rules_can_still_be_removed(tmp_path, protect_c8):
     log, p_in = proposer_setup(tmp_path)
     policy = parse_policy(POLICY)
     assert proposer.check(ProposerOutput.model_validate({"action": "remove", "rule_id": "C7", "summary": "s"}),
                           p_in, policy, log) == []
     candidate, _ = apply_edit(policy, "remove", "C7", None, "policy-v4")
     assert "C7" not in candidate.conversation and "C8" in candidate.conversation
+
+
+@pytest.mark.parametrize("answer", C8_EDITS, ids=["remove", "reword"])
+def test_by_default_the_proposer_may_remove_or_reword_c8(tmp_path, c8_editable, answer):
+    log, p_in = proposer_setup(tmp_path)
+    policy = parse_policy(POLICY)
+    problems = proposer.check(ProposerOutput.model_validate(answer), p_in, policy, log)
+    assert not any("protected" in p for p in problems)
+    assert problems == []
+
+
+def test_by_default_a_policy_edit_rewords_and_removes_c8(c8_editable):
+    policy = parse_policy(POLICY)
+    reworded, touched = apply_edit(policy, "reword", "C8", "Keep listening.", "policy-v4")
+    assert touched == "C8" and reworded.conversation["C8"] == "Keep listening."
+    removed, touched = apply_edit(policy, "remove", "C8", None, "policy-v4")
+    assert touched == "C8" and "C8" not in removed.conversation
 
 
 # ---------- 3.4: a malformed search-tool call ----------

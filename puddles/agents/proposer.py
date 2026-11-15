@@ -6,7 +6,7 @@ from puddles.agents import bullet_lines, system_prompt
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, call_checked
 from puddles.memory import Memory, now, recall_records
-from puddles.policy import PROTECTED_RULE_IDS, Policy, apply_edit, at_length_limit, candidate_version, parse_policy, render_policy
+from puddles.policy import PROTECTED_RULE_IDS, Policy, apply_edit, protected_rule_ids, at_length_limit, candidate_version, parse_policy, render_policy
 from schemas import (
     EditSummary,
     FailurePattern,
@@ -85,7 +85,7 @@ def check(out: ProposerOutput, inp: ProposerInput, policy: Policy, log: Decision
                         f"{parking.tries_text(rules[out.rule_id])}; edit a different rule or add a new one")
     if out.rule_id and out.rule_id.startswith("S"):
         problems.append(f"{out.rule_id} is a safety rule and cannot be edited")
-    if out.rule_id in PROTECTED_RULE_IDS:
+    if out.rule_id in protected_rule_ids():
         problems.append(f"{out.rule_id} is protected; choose another rule")
     if out.action == "add" and (out.rule_id or not out.rule_text):
         problems.append("an addition has rule_text and no rule_id")

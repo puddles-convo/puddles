@@ -96,9 +96,15 @@ twice and the conversation went unscored; one unscored validation conversation r
 **3.2 The single-model judge keeps the safety flags.** When the judge's answer carries safety flags
 and evidence, the score record carries them. (The gatekeeper does not yet act on them; see the end.)
 
-**3.3 Rule C8 is protected.** The proposer cannot remove or reword C8 (the rule that recommends a
-counsellor or doctor when a problem goes beyond listening), in the same way it cannot touch the
-Safety rules. The protected set is written in one place.
+**3.3 Rule C8 can be protected; by default it is not.** The setting `PUDDLES_PROTECT_C8` is on only
+when its value is exactly `1`. Unset, empty or any other value is off: C8 (the rule that recommends a
+counsellor or doctor when a problem goes beyond listening) is edited like any other conversation rule,
+as on `integration`. With the setting on, the proposer cannot remove or reword C8, in the same way it
+cannot touch the Safety rules: its check fails with `C8 is protected; choose another rule`, and the
+policy edit refuses with `rule C8 is protected`. The setting is read at each check, not at import.
+The protected set is written in one place, `PROTECTED_RULE_IDS` in `puddles/policy.py`;
+`protected_rule_ids()` there returns the set in force now, and both checks use it. The Safety rules
+are protected always, whatever the setting. The setting was on during the run of 2026-11-15.
 
 **3.4 A malformed search-tool call is an error result, not a crash.** When the model's tool call has
 arguments that are not JSON, no `query`, a blank or non-string `query`, or names another tool, the

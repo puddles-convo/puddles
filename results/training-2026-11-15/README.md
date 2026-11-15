@@ -68,6 +68,7 @@ python results/training-2026-11-15/measurements/tools/paired_stats.py
 | Per round | 8 training conversations from a pool of 910; 20 fixed validation conversations; 19 safety cases; 6 helper replies per conversation |
 | Calls and cost | 4,832 model calls, none failed at the provider; $6.67 by the run's usage log |
 | Code | Branch `train-run`. The loop was restarted four times on newer commits, at round boundaries: after round 7 (`bf840e2`, a kept policy is measured again), after round 8 (`8143577`, rejected rules are set aside), after round 9 (`01ac931`, a clearly worse result is remembered; same-idea check) and after round 13 (`c1febb7`, which stopped at once on the three failures already in the log) |
+| C8 protection | On. The proposer could not reword or remove C8. It is now a setting, PUDDLES_PROTECT_C8=1, off by default |
 
 Rounds 5 to 7 were decided against a bar that was too high: `policy-v3` had been kept on a reading of 4.15 and measured 3.75 to 3.90 afterwards. From round 8 the gatekeeper measures a kept policy again before using its score.
 
