@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import NoReturn, Sequence
 
-from puddles.round_view import ReportError, build_report, read_rounds, report_path
+from puddles.round_view import UNREADABLE, ReportError, _why, build_report, name, read_rounds, report_path
 from puddles.tracing import DEFAULT_TRACKING_URI, SQLITE_PREFIX
 
 EXPERIMENT = "puddles"
@@ -53,14 +53,20 @@ def attach(path: Path, round_: int, tracking_uri: str, root: Path) -> str:
     experiment = client.get_experiment_by_name(EXPERIMENT)
     if experiment is None:
         return f"there is no experiment {EXPERIMENT!r}"
-    name = f"round-{round_:02d}"
-    runs = client.search_runs([experiment.experiment_id], filter_string=f"attributes.run_name = '{name}'",
+    experiment_id = name(experiment.experiment_id)  # an ID from the store is shown or used only as a name
+    if experiment_id == UNREADABLE:
+        return f"the experiment {EXPERIMENT!r} has an ID that is unreadable"
+    name_ = f"round-{round_:02d}"
+    runs = client.search_runs([experiment_id], filter_string=f"attributes.run_name = '{name_}'",
                               order_by=["attributes.start_time DESC"])
     here = str(Path(root).resolve())
     runs = [r for r in runs if r.data.tags.get("root") == here]  # compared here: no quoting of the path needed
     if not runs:
-        return f"there is no run named {name} for the root {here}"
-    client.log_artifact(runs[0].info.run_id, str(path), artifact_path="reports")
+        return f"there is no run named {name_} for the root {here}"
+    run_id = name(runs[0].info.run_id)
+    if run_id == UNREADABLE:
+        return f"the run named {name_} for the root {here} has an ID that is unreadable"
+    client.log_artifact(run_id, str(path), artifact_path="reports")
     return ""
 
 
@@ -80,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_error(str(exc))
         return 2
     except Exception as exc:  # noqa: BLE001  build_report reads leniently; this is a fault of the view itself
-        _print_error(f"the report could not be built ({type(exc).__name__}: {exc})")
+        _print_error(f"the report could not be built ({_why(exc)})")
         return 1
     path = report_path(root, round_)
     print(text, end="")
@@ -88,14 +94,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     except OSError as exc:  # printed all the same; with no file there is nothing to attach
-        _print_error(f"the report could not be written to {path} ({type(exc).__name__}: {exc})")
+        _print_error(f"the report could not be written to {path} ({_why(exc)})")
         print("The report was not attached to an MLflow run: it could not be written.")
         return 1
     uri = args.mlflow or os.environ.get("MLFLOW_TRACKING_URI") or DEFAULT_TRACKING_URI
     try:
         why = attach(path, round_, uri, root)
     except Exception as exc:  # noqa: BLE001  a report that cannot be attached is still written and printed
-        why = f"{type(exc).__name__}: {exc}"
+        why = f"attaching it failed ({_why(exc)})"
     if why:
         print(f"The report was not attached to an MLflow run: {' '.join(why.split())}")
     else:

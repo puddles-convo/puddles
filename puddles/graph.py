@@ -40,7 +40,7 @@ from puddles.round import (
     run_researcher,
     stand_in_gate,
 )
-from puddles.round_view import gate_metrics, with_summary
+from puddles.round_view import log_round_view, with_summary
 from puddles.tracing import TracedClient, TracedLLM
 from puddles.usage import Meter, metering, model_name
 from schemas import ConversationRecord, GateOutcome, RoundEvent, Scenario, ScoredConversation
@@ -246,9 +246,9 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
                                           "scenarios": list(scenarios), "max_turns": max_turns,
                                           "seed": seed, "gate": None})
         mlflow.set_tag("outcome", state["event"].outcome)
-        mlflow.set_tag("root", str(Path(deps.root).resolve()))
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
                             "conversations_failed": len(state.get("failures", [])),
                             "conversations_unscored": len(state.get("unscored", [])),
-                            **meter.metrics(), **gate_metrics(state, Path(deps.root))})
+                            **meter.metrics()})
+        log_round_view(state, Path(deps.root))  # the root tag and the gate's numbers; never raises
     return state
