@@ -54,7 +54,7 @@ class PlainLLM:
     autologging watches, and validates the answer with its JSON-answer call. No span, no usage line.
     """
 
-    def __init__(self, client: JSONChatClient, *, max_tokens: int, temperature: float = 0.0) -> None:
+    def __init__(self, client: JSONChatClient, *, max_tokens: int, temperature: float | None = None) -> None:
         tracing = sys.modules.get("puddles.tracing")  # not imported here: if it never was, nothing is a TracedClient
         if tracing is not None and isinstance(client, tracing.TracedClient):
             raise ValueError("PlainLLM must not be given a traced client")
@@ -65,7 +65,12 @@ class PlainLLM:
     @classmethod
     def from_env(cls) -> PlainLLM:
         """From what `OpenAILLM` reads: OPENAI_API_KEY, OPENAI_BASE_URL if set, PUDDLES_AGENT_MODEL,
-        PUDDLES_AGENT_TEMPERATURE if set, and the output limit in the run's config file."""
+        PUDDLES_AGENT_TEMPERATURE if set, and the output limit in the run's config file.
+
+        The request body is what `OpenAILLM.structured` sends for the same environment: no temperature
+        unless PUDDLES_AGENT_TEMPERATURE is set, and the limit as `max_completion_tokens`, the only name
+        current OpenAI models accept. PUDDLES_AGENT_MAX_TOKENS_PARAM=max_tokens is for a server that wants
+        the older name. No `reasoning_effort`: `OpenAILLM` adds it only to requests that carry a tool."""
         key = os.environ.get("OPENAI_API_KEY")
         model = os.environ.get("PUDDLES_AGENT_MODEL")
         missing = [name for name, value in (("OPENAI_API_KEY", key), ("PUDDLES_AGENT_MODEL", model)) if not value]
@@ -73,11 +78,15 @@ class PlainLLM:
             raise ConfigError(" and ".join(missing) + " not set; the note-taker needs them")
         raw = os.environ.get("PUDDLES_AGENT_TEMPERATURE")
         try:
-            temperature = float(raw) if raw else 0.0
+            temperature = float(raw) if raw else None
         except ValueError as exc:
             raise ConfigError("PUDDLES_AGENT_TEMPERATURE is not a number") from exc
+        param = os.environ.get("PUDDLES_AGENT_MAX_TOKENS_PARAM") or "max_completion_tokens"
+        if param not in ("max_tokens", "max_completion_tokens"):
+            raise ConfigError("PUDDLES_AGENT_MAX_TOKENS_PARAM must be max_tokens or max_completion_tokens")
         base_url = os.environ.get("OPENAI_BASE_URL") or OPENAI_DEFAULT_URL
-        client = OpenAICompatClient(base_url, model, api_key=key)  # type: ignore[arg-type]  # checked above
+        client = OpenAICompatClient(base_url, model, api_key=key,  # type: ignore[arg-type]  # checked above
+                                    max_tokens_param=param)
         return cls(client, max_tokens=output_limit(load_config().output_limits, NOTE_TAKER), temperature=temperature)
 
     def structured(self, system: str, user: str, schema: type[T]) -> T:

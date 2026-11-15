@@ -392,7 +392,7 @@ The scripts in this section are drafts with no clinical review. The evaluation l
 5. The release step decides:
      keyword match, or the checker says crisis      -> discard the draft, speak the fixed response
      the checker says none or concern               -> speak the helper's draft
-     the checker failed, took over 3 seconds,
+     the checker failed, took over 5 seconds,
        or gave an answer that cannot be parsed      -> discard the draft, speak the holding line
 ```
 

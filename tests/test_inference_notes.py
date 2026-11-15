@@ -871,3 +871,176 @@ def test_next_note_id_queues_a_write_left_by_a_stopped_store(store: NoteStore, m
     assert again.next_note_id("user-01") == "note-user-01-002"
     assert again.pending_deletes("user-01") == [note.id]
     assert set(json.loads((store.root / "notes/user-01/counter.json").read_text())) == {"next"}
+
+
+# ---------- the write wait and the read-path recall timeout (pastdev.md, 2026-11-15) ----------
+
+import puddles.memory as memory_module  # noqa: E402
+from puddles.inference.note_store import RECALL_TIMEOUT_ENV, WRITE_WAIT_ENV  # noqa: E402
+
+
+@pytest.fixture
+def no_timeout_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(WRITE_WAIT_ENV, raising=False)
+    monkeypatch.delenv(RECALL_TIMEOUT_ENV, raising=False)
+
+
+class FakeClock:
+    """Stands in for `time` inside puddles.memory: sleeping moves the clock, nothing really waits."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def slow_past(clock: FakeClock, *, ingest_takes_s: float = 61.0, recall_error: Exception | None = None,
+              seen: list | None = None) -> PastUserMemory:
+    """The real PastUserMemory over a mock transport: an ingestion completes `ingest_takes_s` after it is sent.
+
+    The default is just over 60 s, so the old 60 s wait gives up on it, as it did against past.dev."""
+    sent_at: dict[str, float] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix("/api/v1")
+        if seen is not None:
+            seen.append((request.method, path, request.extensions.get("timeout")))
+        if request.method == "PUT" and path.startswith("/audiences/"):
+            return httpx.Response(200, json={})
+        if request.method == "POST" and path == "/ingest":
+            ingestion = f"ing-{len(sent_at) + 1}"
+            sent_at[ingestion] = clock.now
+            return httpx.Response(202, json={"ingestionId": ingestion})
+        if request.method == "GET" and path.startswith("/ingest/"):
+            ingestion = path.rsplit("/", 1)[-1]
+            done = clock.now - sent_at[ingestion] >= ingest_takes_s
+            return httpx.Response(200, json={"status": "completed" if done else "processing"})
+        if request.method == "POST" and path == "/recall":
+            if recall_error is not None:
+                raise recall_error
+            return httpx.Response(200, json={"results": []})
+        if request.method == "DELETE" and path.startswith("/data-points/"):
+            entry = path.rsplit("/", 1)[-1]
+            return httpx.Response(202, json={"operationId": "op", "ids": [entry]})
+        return httpx.Response(404)
+
+    return PastUserMemory(api_key="test-key", transport=httpx.MockTransport(handler))
+
+
+def test_write_passes_write_wait_s_to_the_wait(mem: FakeUserMemory, tmp_path: Path, no_timeout_env) -> None:
+    given: list[float] = []
+    real_wait = mem.wait
+
+    def wait(ingestion_id, timeout_s=60):
+        given.append(timeout_s)
+        return real_wait(ingestion_id, timeout_s)
+
+    mem.wait = wait
+    seed(NoteStore(mem, tmp_path / "a", write_wait_s=123.0), "user-01", ("goals", "Zebra."))
+    seed(NoteStore(mem, tmp_path / "b"), "user-01", ("goals", "Zebra."))
+    assert given == [123.0, 300.0]
+
+
+def test_an_ingestion_of_60_simulated_seconds_is_stored_with_the_default_wait(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_timeout_env) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(memory_module, "time", clock)
+    store = NoteStore(slow_past(clock), tmp_path)
+    result = session(store, "user-01", [add("situation", "Works nights.")])
+    assert result.not_written == 0 and result.added == ["note-user-01-001"]
+    assert index_ids(store, "user-01") == ["note-user-01-001"] and store.pending_deletes("user-01") == []
+    assert 60 <= clock.now < 300
+
+
+@pytest.mark.parametrize("wait_s", [10, 60])  # 60: the wait every note write had before
+def test_an_ingestion_of_60_simulated_seconds_is_not_stored_with_a_shorter_wait(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_timeout_env, wait_s: int) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(memory_module, "time", clock)
+    store = NoteStore(slow_past(clock), tmp_path, write_wait_s=wait_s)
+    result = session(store, "user-01", [add("situation", "Works nights.")])
+    assert result.added == [] and result.not_written == 1
+    assert index_ids(store, "user-01") == [] and store.stored("user-01") == {}
+    assert store.pending_deletes("user-01") == []  # queued, then deleted from past.dev as before
+
+
+def test_a_timed_out_recall_neither_fails_nor_outlasts_the_setting_in_helper_notes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_timeout_env) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(memory_module, "time", clock)
+    seen: list = []
+    past = slow_past(clock, ingest_takes_s=0, recall_error=httpx.ReadTimeout("slow first recall"), seen=seen)
+    store = NoteStore(past, tmp_path, recall_timeout_s=2.5)
+    seed(store, "user-01", ("goals", "Zebra."))
+    seen.clear()
+    assert store.helper_notes("user-01", TODAY) == ["Zebra."]
+    recalls = [timeout for method, path, timeout in seen if path == "/recall"]
+    assert recalls == [{"connect": 2.5, "read": 2.5, "write": 2.5, "pool": 2.5}]
+    # Every other request keeps the client's own timeout.
+    assert all(timeout["read"] == 30 for method, path, timeout in seen if path != "/recall")
+
+
+def test_live_notes_gives_the_recall_its_timeout_and_survives_a_timeout(tmp_path: Path, no_timeout_env) -> None:
+    class TimesOut(FakeUserMemory):
+        def __init__(self) -> None:
+            super().__init__()
+            self.timeouts: list = []
+
+        def recall(self, query, identity, level="low", limit=20, *, timeout_s=None):
+            self.timeouts.append(timeout_s)
+            raise TimeoutError("read timed out")
+
+    mem = TimesOut()
+    store = NoteStore(mem, tmp_path)
+    seed(store, "user-01", ("goals", "Zebra."))
+    mem.timeouts.clear()
+    assert store.helper_notes("user-01", TODAY) == ["Zebra."]
+    assert mem.timeouts == [5.0]
+
+
+def test_a_memory_whose_recall_has_no_timeout_keyword_is_still_asked(tmp_path: Path, no_timeout_env) -> None:
+    class OldStyle(FakeUserMemory):
+        def recall(self, query, identity, level="low", limit=20):
+            return super().recall(query, identity, level, limit)
+
+    mem = OldStyle()
+    store = NoteStore(mem, tmp_path)
+    seed(store, "user-01", ("goals", "Zebra."))
+    mem.recalls.clear()
+    assert store.helper_notes("user-01", TODAY) == ["Zebra."]
+    assert mem.recalls == [{"query": RECALL_QUERY, "identity": "user-01"}]
+
+
+def test_the_settings_are_read_from_the_environment(mem: FakeUserMemory, tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(WRITE_WAIT_ENV, "450")
+    monkeypatch.setenv(RECALL_TIMEOUT_ENV, "1.5")
+    store = NoteStore(mem, tmp_path)
+    assert (store.write_wait_s, store.recall_timeout_s) == (450.0, 1.5)
+    passed = NoteStore(mem, tmp_path, write_wait_s=20, recall_timeout_s=3)
+    assert (passed.write_wait_s, passed.recall_timeout_s) == (20.0, 3.0)  # a value passed wins
+    monkeypatch.delenv(WRITE_WAIT_ENV)
+    monkeypatch.delenv(RECALL_TIMEOUT_ENV)
+    default = NoteStore(mem, tmp_path)
+    assert (default.write_wait_s, default.recall_timeout_s) == (300.0, 5.0)
+
+
+@pytest.mark.parametrize("env", [WRITE_WAIT_ENV, RECALL_TIMEOUT_ENV])
+@pytest.mark.parametrize("bad", ["", "abc", "0", "-1", "nan", "inf", "-inf"])
+def test_a_bad_environment_value_is_refused_naming_the_variable(mem: FakeUserMemory, tmp_path: Path,
+                                                                monkeypatch: pytest.MonkeyPatch,
+                                                                no_timeout_env, env: str, bad: str) -> None:
+    monkeypatch.setenv(env, bad)
+    with pytest.raises(ValueError, match=env):
+        NoteStore(mem, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["write_wait_s", "recall_timeout_s"])
+@pytest.mark.parametrize("bad", [0, -5, float("nan"), float("inf"), "soon", True])
+def test_a_bad_setting_is_refused(mem: FakeUserMemory, tmp_path: Path, no_timeout_env, name: str, bad) -> None:
+    with pytest.raises(ValueError, match=name):
+        NoteStore(mem, tmp_path, **{name: bad})

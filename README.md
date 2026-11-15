@@ -119,7 +119,7 @@ Which model plays each agent. These are starting choices and none has been bench
 ### Still to decide
 
 - **The exact OpenAI model** for the judge, critic, researcher and proposer. It must be pinned before the judge is calibrated ([#3](https://github.com/puddles-convo/puddles/issues/3)), because changing it afterwards invalidates the scores. A fallback judge on Tinker is [#23](https://github.com/puddles-convo/puddles/issues/23).
-- **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 3-second limit.
+- **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 5-second limit.
 - **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
 
 ## 5. The memory

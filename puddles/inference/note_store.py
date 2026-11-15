@@ -4,7 +4,9 @@ The index decides what the helper sees; past.dev is a searchable copy. A note co
 index before anything is asked of past.dev, so a note someone asked to forget is never shown
 again, even while past.dev still holds it. Contract: docs/specs/notes.md.
 """
+import inspect
 import json
+import math
 import os
 import re
 import tempfile
@@ -19,6 +21,12 @@ from schemas import FOLLOW_UP_EXPIRY_DAYS, ExistingNote, LiveNote, LiveNoteIndex
 
 NOTE_TAKER = "note-taker"
 RECALL_QUERY = "What should the robot remember about this person?"
+# past.dev took 54 s, 81 s and over 63 s to complete a note's ingestion, and up to 30 s and more for the
+# first recall on a new audience (results/inference-smoke/pastdev.md, 2026-11-15).
+WRITE_WAIT_S = 300.0
+RECALL_TIMEOUT_S = 5.0
+WRITE_WAIT_ENV = "PUDDLES_NOTE_WRITE_WAIT_S"
+RECALL_TIMEOUT_ENV = "PUDDLES_NOTE_RECALL_TIMEOUT_S"
 
 USER_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 USER_ID_MAX = 33  # past.dev allows an audience name 40 characters, and the audience is person-<user_id>
@@ -42,7 +50,8 @@ class UserMemory(Protocol):
     def ensure_audience(self, audience: str, identities: list[str]) -> None: ...
     def ingest(self, entry: MemoryEntry) -> str: ...
     def wait(self, ingestion_id: str, timeout_s: float = 60) -> bool: ...
-    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]: ...
+    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
+               timeout_s: Optional[float] = None) -> list[dict]: ...
     def delete(self, entry_id: str) -> bool: ...
 
 
@@ -111,6 +120,36 @@ def _read_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text()) if path.exists() else default
 
 
+def _seconds(name: str, value: Any) -> float:
+    """A finite number of seconds above zero, else ValueError naming the setting."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a number of seconds above zero, not {value!r}")
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number of seconds above zero, not {value!r}") from None
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError(f"{name} must be a finite number of seconds above zero, not {value!r}")
+    return seconds
+
+
+def _setting(name: str, env: str, given: Optional[float], default: float) -> float:
+    """The value passed, else the environment variable if set, else the default."""
+    if given is not None:
+        return _seconds(name, given)
+    raw = os.environ.get(env)
+    return default if raw is None else _seconds(env, raw)
+
+
+def _takes_timeout(method: Any) -> bool:
+    """True if `method` accepts `timeout_s`, so a fake written before the keyword existed still works."""
+    try:
+        params = inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "timeout_s" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
 def belongs_to(note_id: str, user_id: str) -> bool:
     """True only for `note-<user_id>-<NNN>`. The number has no hyphen, so no two people can share an ID."""
     return re.fullmatch(rf"note-{re.escape(user_id)}-\d{{3,}}", note_id) is not None
@@ -146,12 +185,19 @@ class NoteStore:
       for deletion unless it reached the index, so a note past.dev may hold is never unknown to us.
     """
 
-    def __init__(self, memory: UserMemory, root: Path, *, delete_attempts: int = 3) -> None:
+    def __init__(self, memory: UserMemory, root: Path, *, delete_attempts: int = 3,
+                 write_wait_s: Optional[float] = None, recall_timeout_s: Optional[float] = None) -> None:
+        """`write_wait_s`: how long `write` waits for past.dev to confirm a note (default 300 s, or
+        PUDDLES_NOTE_WRITE_WAIT_S). `recall_timeout_s`: the most the recall in `live_notes` may take
+        (default 5 s, or PUDDLES_NOTE_RECALL_TIMEOUT_S)."""
         if delete_attempts < 1:
             raise ValueError("delete_attempts must be at least 1")
         self.memory = memory
         self.root = Path(root)
         self.delete_attempts = delete_attempts
+        self.write_wait_s = _setting("write_wait_s", WRITE_WAIT_ENV, write_wait_s, WRITE_WAIT_S)
+        self.recall_timeout_s = _setting("recall_timeout_s", RECALL_TIMEOUT_ENV, recall_timeout_s,
+                                         RECALL_TIMEOUT_S)
         self._owner = uuid.uuid4().hex  # marks the writes this instance has in flight
 
     def _dir(self, user_id: str) -> Path:
@@ -287,9 +333,13 @@ class NoteStore:
             self.ensure_person(user_id)
             # Recall as the person. A result counts only if its source ID is on the index, and every
             # sentence is then taken from notes.json, so what past.dev returns adds no note and no text.
-            self.memory.recall(RECALL_QUERY, identity=user_id)
+            # Bounded: nothing it returns is used, and a slow first recall would hold up the session start.
+            if _takes_timeout(self.memory.recall):
+                self.memory.recall(RECALL_QUERY, identity=user_id, timeout_s=self.recall_timeout_s)
+            else:
+                self.memory.recall(RECALL_QUERY, identity=user_id)
         except Exception:
-            pass  # the sentences are read from notes.json, so a failed recall loses nothing
+            pass  # the sentences are read from notes.json, so a failed or timed-out recall loses nothing
         stored = self.stored(user_id)
         pending = set(self.pending_deletes(user_id))
         return [ExistingNote(note_id=n.note_id, kind=n.kind, fact=stored[n.note_id].fact,
@@ -325,7 +375,7 @@ class NoteStore:
             self.ensure_person(user_id)
             handed_over = True
             ingestion_id = self.memory.ingest(entry)
-            confirmed = self.memory.wait(ingestion_id)
+            confirmed = self.memory.wait(ingestion_id, timeout_s=self.write_wait_s)
         except Exception as exc:
             self._abandon_write(user_id, note.id, handed_over)
             raise PastError(f"note {note.id} was not written: {exc}") from exc
