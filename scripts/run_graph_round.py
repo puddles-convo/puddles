@@ -3,6 +3,9 @@
     python -m scripts.run_graph_round --fake --root runs/dev
     python -m scripts.run_graph_round --root runs/dev --policy policies/policy-v1.md --max-turns 6
 
+--gate kept or --gate reverted is a stand-in that decides so. --gate real runs the gatekeeper in
+puddles/gate.py; it promotes nothing unless --noise-measured says --noise is a measured figure.
+
 --fake uses scripted chat clients, a scripted model, a fake search and in-process memory: no keys,
 no network. Without it the clients come from HELPER_*, SIMUSER_*, OPENAI_API_KEY,
 PUDDLES_AGENT_MODEL, EXA_API_KEY and PAST_API_KEY.
@@ -13,6 +16,7 @@ import argparse
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, NoReturn, Sequence, TypeVar
 
@@ -23,17 +27,54 @@ from loop.errors import ConfigError, PolicyError
 from loop.llm import ChatClient, FakeClient
 from loop.runner import load_scenarios
 from loop.run_batch import _fake_helper, _fake_user
+from puddles import gate as real_gate
 from puddles import tracing
 from puddles.decision_log import DecisionLog
 from puddles.graph import RoundDeps, check_policy_file, run_round
 from puddles.llm import LLM, AgentFailed
-from puddles.memory import FakeMemory, Memory, PastError
+from puddles.memory import FakeMemory, Memory, PastError, now
+from puddles.policy import TOKEN_CAP
 from puddles.round import RoundResult, policy_in_force, stand_in_gate
-from schemas import CriticOutput, ProposerOutput, ResearcherOutput
+from schemas import (
+    ConversationRecord,
+    CriticOutput,
+    GateOutcome,
+    ProposerOutput,
+    ResearcherOutput,
+    SafetyResult,
+    ScoreRecord,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
 FAKE_URL = "https://counselling.example.org/skills/{slug}"
+REAL_GATE_NOT_JOINED = ("--gate real needs the real judge and safety check, which are joined in a later piece; "
+                        "use --fake --gate real, or --gate kept or reverted")
+
+
+@dataclass
+class _Judged:
+    score: ScoreRecord
+
+
+class FakeJudge:
+    """For --fake --gate real: fixed scores. It reads no conversation."""
+
+    version = "judge-fake"
+
+    def score(self, record: ConversationRecord) -> _Judged:
+        helper_turns = sum(t.speaker == "helper" for t in record.turns)
+        return _Judged(ScoreRecord(
+            id=f"score-{record.id}", written_by="judge", created_at=now(), parent_ids=[record.id],
+            conversation_id=record.id, judge_version=self.version, empathy=3, relevance=3, emotion_before=3,
+            emotion_after=3, strategies=["Question"] * helper_turns,
+            note="Scripted judge: fixed scores, the conversation was not read."))
+
+
+def fake_safety(policy_version: str, reply: real_gate.Reply) -> SafetyResult:
+    """For --fake --gate real: asks the helper nothing and passes. Not a safety check."""
+    return SafetyResult(policy_version=policy_version, case_file="stand-in: no safety cases were run",
+                        passed=True, cases=[])
 
 
 class FakeLLM:
@@ -95,8 +136,14 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--scenarios", default="fixtures/scenarios.jsonl")
     p.add_argument("--max-turns", type=int, default=10)
     p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--gate", choices=["kept", "reverted"], default="reverted",
-                   help="what the stand-in gate decides")
+    p.add_argument("--gate", choices=["kept", "reverted", "real"], default="reverted",
+                   help="kept or reverted: what the stand-in gate decides. real: the gatekeeper")
+    p.add_argument("--validation", default=None,
+                   help="the scenarios the gate tests on, all of them; default: the --scenarios file")
+    p.add_argument("--noise", type=float, default=0.0, help="the run-to-run noise in quality")
+    p.add_argument("--noise-measured", action="store_true",
+                   help="--noise is a measured figure; without it the real gate keeps nothing")
+    p.add_argument("--token-cap", type=int, default=TOKEN_CAP, help="the most tokens a policy may have")
     p.add_argument("--fake", action="store_true", help="scripted clients, model, search and memory")
     p.add_argument("--mlflow", default=None, help="MLflow tracking address")
     return p.parse_args(argv)
@@ -104,6 +151,9 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
+    if args.gate == "real" and not args.fake:
+        _print_error(REAL_GATE_NOT_JOINED)
+        return 2
     root = Path(args.root)
     current_file = None
     try:
@@ -112,6 +162,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         check_policy_file(policy_path)
         current_file = args.scenarios
         scenarios = load_scenarios(args.scenarios)
+        validation = scenarios
+        if args.gate == "real":
+            if args.validation is not None:
+                current_file = args.validation
+                validation = load_scenarios(args.validation)
+            if args.noise < 0:
+                raise ConfigError(f"--noise cannot be negative: {args.noise}")
         current_file = None
         helper_client: ChatClient
         user_client: ChatClient
@@ -139,12 +196,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     decision = args.gate
 
-    def gate(result: RoundResult):
+    def stand_in(result: RoundResult) -> GateOutcome:
         return stand_in_gate(result, decision)
+
+    gate: Callable[[RoundResult], GateOutcome] = stand_in
+    if decision == "real":
+        gate_deps = real_gate.GateDeps(
+            helper_client=tracing.TracedClient(helper_client, "helper"),
+            user_client=tracing.TracedClient(user_client, "simulated_user"), judge=FakeJudge(),
+            safety=fake_safety, root=root, scenarios=validation, noise_measured=args.noise_measured,
+            max_turns=args.max_turns, seed=args.seed)
+        gate = real_gate.make_gate(gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
+                                   noise=args.noise, token_cap=args.token_cap)
 
     tracing.setup(tracking_uri=args.mlflow)
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
-                     memory=memory, log=DecisionLog(root), root=root, gate=gate)
+                     memory=memory, log=DecisionLog(root), root=root, gate=gate, start_policy=Path(args.policy))
     try:
         state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
                           seed=args.seed)

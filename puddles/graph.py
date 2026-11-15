@@ -68,6 +68,8 @@ class RoundDeps:
     judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
     usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
+    # Set: the starting policy gets its .meta.json, a promoted one gets its own, and the replay check runs.
+    start_policy: Optional[Path] = None
 
 
 class RoundState(TypedDict, total=False):
@@ -166,7 +168,8 @@ def build_round_graph(deps: RoundDeps):
             return {"gate": deps.gate(state["result"])}
 
     def finish(state: RoundState) -> dict:
-        event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root)
+        event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root,
+                             start_policy=deps.start_policy)
         return {"event": event}
 
     def after_judge(state: RoundState) -> str:
@@ -204,6 +207,10 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
     # Before any call: a model with no price, or an unpriced Exa search, stops the run here.
     meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)],
                        search=deps.search is exa.search)
+    if deps.start_policy is not None:
+        from puddles.gate import ensure_starting_meta  # puddles.gate imports this module
+
+        ensure_starting_meta(Path(deps.root), Path(deps.start_policy))
     deps.memory.ensure_training_audience()
     retry_pending(deps.log, deps.memory, deps.root)
     round_ = deps.log.next_round()
