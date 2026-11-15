@@ -1,0 +1,28 @@
+{
+  "id": "gate-r03",
+  "schema_version": 4,
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-15T06:36:14Z",
+  "parent_ids": [
+    "edit-r03"
+  ],
+  "round": 3,
+  "edit_id": "edit-r03",
+  "decision": "kept",
+  "before": {
+    "empathy": 4.176,
+    "relevance": 4.529,
+    "quality": 4.353,
+    "emotion_change": null
+  },
+  "after": {
+    "empathy": 4.516,
+    "relevance": 4.592,
+    "quality": 4.554,
+    "emotion_change": null
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v2",
+  "reason": "Dataset gate: On the ESConv validation split, the 157 conversations that follow the new rule rate 4.55 against 4.35 for the 17 that break it (noise 0.20). The gain is above the noise and no dimension fell by more than the noise. No conversations or safety cases were run; the Safety section was checked unchanged.",
+  "prediction_met": null
+}
