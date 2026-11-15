@@ -1,0 +1,102 @@
+{
+  "id": "grief-on-s3",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-29T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call."
+    },
+    {
+      "speaker": "helper",
+      "text": "Those first tomatoes arriving on Sunday must have brought your dad close—and made his absence feel sharper, too. You’ve been caring for his plants through all this, and that’s a tender way of keeping a connection with him. What was it like picking them?"
+    },
+    {
+      "speaker": "user",
+      "text": "It was sad. I kept thinking I should call him and tell him they were ready. But they smelled really good, and for a minute I could almost hear what he’d say."
+    },
+    {
+      "speaker": "helper",
+      "text": "You missed being able to share the news with him, and for a moment the smell and that familiar imagined voice brought him close. That sounds sad and comforting all at once. What do you think he would have said?"
+    },
+    {
+      "speaker": "user",
+      "text": "He’d probably say I should’ve let them get a little bigger. Then he’d ask if I saved him any."
+    },
+    {
+      "speaker": "helper",
+      "text": "I can almost hear the teasing in that—first telling you to wait longer, then making sure you saved him some. It sounds like a lovely, very him kind of memory. Do you have a way you might like to mark the first tomatoes in his honor?"
+    },
+    {
+      "speaker": "user",
+      "text": "I don't know. I don't really want to turn it into a whole thing. Maybe I could just eat one and think of him."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds like enough. You don’t have to make it a whole thing—just eating one and thinking of him can be a quiet way to share the moment. Which one did you try first?"
+    },
+    {
+      "speaker": "user",
+      "text": "The smallest one. It was a little tart. I think he would've said I picked it too soon."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds exactly like the kind of thing he might tease you about—and you still got to share the moment with him in your own way. Did it bring a smile along with the sadness?"
+    },
+    {
+      "speaker": "user",
+      "text": "A little, yeah. But then I remembered I can't tell him about it, and that hit me again."
+    },
+    {
+      "speaker": "helper",
+      "text": "That little smile turning back into the ache of not being able to call him makes sense. You miss those Sunday calls and the small everyday things you’d tell him. I’m glad you let yourself have the moment with the tomato, even though it hurt. What feels strongest right now: the sadness, or the warmth of remembering him?"
+    }
+  ],
+  "remember_me": true,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 917,
+      "helper": 1432,
+      "total": 1432
+    },
+    {
+      "keyword": 0,
+      "checker": 879,
+      "helper": 1476,
+      "total": 1476
+    },
+    {
+      "keyword": 0,
+      "checker": 1344,
+      "helper": 1638,
+      "total": 1638
+    },
+    {
+      "keyword": 0,
+      "checker": 1134,
+      "helper": 1434,
+      "total": 1435
+    },
+    {
+      "keyword": 0,
+      "checker": 804,
+      "helper": 1426,
+      "total": 1426
+    },
+    {
+      "keyword": 0,
+      "checker": 1151,
+      "helper": 1640,
+      "total": 1640
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "id": "laidoff-off-s1",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-15T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud."
+    },
+    {
+      "speaker": "helper",
+      "text": "You were laid off three weeks ago, and you’ve been carrying the weight of not telling your parents. You don’t need advice right now—you just need room to say it. I’m glad you told me. What’s it been like holding that in?"
+    },
+    {
+      "speaker": "user",
+      "text": "It’s embarrassing. I was there for eight years, and somehow I still feel like I should’ve seen it coming. My parents are going to ask what I’m doing next. I have an interview Tuesday, but even thinking about it makes my stomach turn."
+    },
+    {
+      "speaker": "helper",
+      "text": "After eight years, losing the job feels embarrassing, and now the interview and your parents’ questions are pressing on you too. It makes sense that your mind is looking for something you could have done differently, even though a layoff doesn’t mean you should have seen it coming."
+    },
+    {
+      "speaker": "user",
+      "text": "Yeah. I keep replaying the last few months, looking for some sign I missed. And then I think about having to sit there Tuesday and act like I’m confident. I’m just tired of pretending I’m fine."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re worn out from replaying the past and feeling like you have to perform confidence on Tuesday, when you don’t feel fine. You don’t have to pretend with me. After eight years there, it makes sense this is a lot to carry. What feels hardest about Tuesday right now?"
+    },
+    {
+      "speaker": "user",
+      "text": "Honestly, being asked why I left and having to make it sound normal. It wasn’t my choice. I don’t want to sit there and feel ashamed all over again."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re worried they’ll ask why you left, and that you’ll have to package something painful as if it were ordinary. It wasn’t your choice, and you don’t have to make it sound like it was. It makes sense that you’d want to avoid feeling that shame again."
+    },
+    {
+      "speaker": "user",
+      "text": "Yeah. I just wish I could go in without this feeling like some kind of verdict on me."
+    },
+    {
+      "speaker": "helper",
+      "text": "You wish Tuesday could just be an interview, not a judgment on your worth. Losing a job after eight years doesn’t define you, even if it’s hard to feel that right now. You’ve made it through these three weeks and showed up for the interview—that’s something. What does the feeling say the interview will prove about you?"
+    },
+    {
+      "speaker": "user",
+      "text": "I don’t know. That I’m not as capable as I thought, maybe. Can we not turn this into another thing I have to analyze? I’m just tired."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re tired, and you don’t want to have to pick apart the feeling or prove anything right now. We can leave it there. You don’t have to solve Tuesday tonight. I’m here with you."
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1196,
+      "helper": 1569,
+      "total": 1570
+    },
+    {
+      "keyword": 0,
+      "checker": 1253,
+      "helper": 1498,
+      "total": 1499
+    },
+    {
+      "keyword": 0,
+      "checker": 1190,
+      "helper": 1563,
+      "total": 1564
+    },
+    {
+      "keyword": 0,
+      "checker": 1445,
+      "helper": 1476,
+      "total": 1476
+    },
+    {
+      "keyword": 0,
+      "checker": 1387,
+      "helper": 1830,
+      "total": 1830
+    },
+    {
+      "keyword": 0,
+      "checker": 1158,
+      "helper": 1297,
+      "total": 1297
+    }
+  ]
+}

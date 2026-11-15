@@ -1,0 +1,17 @@
+{
+  "user_id": "grief-on",
+  "notes": [
+    {
+      "note_id": "note-grief-on-002",
+      "kind": "people",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-grief-on-004",
+      "kind": "situation",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "persona_id": "examprep",
+  "session": 1,
+  "arm": "notes_on",
+  "user_id": "examprep-on",
+  "session_id": "examprep-on-s1",
+  "failed": false,
+  "reason": "",
+  "notes_given": [],
+  "record": {
+    "id": "examprep-on-s1",
+    "schema_version": 4,
+    "written_by": "helper",
+    "created_at": "2026-11-15T12:00:00Z",
+    "parent_ids": [],
+    "source": "live",
+    "scenario_id": null,
+    "split": null,
+    "policy_version": "policy-v2",
+    "turns": [
+      {
+        "speaker": "user",
+        "text": "My statistics exam is in three weeks and every time I open the notes my chest gets tight. Can you give me something concrete to do?"
+      },
+      {
+        "speaker": "helper",
+        "text": "That tight feeling makes it hard to even begin, and reaching out for a concrete step is a good move. For now, set a timer for five minutes, open your notes to one small topic, and write down just one question you want to understand. When the timer ends, you can stop or keep going\u2014either counts. What topic feels smallest to start with?"
+      },
+      {
+        "speaker": "user",
+        "text": "Maybe probability distributions. But even looking at the chapter makes me want to grab my phone."
+      },
+      {
+        "speaker": "helper",
+        "text": "Probability distributions feels like a starting point, and reaching for your phone sounds like a way to get a little distance from that pressure. Could you put your phone just out of reach for five minutes, then look only at the first example\u2014not the whole chapter\u2014and tell me what the question is asking?"
+      },
+      {
+        "speaker": "user",
+        "text": "I can try, but putting my phone away feels like another thing I\u2019m supposed to do perfectly. I don\u2019t want to turn this into a whole routine."
+      },
+      {
+        "speaker": "helper",
+        "text": "You don\u2019t want a small study step to become another standard you can fail at. That makes sense. We can drop the phone idea; there\u2019s no routine to get right. Maybe just glance at one line of the first example, with your phone wherever it is, and stop there if that\u2019s enough. Would that feel lighter?"
+      },
+      {
+        "speaker": "user",
+        "text": "A little. I can look at one line. I think what scares me is I don\u2019t even know what I got wrong on the mock. I just saw the score and shut it."
+      },
+      {
+        "speaker": "helper",
+        "text": "Seeing the score without knowing what went wrong left you facing a big, blurry fear. Looking at one line is enough for now, and you don\u2019t have to tackle the mock all at once. When you feel ready, would it help to look at just one missed question, without checking the score again?"
+      },
+      {
+        "speaker": "user",
+        "text": "Maybe. I still have the mock. I could pick one question, but I\u2019m worried I\u2019ll stare at it and not know how to start."
+      },
+      {
+        "speaker": "helper",
+        "text": "You could pick one question and still feel stuck at the first step\u2014that\u2019s a real worry. If that happens, just read the question and underline what it\u2019s asking for; you don\u2019t have to solve it yet. And if this tight-chest feeling keeps making it hard to study or affects your sleep, talking with a counsellor or doctor could help."
+      },
+      {
+        "speaker": "user",
+        "text": "Okay. I\u2019ll try underlining what it\u2019s asking for, not solving it. I\u2019ll pick one question now."
+      },
+      {
+        "speaker": "helper",
+        "text": "That sounds like a manageable first step: one question, just underlining what it asks. You\u2019ve already made this feel less like \u201cstudy the whole chapter\u201d and more like one small action. What does the question ask you to find?"
+      }
+    ],
+    "remember_me": true,
+    "consent_for_training": true,
+    "helped": null,
+    "timings_ms": [
+      {
+        "keyword": 0,
+        "checker": 1265,
+        "helper": 1402,
+        "total": 1402
+      },
+      {
+        "keyword": 0,
+        "checker": 1224,
+        "helper": 2265,
+        "total": 2266
+      },
+      {
+        "keyword": 0,
+        "checker": 1169,
+        "helper": 1505,
+        "total": 1505
+      },
+      {
+        "keyword": 0,
+        "checker": 919,
+        "helper": 1788,
+        "total": 1789
+      },
+      {
+        "keyword": 0,
+        "checker": 958,
+        "helper": 1645,
+        "total": 1646
+      },
+      {
+        "keyword": 0,
+        "checker": 947,
+        "helper": 1672,
+        "total": 1672
+      }
+    ]
+  },
+  "notes_before": [],
+  "notes_after": [
+    {
+      "note_id": "note-examprep-on-001",
+      "kind": "situation",
+      "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam.",
+      "last_confirmed": "2026-11-15",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-002",
+      "kind": "what_helps",
+      "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+      "last_confirmed": "2026-11-15",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-003",
+      "kind": "goals",
+      "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet.",
+      "last_confirmed": "2026-11-15",
+      "due_date": null
+    }
+  ],
+  "changes": {
+    "added": [
+      {
+        "note_id": "note-examprep-on-001",
+        "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam."
+      },
+      {
+        "note_id": "note-examprep-on-002",
+        "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it."
+      },
+      {
+        "note_id": "note-examprep-on-003",
+        "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet."
+      }
+    ],
+    "replaced": [],
+    "confirmed": [],
+    "deleted": [],
+    "failed": false,
+    "reason": ""
+  },
+  "score": {
+    "status": "scored",
+    "reason": "",
+    "empathy": 5,
+    "relevance": 5,
+    "emotion_before": 3,
+    "emotion_after": 2,
+    "judge_version": "judge-fallback-v1-74e8678d",
+    "note": "In turn 6, the helper recognized that putting the phone away felt like another standard to fail at and dropped that suggestion, adapting the task to the person's actual source of pressure."
+  }
+}
