@@ -1,7 +1,7 @@
 #!/bin/sh
 # Held-out check: the final policy, the like-for-like control and the starting policy on 20 validation-split
 # scenarios that the gatekeeper never used. Loop judge only.
-T=$HOME/.hermes/cache/scratch/train
+T=<run-folder>
 H=$T/controls/heldout_ids.txt
 date "+start %H:%M:%S"
 sh $T/recheck_ids.sh $T/train-root2/policies/policy-v4.md 1 heldout-v4 $H &

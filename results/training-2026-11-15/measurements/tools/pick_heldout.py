@@ -11,7 +11,7 @@ print("validation split size:", len(ids), "| in the gatekeeper's set:", len(used
 rest = sorted(set(ids) - used)
 random.Random(20261115).shuffle(rest)
 held = sorted(rest[:20])
-path = os.path.expanduser("~/.hermes/cache/scratch/train/controls/heldout_ids.txt")
+path = os.path.expanduser("<run-folder>/controls/heldout_ids.txt")
 with open(path, "w") as f:
     f.write("\n".join(held) + "\n")
 print("held-out IDs written:", len(held), held[:4], "...")

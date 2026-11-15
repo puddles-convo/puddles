@@ -1,6 +1,6 @@
 # Training run of 2026-11-15
 
-The records of one unattended training run and of every measurement behind its results. The run started at 03:02 and stopped itself at 06:40 after 13 rounds. Everything here was copied from the machine it ran on; nothing was edited.
+The records of one unattended training run and of every measurement behind its results. The run started at 03:02 and stopped itself at 06:40 after 13 rounds. Everything here was copied from the machine it ran on. One thing was edited: absolute paths of that machine were replaced by `<run-folder>`, `<venv>` and `<documents>`.
 
 ## Result
 
@@ -87,6 +87,6 @@ Rounds 5 to 7 were decided against a bar that was too high: `policy-v3` had been
 | `measurements/heldout/` | The held-out check and its 20 scenario IDs |
 | `measurements/stage5-baseline/` | The three baseline runs the noise of 0.275 was measured from, and the comparison of the two grading guides |
 | `measurements/controls/` | The control policy: the run's safety rules with no conversation rules |
-| `measurements/tools/` | The scripts and settings used, as run. Some hold paths of the machine they ran on |
+| `measurements/tools/` | The scripts and settings used, as run, with machine paths replaced by placeholders; set those before running one |
 
 Labels in `measurements/astra/`: `v1`, `v1b` are the two sets of the starting policy; `v2`, `v3` one set each; `v4`, `v4b` the final policy; `plain` the plain baseline with the original safety wording; `plain-s2`, `plain-s2b` the control; `heldout-v1`, `heldout-control`, `heldout-v4` the three held-out sets.

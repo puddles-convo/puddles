@@ -1,5 +1,5 @@
 {
-  "root": "/Users/moamen/.hermes/cache/scratch/train/baseline",
+  "root": "<run-folder>/baseline",
   "runs": [
     {
       "policy_version": "policy-v1",
