@@ -1486,11 +1486,8 @@ def test_usage_field_boundary_matrix(tmp_path, field, value):
     report = build_report(tmp_path, 7)
     assert CLIENT_LINE not in report and HELPER_LINE not in report
     assert snapshot(tmp_path) == before
-    # A huge nonnegative token count is still an integer; a different integer round is simply ignored.
-    if field in {"tokens_in", "tokens_out"} and isinstance(value, int) and not isinstance(value, bool):
-        assert str(value) in section(report, "Cost")
-    else:
-        assert not any("boundary-agent" in row for row in table_rows(section(report, "Cost")))
+    # Amendment: token counts above 10**12 are unreadable and excluded, including these two 10**400 cases.
+    assert not any("boundary-agent" in row for row in table_rows(section(report, "Cost")))
 
 
 def _change_raw_log(root, path, value, *, copy=False):
@@ -1675,7 +1672,7 @@ def test_mlflow_metadata_boundary_matrix(tmp_path, monkeypatch, capsys, field, v
     assert report_path(root, 7).exists()
 
 
-# Reason: individually readable integer token counts must not make formatting their sum crash a report.
+# Reason: out-of-range integer token counts must not make formatting a report raise.
 def test_large_token_totals_do_not_crash_report_or_cli(tmp_path, capsys):
     archived_round(tmp_path)
     with (tmp_path / "log/usage.jsonl").open("a") as stream:
@@ -1715,9 +1712,8 @@ def test_score_and_count_boundary_matrix(tmp_path, capsys, field, value):
                                        allow_log_refusal=field not in {"empathy", "relevance"})
     if report is not None:
         assert CLIENT_LINE not in report and HELPER_LINE not in report
-        # Unbounded nonnegative integer counts are valid; the bounded 1..5 judge scores are not.
-        if field in {"empathy", "relevance"} or not (isinstance(value, int) and not isinstance(value, bool)):
-            assert any(word in report.lower() for word in ("unreadable", "could not", "cannot", "not valid", "left out"))
+        # Amendment: counts above 10**9 are unreadable too; every value in this matrix is invalid.
+        assert any(word in report.lower() for word in ("unreadable", "could not", "cannot", "not valid", "left out"))
 
 
 # Reason: the view's new root-tag write must not turn a completed round into an MLflow exception.
@@ -1732,3 +1728,160 @@ def test_round_survives_root_tag_logging_failure(training_round, monkeypatch):
     monkeypatch.setattr(mlflow, "set_tag", fail_root)
     _, state, _ = training_round()
     assert state["event"].outcome == "reverted"
+
+
+# Reason: rule 1 fixes the exact name alphabet and length, including the two boundaries.
+@pytest.mark.parametrize("value,readable", [
+    ("A", True), ("A" * 200, True), ("A._:/@+=#~-9", True),
+    ("", False), ("A" * 201, False), ("_first", False), ("two words", False),
+    ("line\n", False), ("é", False), ("name?query", False),
+])
+def test_name_shape_boundaries_reach_judge_summary(tmp_path, value, readable):
+    _, _, records, _ = archived_round(tmp_path)
+    write_jsonl(tmp_path / "scores/round-07-train.jsonl", [score(records[0], version=value)])
+    summary = node_summary("judge", {"round": 7}, {"unscored": []}, tmp_path)
+    assert summary["judge_version"] == (value if readable else "unreadable")
+    assert summary["mean_empathy"] == 2 and summary["mean_relevance"] == 4
+
+
+# Reason: raw numbers at the limits remain readable; immediately outside them they cannot enter a value or total.
+@pytest.mark.parametrize("kind,minimum,maximum", [
+    ("score", 1, 5), ("noise", 0, 5), ("count", 0, 10 ** 9),
+    ("tokens", 0, 10 ** 12), ("cost", 0, 10 ** 6),
+])
+@pytest.mark.parametrize("edge", ["minimum", "maximum", "below", "above"])
+def test_number_range_boundaries_in_reports(tmp_path, capsys, kind, minimum, maximum, edge):
+    archived_round(tmp_path, decision="kept")
+    value = {"minimum": minimum, "maximum": maximum, "below": minimum - 1, "above": maximum + 1}[edge]
+    readable = edge in {"minimum", "maximum"}
+    if kind in {"tokens", "cost"}:
+        row = {"event": "done", "round": 7, "kind": "model", "agent": "range-agent",
+               "tokens_in": 1, "tokens_out": 1, "cost_usd": 0.25}
+        row["tokens_in" if kind == "tokens" else "cost_usd"] = value
+        with (tmp_path / "log/usage.jsonl").open("a") as stream:
+            stream.write(json.dumps(row) + "\n")
+    else:
+        paths = {"score": ["scores", "before", "quality"], "noise": ["scores", "noise"],
+                 "count": ["safety", "cases"]}
+        _change_raw_log(tmp_path, paths[kind], value)
+    report = _report_or_safe_log_refusal(tmp_path, capsys, allow_log_refusal=kind not in {"tokens", "cost"})
+    if report is None:
+        assert not readable
+        return
+    if kind in {"tokens", "cost"}:
+        cost = section(report, "Cost")
+        rows = [row for row in table_rows(cost) if "range-agent" in row]
+        assert bool(rows) is readable
+        total = row_for(cost, "total")
+        if readable:
+            assert float(rows[0][2 if kind == "tokens" else 4]) == value
+            assert float(total[2 if kind == "tokens" else 4]) == (31 if kind == "tokens" else 0.65) + value
+        else:
+            assert total[1:] == ["1", "31", "17", "0.6500"]
+            assert "left out" in cost
+    else:
+        gate = section(report, "Gate")
+        label = {"score": "Quality before", "noise": "Noise"}.get(kind)
+        expected = f"{value:.2f}" if readable else "unreadable"
+        if label:
+            assert f"{label}: {expected}" in gate
+        else:
+            assert f"({value if readable else 'unreadable'} cases," in gate
+
+
+# Reason: version 4's evidence, safety flags, comparison count and source quote must not add spoken text to the view.
+@pytest.mark.parametrize("version", [3, 4])
+def test_record_versions_preserve_report_and_hide_new_evidence_fields(tmp_path, version):
+    event, _, records, _ = archived_round(tmp_path)
+    expected = build_report(tmp_path, 7)
+    for kind, ref in event.records.items():
+        path = tmp_path / ref.path
+        data = json.loads(path.read_text())
+        data["schema_version"] = version
+        if kind == "pattern":
+            if version == 4:
+                data["seen_in_high"] = 1
+            else:
+                data.pop("seen_in_high", None)
+        if kind == "research":
+            for source in data["sources"]:
+                if version == 4:
+                    source["quote"] = HELPER_LINE
+                else:
+                    source.pop("quote", None)
+        write_json(path, data)
+        _change_raw_log(tmp_path, ["records", kind, "sha256"], sha256_text(path.read_text()))
+    path = tmp_path / "scores/round-07-train.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    for row in rows:
+        row["schema_version"] = version
+        if version == 4:
+            row.update(evidence=CLIENT_LINE, safety_flags=["role_break"])
+        else:
+            row.pop("evidence", None)
+            row.pop("safety_flags", None)
+    write_jsonl(path, rows)
+    assert build_report(tmp_path, 7) == expected
+    summary = node_summary("judge", {"round": 7, "records": records}, {"unscored": []}, tmp_path)
+    assert summary["scored"] == 2 and summary["mean_empathy"] == summary["mean_relevance"] == 3
+    assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
+
+
+# Reason: the new gate-metric write must be best effort independently of existing graph metrics.
+def test_round_survives_view_metric_logging_failure(training_round, monkeypatch):
+    original = mlflow.log_metrics
+    failures = []
+
+    def fail_view(metrics, *args, **kwargs):
+        if "kept" in metrics:
+            failures.append(dict(metrics))
+            raise RuntimeError(CLIENT_LINE)
+        return original(metrics, *args, **kwargs)
+
+    monkeypatch.setattr(mlflow, "log_metrics", fail_view)
+    root, state, _ = training_round(measured=True)
+    assert failures and state["event"].outcome == "reverted"
+    assert DecisionLog(root).rounds()[-1] == state["event"]
+
+
+# Reason: rule 2 requires a count of unreadable numbers, as well as suppressing their values.
+def test_unreadable_logged_measurement_is_counted_in_report(tmp_path):
+    archived_round(tmp_path)
+    _change_raw_log(tmp_path, ["scores", "before", "quality"], True)
+    report = build_report(tmp_path, 7)
+    gate = section(report, "Gate")
+    assert "Quality before: unreadable" in gate
+    # Reason: the contract fixes neither the count line's location nor whether the count is spelled out.
+    assert any(re.search(r"\b(?:1|one)\b", line, re.IGNORECASE)
+               and re.search(r"unreadable|could not be read|not valid|left out", line, re.IGNORECASE)
+               for line in report.splitlines())
+
+
+# Reason: a stored question mark is an invalid name, even when it equals the missing-writer placeholder.
+def test_stored_writer_placeholder_still_obeys_name_rule(tmp_path):
+    event, _, _, _ = archived_round(tmp_path)
+    ref = event.records["pattern"]
+    path = tmp_path / ref.path
+    data = json.loads(path.read_text())
+    data["written_by"] = "?"
+    write_json(path, data)
+    _change_raw_log(tmp_path, ["records", "pattern", "sha256"], sha256_text(path.read_text()))
+    memory = section(build_report(tmp_path, 7), "Memory")
+    assert any(ref.id in line and "unreadable" in line for line in memory.splitlines())
+    assert "?" not in memory
+
+
+# Reason: an absent legacy action must not invent an add when the log records a rewording.
+def test_missing_record_action_does_not_override_logged_action(tmp_path):
+    event, _, _, _ = archived_round(tmp_path, action="reword")
+    ref = event.records["edit"]
+    path = tmp_path / ref.path
+    data = json.loads(path.read_text())
+    data["action"] = None
+    write_json(path, data)
+    _change_raw_log(tmp_path, ["records", "edit", "sha256"], sha256_text(path.read_text()))
+    report = build_report(tmp_path, 7)
+    proposer = row_for(section(report, "Nodes"), "proposer")
+    assert "add C1" not in proposer
+    assert any("reword" in cell or "unreadable" in cell for cell in proposer)
+    assert f"- C1. {OLD_RULE}" in report and f"+ C1. {NEW_RULE}" in report
