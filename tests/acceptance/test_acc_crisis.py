@@ -792,6 +792,18 @@ def test_chat_errors_return_two_and_one_stderr_line(tmp_path, policy_path, capsy
 
 def test_chat_real_mode_uses_helper_endpoint_and_no_setup_without_consent(
         tmp_path, policy_path, monkeypatch):
+    from puddles.inference import note_store
+    from puddles import llm as notes_llm
+
+    class LocalNoteTaker:
+        def structured(self, system, user, schema):
+            return schema()
+
+    # Real mode now requires notes configuration; keep both notes services local.
+    monkeypatch.setenv("PAST_API_KEY", "dummy")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy")
+    patch_dependency(monkeypatch, note_store, "PastUserMemory", note_store.FakeUserMemory)
+    patch_dependency(monkeypatch, notes_llm, "OpenAILLM", LocalNoteTaker)
     # Route by the contractual checker request, permitting either creation order
     # and one shared endpoint client as well as two separate clients.
     def answer_for_request(system, messages):
