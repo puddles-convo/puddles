@@ -141,7 +141,7 @@ The gate never runs after a failure. No other exception is caught.
 In this order:
 
 1. `check_policy_file(policy_path)`. A `PolicyError` propagates. Nothing has touched the memory or the log by then, so the log is exactly as it was, even when it holds copies that are still pending.
-2. `deps.memory.ensure_training_audience()`, then `puddles.round.retry_pending(deps.log, deps.memory, deps.root)`.
+2. `puddles.memory.prepare_training_audience(deps.memory, deps.root)`, which calls `deps.memory.ensure_training_audience()` and, if it fails, notes it in `log/memory_reads.jsonl` and goes on; then `puddles.round.retry_pending(deps.log, deps.memory, deps.root)`, which sends nothing again for a start `prepare_round` has already retried, and never raises for a pending copy.
 3. `round = deps.log.next_round()`.
 4. Inside one MLflow run named `round-NN`, invoke the graph with `invoke`.
 5. On that MLflow run: parameters `round` and `policy_version`; tag `outcome`, set to `event.outcome`; metrics `conversations` (finished) and `conversations_failed`.

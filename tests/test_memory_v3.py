@@ -7,7 +7,7 @@ import pytest
 from puddles import replay
 from puddles.agents import researcher
 from puddles.decision_log import DecisionLog, DecisionLogError
-from puddles.memory import FakeMemory, PastError
+from puddles.memory import FakeMemory
 from puddles.round import finish_round, prepare_round, retry_pending, run_agents, stand_in_gate
 from schemas import (
     FROM_MEMORY_LIMIT,
@@ -156,14 +156,15 @@ def test_copy_missing_after_a_crash_is_sent_at_next_start(tmp_path):
     assert "gate-r01" in loop.mem.entries and not loop.log.missing_copies()
 
 
-def test_third_failed_attempt_stops_before_the_next_round(tmp_path):
+def test_third_failed_attempt_stays_pending_and_the_round_goes_ahead(tmp_path):
+    # docs/specs/unattended-run.md 2.3 replaces the stop after three attempts.
     loop = Loop(tmp_path)
     loop.round("advice-before-understanding")
     loop.log.append(MemoryCopyEvent(round=1, record_id="gate-r01", status="pending", attempt=2))
     loop.mem.wait = lambda ingestion_id, timeout_s=60: False
-    with pytest.raises(PastError, match="gate-r01"):
-        retry_pending(loop.log, loop.mem, tmp_path)
-    assert loop.log.copy_events()[(1, "gate-r01")].attempt == 3
+    retry_pending(loop.log, loop.mem, tmp_path)
+    event = loop.log.copy_events()[(1, "gate-r01")]
+    assert (event.status, event.attempt) == ("pending", 3)
 
 
 def test_restart_leaves_the_starting_policy_and_older_files_alone(tmp_path):

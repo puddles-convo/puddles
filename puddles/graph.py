@@ -32,7 +32,7 @@ from puddles.judging import (
     train_scores_path,
 )
 from puddles.llm import LLM, AgentFailed
-from puddles.memory import Memory
+from puddles.memory import Memory, prepare_training_audience
 from puddles.round import (
     RoundResult,
     finish_round,
@@ -256,7 +256,7 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
         from puddles.gate import ensure_starting_meta  # puddles.gate imports this module
 
         ensure_starting_meta(Path(deps.root), Path(deps.start_policy))
-    deps.memory.ensure_training_audience()
+    prepare_training_audience(deps.memory, deps.root)  # a failure is noted and the round goes on
     retry_pending(deps.log, deps.memory, deps.root)
     round_ = deps.log.next_round()
     graph = build_round_graph(deps)

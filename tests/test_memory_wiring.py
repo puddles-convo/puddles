@@ -2,10 +2,8 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from puddles.decision_log import DecisionLog
-from puddles.memory import FakeMemory, PastError
+from puddles.memory import FakeMemory
 from puddles.replay import policy_in_force
 from puddles.round import finish_round, memory_trace, retry_pending, run_agents, stand_in_gate
 from schemas import CriticOutput, MemoryCopyEvent, ProposerOutput, ResearcherOutput, ScoredConversation
@@ -81,8 +79,9 @@ def test_two_rounds_wire_memory_between_agents(tmp_path):
     assert mem.recall("advice before understanding edit pattern", identity="simulated-user") == []
 
 
-def test_copy_still_pending_after_three_attempts_stops_the_loop(tmp_path):
+def test_copy_still_pending_after_three_attempts_does_not_stop_the_loop(tmp_path):
+    # docs/specs/unattended-run.md 2.3 replaces the stop after three attempts.
     log = DecisionLog(tmp_path)
     log.append(MemoryCopyEvent(round=1, record_id="pattern-r01", status="pending", attempt=3))
-    with pytest.raises(PastError, match="pattern-r01"):
-        retry_pending(log, FakeMemory(), tmp_path)
+    retry_pending(log, FakeMemory(), tmp_path)
+    assert [e.record_id for e in log.pending_copies()] == ["pattern-r01"]
