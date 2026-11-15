@@ -37,8 +37,12 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def attach(path: Path, round_: int, tracking_uri: str) -> str:
-    """Attach the report to the newest run named round-NN. Returns why it was not attached, or ''."""
+def attach(path: Path, round_: int, tracking_uri: str, root: Path) -> str:
+    """Attach the report to the newest run named round-NN whose tag `root` is this root.
+
+    Several roots can share one tracking store, each with its own round-01, so a run with another
+    root's tag, or with none, is never used. Returns why it was not attached, or ''.
+    """
     if tracking_uri.startswith(SQLITE_PREFIX):
         db = tracking_uri[len(SQLITE_PREFIX):]
         if db and db != ":memory:" and not Path(db).exists():
@@ -51,9 +55,11 @@ def attach(path: Path, round_: int, tracking_uri: str) -> str:
         return f"there is no experiment {EXPERIMENT!r}"
     name = f"round-{round_:02d}"
     runs = client.search_runs([experiment.experiment_id], filter_string=f"attributes.run_name = '{name}'",
-                              order_by=["attributes.start_time DESC"], max_results=1)
+                              order_by=["attributes.start_time DESC"])
+    here = str(Path(root).resolve())
+    runs = [r for r in runs if r.data.tags.get("root") == here]  # compared here: no quoting of the path needed
     if not runs:
-        return f"there is no run named {name}"
+        return f"there is no run named {name} for the root {here}"
     client.log_artifact(runs[0].info.run_id, str(path), artifact_path="reports")
     return ""
 
@@ -73,13 +79,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ReportError as exc:
         _print_error(str(exc))
         return 2
+    except Exception as exc:  # noqa: BLE001  build_report reads leniently; this is a fault of the view itself
+        _print_error(f"the report could not be built ({type(exc).__name__}: {exc})")
+        return 1
     path = report_path(root, round_)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
     print(text, end="")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:  # printed all the same; with no file there is nothing to attach
+        _print_error(f"the report could not be written to {path} ({type(exc).__name__}: {exc})")
+        print("The report was not attached to an MLflow run: it could not be written.")
+        return 1
     uri = args.mlflow or os.environ.get("MLFLOW_TRACKING_URI") or DEFAULT_TRACKING_URI
     try:
-        why = attach(path, round_, uri)
+        why = attach(path, round_, uri, root)
     except Exception as exc:  # noqa: BLE001  a report that cannot be attached is still written and printed
         why = f"{type(exc).__name__}: {exc}"
     if why:
