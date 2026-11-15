@@ -49,7 +49,8 @@ class Memory(Protocol):
     def ensure_training_audience(self) -> None: ...
     def ingest(self, entry: MemoryEntry) -> str: ...
     def wait(self, ingestion_id: str, timeout_s: float = 60) -> bool: ...
-    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]: ...
+    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
+               timeout_s: Optional[float] = None) -> list[dict]: ...
 
 
 class PastClient:
@@ -96,9 +97,12 @@ class PastClient:
                 return False
             time.sleep(poll_s)
 
-    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]:
+    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
+               timeout_s: Optional[float] = None) -> list[dict]:
+        """`timeout_s` replaces the client's timeout for this one request; None keeps the client's."""
         body = {"query": query, "identity": identity, "level": level, "limit": limit}
-        return self._call("POST", "/recall", json=body).get("results", [])
+        extra: dict[str, Any] = {} if timeout_s is None else {"timeout": timeout_s}
+        return self._call("POST", "/recall", json=body, **extra).get("results", [])
 
 
 class FakeMemory:
@@ -121,7 +125,8 @@ class FakeMemory:
     def wait(self, ingestion_id: str, timeout_s: float = 60) -> bool:
         return True
 
-    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20) -> list[dict]:
+    def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
+               timeout_s: Optional[float] = None) -> list[dict]:
         self.recalls.append({"query": query, "identity": identity})
         words = set(re.findall(r"\w+", query.lower()))
         visible = [e for e in self.entries.values()

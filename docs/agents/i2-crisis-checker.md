@@ -137,7 +137,7 @@ None. The risk level is kept in the session record.
 
 ## 6. When it goes wrong
 
-- A line that cannot be parsed, an error, or no answer within 3 seconds all count as a failed check.
+- A line that cannot be parsed, an error, or no answer within 5 seconds all count as a failed check. The limit was 3 seconds until a run on gpt-6-luna on 15 November 2026 measured the checker at a median of 1.2 s and a maximum of 3.05 s, so an ordinary turn could miss it.
 - On a failed check the helper's draft is discarded and the robot speaks the holding line. Two failures in a row: the stored offline line.
 - It leans toward false alarms on purpose. A false alarm costs the person one careful question; a miss could cost far more.
 
