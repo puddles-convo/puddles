@@ -478,9 +478,10 @@ def test_safety_flags_survive_graph_score_serialization(tmp_path, tracked):
     assert score["safety_flags"] == ["missed_risk"] and score["evidence"] == "The helper ignored a risk at turn 2."
 
 
-# 3.3: the agent must fail closed after two attempts, and policy application independently protects C8.
+# 3.3: with protection on, the agent fails closed and policy application independently protects C8.
 @pytest.mark.parametrize("action", ["remove", "reword"])
-def test_c8_repeated_edit_attempt_fails_without_a_candidate(tmp_path, action):
+def test_c8_repeated_edit_attempt_fails_without_a_candidate(tmp_path, monkeypatch, action):
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "1")
     policy = parse_policy(START.read_text())
     inp = ProposerInput(policy_text=START.read_text(), at_length_limit=False,
                         pattern={"id": "pattern-r01", "name": "advice", "description": "Advice first."}, sources=[])
@@ -492,6 +493,39 @@ def test_c8_repeated_edit_attempt_fails_without_a_candidate(tmp_path, action):
     with pytest.raises(PolicyEditError, match="C8"):
         apply_edit(policy, action, "C8", text, "policy-v2-candidate")
     assert not (tmp_path / "policies").exists()
+
+
+def test_c8_is_editable_by_default_like_integration(tmp_path, monkeypatch):
+    monkeypatch.delenv("PUDDLES_PROTECT_C8", raising=False)
+    monkeypatch.delenv("PUDDLES_PARK_REVERTED", raising=False)
+    text = START.read_text()
+    policy = parse_policy(text)
+    inp = ProposerInput(policy_text=text, at_length_limit=False,
+                        pattern={"id": "pattern-r01", "name": "advice"}, sources=[])
+    log = DecisionLog(tmp_path)
+    for action, wording in (("reword", "Keep listening."), ("remove", None)):
+        out = ProposerOutput(action=action, rule_id="C8", rule_text=wording, summary="Edit.")
+        assert proposer.check(out, inp, policy, log) == []
+        candidate, touched = apply_edit(policy, action, "C8", wording, "policy-v2-candidate")
+        assert touched == "C8"
+        assert candidate.version == "policy-v2-candidate"
+        assert candidate.safety == policy.safety
+        assert {rid: rule for rid, rule in candidate.conversation.items() if rid != "C8"} == {
+            rid: rule for rid, rule in policy.conversation.items() if rid != "C8"}
+        if action == "reword":
+            assert candidate.conversation["C8"] == wording
+        else:
+            assert "C8" not in candidate.conversation
+    for setting in (None, "1"):
+        if setting is None:
+            monkeypatch.delenv("PUDDLES_PROTECT_C8", raising=False)
+        else:
+            monkeypatch.setenv("PUDDLES_PROTECT_C8", setting)
+        for action, wording in (("reword", "Keep listening."), ("remove", None)):
+            out = ProposerOutput(action=action, rule_id="S1", rule_text=wording, summary="Edit.")
+            assert any("safety rule" in problem for problem in proposer.check(out, inp, policy, log))
+            with pytest.raises(PolicyEditError, match="protected safety rule"):
+                apply_edit(policy, action, "S1", wording, "policy-v2-candidate")
 
 
 def completion(message, finish="stop", parsed=False):

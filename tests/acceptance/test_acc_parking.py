@@ -61,6 +61,8 @@ def move(action, rule=None, text=None):
 
 
 def test_acc_off_is_identical_to_parent_prompts_and_checks(tmp_path, monkeypatch):
+    # The named pre-parking commit protected C8 unconditionally; match that setting.
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "1")
     log = history(tmp_path, event(1))
     ci, pi, policy = critic_input(log), proposer_input(), parse_policy(TEXT)
     parents = []
@@ -165,6 +167,7 @@ def test_acc_proposer_always_has_move_below_cap_including_all_editable_rules_par
 
 
 def test_acc_length_cap_can_exhaust_moves_when_every_editable_rule_is_parked(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUDDLES_PROTECT_C8", "1")
     monkeypatch.setenv("PUDDLES_PARK_REVERTED", "1")
     policy = parse_policy(TEXT)
     log = history(tmp_path, event(1), event(2, rule="C2"))
