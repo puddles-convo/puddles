@@ -57,12 +57,14 @@ def policy_in_force(root: Path, fallback: Path) -> Path:
     return promoted[-1] if promoted else fallback
 
 
-def run_agents(round_: int, conversations: list[ScoredConversation], policy_path: Path,
-               log: DecisionLog, memory: Memory, llm: LLM, search: Callable[[str], list[dict]],
-               root: Path) -> RoundResult:
+NO_EVIDENCE_REASON = "No trustworthy source was found for this pattern."
+
+
+def run_critic(round_: int, conversations: list[ScoredConversation], policy_path: Path,
+               log: DecisionLog, memory: Memory, llm: LLM, root: Path) -> RoundResult:
+    """Step 4. A new result, outcome no_pattern; with the pattern set if the critic found one."""
     policy_text = policy_path.read_text()
     result = RoundResult(round=round_, outcome="no_pattern", base_policy_path=policy_path)
-
     c_in = critic.build_input(round_, policy_text, conversations, log, memory, root)
     c_out = critic.run(c_in, llm)
     pattern = critic.to_record(c_out, c_in)
@@ -73,7 +75,14 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     statuses = [p.status for p in c_in.earlier_patterns if p.id == pattern.id and p.status]
     result.status_before = statuses[0] if statuses else "open"
     result.refs["pattern"] = save_record(pattern, round_, root)
+    return result
 
+
+def run_researcher(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM,
+                   search: Callable[[str], list[dict]], root: Path) -> RoundResult:
+    """Step 5. Sets the research note; with no sources the outcome becomes no_evidence."""
+    assert result.pattern is not None
+    pattern, round_ = result.pattern, result.round
     r_in = researcher.build_input(pattern, log, memory, root)
     r_out, searches = researcher.run(r_in, llm, search)
     research = researcher.to_record(r_out, pattern, round_)
@@ -81,9 +90,16 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     result.research = research
     result.refs["research"] = save_record(research, round_, root)
     if not research.sources:
-        result.outcome, result.reason = "no_evidence", "No trustworthy source was found for this pattern."
-        return result
+        result.outcome, result.reason = "no_evidence", NO_EVIDENCE_REASON
+    return result
 
+
+def run_proposer(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM,
+                 root: Path) -> RoundResult:
+    """Step 6. Writes the candidate policy; the outcome becomes candidate."""
+    assert result.pattern is not None and result.research is not None
+    pattern, research, round_ = result.pattern, result.research, result.round
+    policy_text = result.base_policy_path.read_text()
     p_in = proposer.build_input(policy_text, pattern, research, log, memory, root)
     policy = parse_policy(policy_text)
     p_out = proposer.run(p_in, policy.version, policy, log, llm)
@@ -91,6 +107,18 @@ def run_agents(round_: int, conversations: list[ScoredConversation], policy_path
     result.edit, result.candidate_path, result.outcome = edit, candidate, "candidate"
     result.refs["edit"] = save_record(edit, round_, root)
     return result
+
+
+def run_agents(round_: int, conversations: list[ScoredConversation], policy_path: Path,
+               log: DecisionLog, memory: Memory, llm: LLM, search: Callable[[str], list[dict]],
+               root: Path) -> RoundResult:
+    result = run_critic(round_, conversations, policy_path, log, memory, llm, root)
+    if result.pattern is None:
+        return result
+    run_researcher(result, log, memory, llm, search, root)
+    if result.outcome == "no_evidence":
+        return result
+    return run_proposer(result, log, memory, llm, root)
 
 
 def stand_in_gate(result: RoundResult, decision: Literal["kept", "reverted"]) -> GateOutcome:
