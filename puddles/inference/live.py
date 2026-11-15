@@ -6,7 +6,9 @@ the model the caller passes, and that follows the person's consent. Contract: do
 """
 from __future__ import annotations
 
+import contextvars
 import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -36,15 +38,33 @@ def _on_file(store: NoteStore, user_id: str, today: date) -> list[str]:
             and ((last := expires_on(n)) is None or today <= last)]
 
 
+def tracing_off() -> None:
+    """Turn off what a session with consent may have left on for the whole process.
+
+    `tracing.setup` turns on OpenAI and LangChain autologging process-wide, and it stays on for every
+    later session. This does not import MLflow: if it was never imported, nothing can be tracing.
+    A later session with consent calls `tracing.setup` again.
+    """
+    mlflow = sys.modules.get("mlflow")
+    if mlflow is None:
+        return
+    for flavour in ("openai", "langchain"):
+        try:
+            module = __import__(f"mlflow.{flavour}", fromlist=["autolog"])
+        except ImportError:
+            continue  # the flavour cannot load, so it was never turned on
+        module.autolog(disable=True)
+
+
 def finish_session(session: Session, store: NoteStore, llm: LLM, *, today: date | None = None,
                    now: datetime | None = None) -> tuple[Optional[ConversationRecord], NotesResult]:
     """End the session, then run the note-taker on a copy of what was said. Both results are returned."""
     if session.user_id is None:
         raise ValueError("the session has no user_id, so its notes cannot be found")
     if not session.consent_for_training:
-        from puddles.tracing import TracedLLM  # here, so that this module does not import MLflow
-
-        if isinstance(llm, TracedLLM):
+        tracing_off()
+        tracing = sys.modules.get("puddles.tracing")  # not imported here, so that this module does not import MLflow
+        if tracing is not None and isinstance(llm, tracing.TracedLLM):
             raise ValueError("training use is off, so the note-taker's model must not be traced")
     user_id = session.user_id
     turns = list(session.turns)  # end_session clears them
@@ -67,8 +87,16 @@ def _take(store: NoteStore, llm: LLM, session: Session, user_id: str, turns: lis
     try:
         folder = store.root / "notes" / check_user_id(user_id)
         new = _first_missing(folder)
-        result = take_notes(store, llm, user_id=user_id, session_id=session.session_id, turns=turns,
-                            remember_me=session.remember_me, today=today, now=now)
+        def run() -> NotesResult:
+            return take_notes(store, llm, user_id=user_id, session_id=session.session_id, turns=turns,
+                              remember_me=session.remember_me, today=today, now=now)
+
+        if session.consent_for_training:
+            result = run()
+        else:
+            # An empty context: no span the caller left open becomes the parent of a call, and no usage
+            # meter set by the caller opens a span around the model's requests.
+            result = contextvars.Context().run(run)
         if new is not None:
             _remove_if_empty(store, user_id, folder, new)
         return result

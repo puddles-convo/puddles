@@ -32,7 +32,7 @@ from puddles import tracing
 from puddles.graph import check_policy_file
 from puddles.inference import crisis
 from puddles.inference.crisis import CrisisPath
-from puddles.inference.live import finish_session, start_notes
+from puddles.inference.live import finish_session, start_notes, tracing_off
 from puddles.inference.note_store import FakeUserMemory, NoteStore, PastUserMemory, UserMemory
 from puddles.inference.notes import NotesResult
 from puddles.inference.session_log import session_path
@@ -182,6 +182,8 @@ def main(argv: Sequence[str] | None = None, stdin: TextIO | None = None, stdout:
 
     if training:
         tracing.setup(tracking_uri=args.mlflow)
+    else:
+        tracing_off()  # whatever an earlier session in this process switched on
     session = Session(session_id=session_id, policy=policy, helper_client=helper_client,
                       checker_client=checker_client, path=path, user_id=args.user_id,
                       remember_me=args.remember_me == "yes", consent_for_training=training, root=root)

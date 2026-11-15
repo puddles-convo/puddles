@@ -81,51 +81,104 @@ def store(tmp_path, monkeypatch):
 
 # ---------- 1. the four rows ----------
 
-@pytest.mark.parametrize("remember_me,training", list(itertools.product([False, True], [False, True])))
-def test_1_what_a_session_leaves_behind(remember_me, training, tmp_path, store, capsys):
+ROWS = list(itertools.product([False, True], [False, True]))
+
+
+def runs() -> list:
+    import mlflow
+
+    return mlflow.search_runs(search_all_experiments=True, output_format="list")
+
+
+def row_args(remember_me: bool, training: bool, uri: str) -> list[str]:
+    args = ["--remember-me", "yes" if remember_me else "no", "--training", "yes" if training else "no"]
+    return args + (["--mlflow", uri] if training else [])
+
+
+@pytest.mark.parametrize("apart", [False, True], ids=["notes-in-root", "notes-root-apart"])
+@pytest.mark.parametrize("remember_me,training", ROWS)
+def test_1_what_a_session_leaves_behind(remember_me, training, apart, tmp_path, store, capsys):
+    """Contract tests 1 and 7: files, traces and runs, row by row, with the notes root in --root or apart."""
     import mlflow
 
     root = tmp_path / "root"
+    notes_root = tmp_path / "people" if apart else root
     text = f"I keep thinking about the {PHRASE} again\nalso [note:situation:{FACT}]\n"
-    args = ["--remember-me", "yes" if remember_me else "no", "--training", "yes" if training else "no"]
-    if training:
-        args += ["--mlflow", store]
-    code, out, err = chat(capsys, root, text, *args)
+    extra = ["--notes-root", str(notes_root)] if apart else []
+    code, out, err = chat(capsys, root, text, *row_args(remember_me, training, store), *extra)
     mlflow.flush_trace_async_logging()
     traces = mlflow.search_traces(return_type="list")
     assert code == 0
     assert out.splitlines()[-1] == (f"kept: {session_path(root, 's1')}" if training else "kept: nothing")
     assert notes_lines(err)[0] == "notes: 0 loaded"
     assert FACT not in err and PHRASE not in err  # the notes lines hold counts and IDs only
+    assert runs() == []                           # no row starts an MLflow run
 
-    expected: list[Path] = []
+    in_root: list[Path] = []
+    in_notes: list[Path] = []
     if training:
-        expected += [Path("sessions/s1.jsonl"), Path("sessions/s1.record.json")]
+        in_root += [Path("sessions/s1.jsonl"), Path("sessions/s1.record.json")]
     if remember_me:
-        assert index_ids(root) == [f"note-{PERSON}-001"]
+        assert index_ids(notes_root) == [f"note-{PERSON}-001"]
         assert "notes: 1 added, 0 replaced, 0 confirmed, 0 deleted" in err
-        expected += [Path(f"notes/{PERSON}/{name}") for name in ("counter.json", "index.json", "notes.json")]
+        in_notes += [Path(f"notes/{PERSON}/{name}") for name in ("counter.json", "index.json", "notes.json")]
     else:
-        assert not (root / "notes").exists()  # no new notes
+        assert not (notes_root / "notes").exists()  # no new notes
         assert "notes: 0 added, 0 replaced, 0 confirmed, 0 deleted" in err
-    assert files(root) == sorted(expected)
+    if apart:
+        assert files(root) == sorted(in_root) and files(notes_root) == sorted(in_notes)
+    else:
+        assert files(root) == sorted(in_root + in_notes)
 
     if training:
         assert record_path(root, "s1").exists()
         spans = {s.name for t in traces for s in t.data.spans}
         assert {"turn", "llm:helper", "llm:crisis_checker", "llm:agent"} <= spans  # llm:agent is the note-taker
-        assert holding(tmp_path, PHRASE)         # the search can see the phrase when it is stored
+        assert holding(tmp_path, PHRASE)          # the search can see the phrase when it is stored
     else:
         assert traces == []
+        # tmp_path holds --root, --notes-root, the MLflow store and ./mlruns.
         assert holding(tmp_path, PHRASE) == []
         assert PHRASE not in out + err
         where_fact = holding(tmp_path, FACT)
         if remember_me:
-            assert where_fact == [notes_dir(root) / "notes.json"]   # by their consent, and only there
+            assert where_fact == [notes_dir(notes_root) / "notes.json"]   # by their consent, and only there
             assert FACT not in out + err
         else:
             assert where_fact == []
-            assert not root.exists()
+            assert not root.exists() and not notes_root.exists()
+
+
+class Failing:
+    """A note-taker whose error repeats the person's words, as a real model's error text can."""
+
+    def structured(self, system, user, schema):
+        raise RuntimeError(f"could not read the conversation: {user}")
+
+    def structured_with_search(self, system, user, schema, search, max_searches):
+        raise NotImplementedError
+
+
+@pytest.mark.parametrize("remember_me,training", ROWS)
+def test_6_cheap_a_note_taker_error_with_the_persons_words_goes_nowhere(remember_me, training, tmp_path, store,
+                                                                       capsys, caplog, monkeypatch):
+    import mlflow
+    import scripts.chat
+
+    monkeypatch.setattr(scripts.chat, "FakeNoteTaker", Failing)
+    root = tmp_path / "root"
+    code, out, err = chat(capsys, root, f"I keep thinking about the {PHRASE}\n",
+                          *row_args(remember_me, training, store))
+    mlflow.flush_trace_async_logging()
+    assert code == 0
+    assert notes_lines(err)[-1] == "notes: the notes step failed; not yet confirmed deleted: none"
+    assert out.splitlines()[-1] == (f"kept: {session_path(root, 's1')}" if training else "kept: nothing")
+    assert runs() == []
+    if not training:
+        assert mlflow.search_traces(return_type="list") == []
+        assert holding(tmp_path, PHRASE) == []
+        assert PHRASE not in out + err + caplog.text
+        assert not root.exists()
 
 
 # ---------- 2. stage 4's test 12, through a whole session ----------
@@ -305,3 +358,97 @@ def test_real_mode_without_training_uses_an_unwrapped_model_and_no_setup(tmp_pat
                              stdin=io.StringIO("hello\n"), stdout=out) == 0
     assert len(seen) == 1 and type(seen[0]) is Model
     assert out.getvalue().splitlines()[-1] == "kept: nothing" and not (tmp_path / "r").exists()
+
+
+# ---------- 6. training on, then off, in the same process, with the real OpenAI adapter ----------
+
+def test_tracing_off_does_not_import_mlflow():
+    import subprocess
+    import sys
+
+    code = ("import sys, puddles.inference.live as live; live.tracing_off(); "
+            "sys.exit(1 if 'mlflow' in sys.modules else 0)")
+    assert subprocess.run([sys.executable, "-c", code], cwd=REPO).returncode == 0
+
+
+EARLIER = "amber-lighthouse-kettle"          # typed in the consenting session, so traced by consent
+
+
+def stand_in_openai(fail: bool):
+    """`OpenAILLM` itself, its SDK client on an `httpx.MockTransport`: no network, every request recorded."""
+    import httpx
+    from openai import OpenAI
+
+    from puddles.llm import OpenAILLM
+
+    bodies: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode()
+        bodies.append(body)
+        if fail and EARLIER not in body:  # the consenting session's request answers; the later one fails
+            words = PHRASE if PHRASE in body else "?"
+            return httpx.Response(400, json={"error": {"message": f"cannot use the words {words}", "type": "x"}})
+        content = json.dumps({"forget_everything": False, "actions": []})
+        return httpx.Response(200, json={
+            "id": "c1", "object": "chat.completion", "created": 0, "model": "stand-in",
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": content}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+
+    class StandIn(OpenAILLM):
+        def __init__(self) -> None:
+            super().__init__(model="stand-in", output_limits={"default": 100})
+            self.client = OpenAI(api_key="placeholder", base_url="http://stand-in.invalid/v1", max_retries=0,
+                                 http_client=httpx.Client(transport=httpx.MockTransport(answer)))
+
+    return StandIn, bodies
+
+
+@pytest.mark.parametrize("fail", [False, True], ids=["answering", "failing"])
+def test_6_training_on_then_off_in_one_process_leaves_no_trace(fail, tmp_path, capsys, caplog, monkeypatch):
+    import loop.llm
+    import mlflow
+    import scripts.chat
+
+    monkeypatch.chdir(tmp_path)
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    path = crisis.load_path()
+    model, bodies = stand_in_openai(fail)
+    monkeypatch.setattr(loop.llm, "client_from_env",
+                        lambda prefix: FakeClient(lambda s, m: "none | - | ok" if s == path.system else "A reply."))
+    monkeypatch.setattr(scripts.chat, "PastUserMemory", FakeUserMemory)
+    monkeypatch.setattr(scripts.chat, "OpenAILLM", model)
+    for name in ("PAST_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.setenv(name, "placeholder")
+
+    def session(text: str, training: str, sid: str) -> tuple[int, str, str]:
+        capsys.readouterr()
+        out = io.StringIO()
+        code = scripts.chat.main(["--policy", POLICY, "--root", str(tmp_path / "root"), "--user-id", PERSON,
+                                  "--session-id", sid, "--training", training, "--mlflow", uri],
+                                 stdin=io.StringIO(text), stdout=out)
+        return code, out.getvalue(), capsys.readouterr().err
+
+    try:
+        assert session(f"before that, the {EARLIER}\n", "yes", "s-on")[0] == 0
+        mlflow.flush_trace_async_logging()
+        before = mlflow.search_traces(return_type="list")
+        traced = [s.name for t in before for s in t.data.spans if EARLIER in json.dumps(s.inputs, default=str)]
+        assert any("Completions" in name for name in traced)   # autologging traced the consenting note-taker
+        runs_before = runs()
+        caplog.clear()
+
+        code, out, err = session(f"I keep thinking about the {PHRASE}\n", "no", "s-off")
+        mlflow.flush_trace_async_logging()
+        assert code == 0 and out.splitlines()[-1] == "kept: nothing"
+        assert PHRASE in bodies[-1]                # the note-taker was asked, with the person's words
+        after = mlflow.search_traces(return_type="list")
+        assert sorted(t.info.trace_id for t in after) == sorted(t.info.trace_id for t in before)
+        assert runs() == runs_before
+        assert holding(tmp_path, PHRASE) == []     # files, the sqlite store and ./mlruns
+        assert PHRASE not in out + err + caplog.text
+        assert ("notes: the notes step failed" in err) == fail
+    finally:
+        mlflow.openai.autolog(disable=True)
+        mlflow.langchain.autolog(disable=True)
