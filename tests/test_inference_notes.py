@@ -73,7 +73,7 @@ def index_ids(store: NoteStore, user_id: str) -> list[str]:
 
 # ---------- who is who ----------
 
-@pytest.mark.parametrize("bad", ["", "User-01", "-user", "../etc", "a/b", "user_01", "x" * 65, "note-taker",
+@pytest.mark.parametrize("bad", ["", "User-01", "-user", "../etc", "a/b", "user_01", "x" * 34, "note-taker",
                                  "project", *TRAINING_IDENTITIES])
 def test_refused_user_ids(store: NoteStore, bad: str) -> None:
     with pytest.raises(ValueError):
@@ -88,7 +88,7 @@ def test_refused_user_ids(store: NoteStore, bad: str) -> None:
 
 
 def test_audience_and_identities(store: NoteStore, mem: FakeUserMemory) -> None:
-    assert check_user_id("user-01") == "user-01" and check_user_id("x" * 64) == "x" * 64
+    assert check_user_id("user-01") == "user-01" and check_user_id("x" * 33) == "x" * 33
     assert audience_for("user-01") == "person-user-01"
     store.ensure_person("user-01")
     assert mem.audiences["person-user-01"] == ["user-01", NOTE_TAKER]
@@ -98,7 +98,7 @@ def test_audience_and_identities(store: NoteStore, mem: FakeUserMemory) -> None:
 
 def test_write_sends_one_entry_in_the_persons_audience(store: NoteStore, mem: FakeUserMemory) -> None:
     [note_id] = seed(store, "user-01", ("what_helps", "Slow breathing helps a bit."))
-    assert note_id == "note-user01-001"
+    assert note_id == "note-user-01-001"
     entry = mem.entries[note_id]
     assert entry.content == "15 Nov 2026: Slow breathing helps a bit."
     assert entry.label == "note-taker: user note" and entry.identity == NOTE_TAKER
@@ -106,7 +106,7 @@ def test_write_sends_one_entry_in_the_persons_audience(store: NoteStore, mem: Fa
     assert entry.metadata == {"type": "user_note", "kind": "what_helps", "user_id": "user-01",
                               "session_id": "sess-seed"}
     assert set(files(store, "user-01")) == {"index.json", "notes.json", "counter.json"}
-    assert store.next_note_id("user-01") == "note-user01-002"
+    assert store.next_note_id("user-01") == "note-user-01-002"
 
 
 def test_write_that_past_dev_does_not_confirm_is_kept_nowhere(store: NoteStore, mem: FakeUserMemory) -> None:
@@ -133,6 +133,7 @@ def test_save_index_drops_notes_not_on_it_and_files_leave_no_temporaries(store: 
     store.save_index(LiveNoteIndex(user_id="user-01", notes=[n for n in store.index("user-01").notes
                                                              if n.note_id == b]))
     assert set(store.stored("user-01")) == {b}
+    assert store.pending_deletes("user-01") == [a]  # removed from notes.json, so queued for deletion
     assert not list((store.root / "notes" / "user-01").glob(".*"))
 
 
@@ -140,7 +141,7 @@ def test_note_numbers_are_never_reused(store: NoteStore) -> None:
     [first] = seed(store, "user-01", ("goals", "A."))
     session(store, "user-01", [{"action": "delete", "note_id": first}])
     [second] = seed(store, "user-01", ("goals", "B."))
-    assert (first, second) == ("note-user01-001", "note-user01-002")
+    assert (first, second) == ("note-user-01-001", "note-user-01-002")
 
 
 # ---------- test 12: "remember me" off, through a whole session ----------
@@ -239,7 +240,7 @@ def test_15_unknown_or_other_persons_note_id_is_refused(store: NoteStore, mem: F
     [theirs] = seed(store, "user-02", ("people", "Has a brother."))
     [mine] = seed(store, "user-01", ("goals", "Back to work."))
     inp = build_input(store, "user-01", TURNS, remember_me=True, today=TODAY)
-    for bad in (theirs, "note-user01-999"):
+    for bad in (theirs, "note-user-01-999"):
         for action in ("delete", "replace", "confirm"):
             out = NoteTakerOutput(actions=[NoteAction(action=action, note_id=bad, kind="goals", fact="x")])
             assert any(bad in p for p in check(out, inp)), (bad, action)
@@ -253,22 +254,22 @@ def test_15_unknown_or_other_persons_note_id_is_refused(store: NoteStore, mem: F
 
 def test_check_lists_every_problem() -> None:
     inp = NoteTakerInput(today="2026-11-15", may_add_notes=True, turns=TURNS, existing_notes=[
-        {"note_id": "note-user01-001", "kind": "goals", "fact": "A.", "last_confirmed": "2026-11-01"}])
+        {"note_id": "note-user-01-001", "kind": "goals", "fact": "A.", "last_confirmed": "2026-11-01"}])
     assert check(NoteTakerOutput(actions=[]), inp) == []
-    ok = NoteTakerOutput(actions=[NoteAction(action="confirm", note_id="note-user01-001"),
+    ok = NoteTakerOutput(actions=[NoteAction(action="confirm", note_id="note-user-01-001"),
                                   NoteAction(action="add", kind="goals", fact="B.")])
     assert check(ok, inp) == []
     cases = [
         NoteAction(action="delete"),
-        NoteAction(action="replace", note_id="note-user01-001", fact="no kind"),
+        NoteAction(action="replace", note_id="note-user-01-001", fact="no kind"),
         NoteAction(action="add", kind="goals"),
         NoteAction(action="add", kind="goals", fact="   "),
-        NoteAction(action="add", kind="goals", fact="has id", note_id="note-user01-001"),
+        NoteAction(action="add", kind="goals", fact="has id", note_id="note-user-01-001"),
     ]
     for action in cases:
         assert check(NoteTakerOutput(actions=[action]), inp), action
-    twice = NoteTakerOutput(actions=[NoteAction(action="confirm", note_id="note-user01-001"),
-                                     NoteAction(action="delete", note_id="note-user01-001")])
+    twice = NoteTakerOutput(actions=[NoteAction(action="confirm", note_id="note-user-01-001"),
+                                     NoteAction(action="delete", note_id="note-user-01-001")])
     assert check(twice, inp)
 
 
@@ -318,10 +319,10 @@ def test_17_notes_stay_with_their_person(store: NoteStore, mem: FakeUserMemory) 
     take_notes(store, llm, user_id="user-02", session_id="s", turns=TURNS, remember_me=True, today=TODAY)
     assert "Ana" not in llm.prompts[NoteTakerOutput][0] and "note-user01" not in llm.prompts[NoteTakerOutput][0]
     inp = build_input(store, "user-02", TURNS, remember_me=True, today=TODAY)
-    assert all(n.note_id.startswith("note-user02-") for n in inp.existing_notes)
+    assert all(n.note_id.startswith("note-user-02-") for n in inp.existing_notes)
     # Each person's own recall reaches only their own notes; a training identity reaches none.
     own = [s["sourceId"] for r in mem.recall(RECALL_QUERY, identity="user-01") for s in r["sources"]]
-    assert own == ["note-user01-001"]
+    assert own == ["note-user-01-001"]
     mem.ensure_training_audience()
     for identity in [*TRAINING_IDENTITIES, "project"]:
         assert mem.recall("Remember robot person sister brother Ana Ben", identity=identity) == []
@@ -332,7 +333,7 @@ def test_17_notes_stay_with_their_person(store: NoteStore, mem: FakeUserMemory) 
 def test_a_second_failed_answer_changes_nothing(store: NoteStore, mem: FakeUserMemory) -> None:
     a, b = seed(store, "user-01", ("goals", "A."), ("people", "B."))
     before_files, before_entries = files(store, "user-01"), dict(mem.entries)
-    bad = {"actions": [{"action": "delete", "note_id": "note-user01-777"}, add("goals", "New.")]}
+    bad = {"actions": [{"action": "delete", "note_id": "note-user-01-777"}, add("goals", "New.")]}
     llm = scripted(bad, bad)
     result = take_notes(store, llm, user_id="user-01", session_id="s", turns=TURNS, remember_me=True, today=TODAY)
     assert result.failed and result.reason and result.added == [] and result.deleted == []
@@ -357,7 +358,7 @@ def test_a_model_call_that_raises_changes_nothing(store: NoteStore) -> None:
 def test_a_first_failed_answer_is_retried(store: NoteStore) -> None:
     llm = scripted({"actions": [{"action": "delete", "note_id": "nope"}]}, {"actions": [add("goals", "A.")]})
     result = take_notes(store, llm, user_id="user-01", session_id="s", turns=TURNS, remember_me=True, today=TODAY)
-    assert not result.failed and result.added == ["note-user01-001"]
+    assert not result.failed and result.added == ["note-user-01-001"]
 
 
 # ---------- the limits ----------
@@ -367,9 +368,9 @@ def test_limits_drop_the_oldest_confirmed_then_the_lower_number(store: NoteStore
     mid = seed(store, "user-01", ("situation", "S2."), ("situation", "S3."), today=TODAY - timedelta(days=3))
     result = session(store, "user-01", [add("situation", "S4."), add("situation", "S5.")])
     # S1 is oldest; S2 and S3 tie, and S2 has the lower number.
-    assert result.dropped_by_limit == [old[0], mid[0]]
-    assert result.added == ["note-user01-004", "note-user01-005"] and result.not_written == 0
-    assert index_ids(store, "user-01") == [mid[1], "note-user01-004", "note-user01-005"]
+    assert set(result.dropped_by_limit) == {old[0], mid[0]}
+    assert set(result.added) == {"note-user-01-004", "note-user-01-005"} and result.not_written == 0
+    assert index_ids(store, "user-01") == [mid[1], "note-user-01-004", "note-user-01-005"]
     assert old[0] not in mem.entries and mid[0] not in mem.entries and result.undeleted == []
 
 
@@ -378,10 +379,10 @@ def test_limits_can_drop_a_new_note_which_is_then_never_written(store: NoteStore
     # Seven goals, all dated today: the four lowest numbers go, three existing and the first new one.
     result = session(store, "user-01", [add("goals", "G3."), add("goals", "G4."), add("goals", "G5."),
                                         add("goals", "G6.")])
-    assert result.dropped_by_limit == existing
-    assert result.not_written == 1 and "note-user01-004" not in mem.entries
+    assert set(result.dropped_by_limit) == set(existing)
+    assert result.not_written == 1 and "note-user-01-004" not in mem.entries
     assert len(store.index("user-01").notes) == NOTE_CAPS["goals"]
-    assert result.added == ["note-user01-005", "note-user01-006", "note-user01-007"]
+    assert set(result.added) == {"note-user-01-005", "note-user-01-006", "note-user-01-007"}
 
 
 def test_confirm_sets_last_confirmed_to_today_and_costs_no_write(store: NoteStore, mem: FakeUserMemory) -> None:
@@ -419,8 +420,8 @@ def test_a_write_that_fails_is_left_out_and_the_others_go_on(store: NoteStore, m
 
     mem.ingest = flaky
     result = session(store, "user-01", [add("goals", "Bad."), add("goals", "Good.")])
-    assert result.not_written == 1 and result.added == ["note-user01-002"]
-    assert index_ids(store, "user-01") == ["note-user01-002"] and set(store.stored("user-01")) == {"note-user01-002"}
+    assert result.not_written == 1 and result.added == ["note-user-01-002"]
+    assert index_ids(store, "user-01") == ["note-user-01-002"] and set(store.stored("user-01")) == {"note-user-01-002"}
 
 
 # ---------- the order of the four saves ----------
@@ -450,7 +451,7 @@ def test_the_four_saves_happen_in_order(mem: FakeUserMemory, tmp_path: Path) -> 
     events.clear()
     session(store, "user-01", [{"action": "replace", "note_id": a, "kind": "goals", "fact": "A2."},
                                {"action": "delete", "note_id": c}, {"action": "confirm", "note_id": b}])
-    new = "note-user01-004"
+    new = "note-user-01-004"
     top = [e for e in events if e[0] in ("take_off", "write", "delete") or e[0] == "save_index"]
     names = [e[0] for e in top]
     first_take_off = names.index("take_off")
@@ -492,7 +493,7 @@ def test_render_user_shows_every_kind_with_count_and_limit(store: NoteStore) -> 
     for kind, limit in NOTE_CAPS.items():
         count = 1 if kind == "goals" else 0
         assert f'<{kind} count="{count}" limit="{limit}">' in text and f"</{kind}>" in text
-    assert "- note-user01-001, last confirmed 2026-11-15: Back to work." in text
+    assert "- note-user-01-001, last confirmed 2026-11-15: Back to work." in text
     assert "<conversation>\nuser: I'd rather" in text and text.startswith("<today>2026-11-15</today>")
 
 
@@ -516,8 +517,93 @@ def test_past_user_memory_follows_the_documented_calls() -> None:
     client = PastUserMemory(api_key="test-not-a-key", base_url="https://past.test/api/v1",
                             transport=httpx.MockTransport(handler))
     client.ensure_audience("person-user-01", ["user-01", NOTE_TAKER])
-    assert client.delete("note-user01-001") is True
+    assert client.delete("note-user-01-001") is True
     assert client.delete("missing") is False
     assert seen[0] == ("PUT", "/api/v1/audiences/person-user-01",
                        {"kind": "fixed", "name": "person-user-01", "identities": ["user-01", NOTE_TAKER]})
-    assert seen[1][:2] == ("DELETE", "/api/v1/data-points/note-user01-001")
+    assert seen[1][:2] == ("DELETE", "/api/v1/data-points/note-user-01-001")
+
+
+# ---------- amended contract: two people never meet, and what survives a crash or a failure ----------
+
+def test_note_ids_keep_the_user_id_as_it_is(store: NoteStore, mem: FakeUserMemory) -> None:
+    [hyphen] = seed(store, "user-01", ("goals", "Hyphen person."))
+    [plain] = seed(store, "user01", ("goals", "Plain person."))
+    assert (hyphen, plain) == ("note-user-01-001", "note-user01-001")
+    assert mem.entries[hyphen].audience == "person-user-01" and mem.entries[plain].audience == "person-user01"
+    session(store, "user01", [{"action": "delete", "note_id": plain}])
+    assert hyphen in mem.entries and store.helper_notes("user-01", TODAY) == ["Hyphen person."]
+    assert store.helper_notes("user01", TODAY) == []
+
+
+def test_another_persons_note_id_never_enters_their_files_or_a_delete(store: NoteStore,
+                                                                     mem: FakeUserMemory) -> None:
+    [theirs] = seed(store, "user01", ("goals", "Plain person."))
+    note = to_record(NoteAction(action="add", kind="goals", fact="x"), user_id="user-01", session_id="s",
+                     note_id=theirs, today=TODAY, now=NOW)
+    with pytest.raises(ValueError):
+        store.write(note)  # an ID of user01's cannot be written as user-01's note
+    with pytest.raises(ValueError):
+        store.save_index(LiveNoteIndex(user_id="user-01", notes=[
+            LiveNote(note_id=theirs, kind="goals", last_confirmed=TODAY)]))
+    assert store.delete("user-01", [theirs, "note-user-01-01-001"]) == []
+    assert theirs in mem.entries and mem.delete_calls == [] and store.pending_deletes("user-01") == []
+    assert index_ids(store, "user01") == [theirs]
+
+
+def test_a_note_written_but_never_indexed_is_deleted_later(store: NoteStore, mem: FakeUserMemory) -> None:
+    [kept] = seed(store, "user-01", ("goals", "Kept."))
+    orphan = to_record(NoteAction(action="add", kind="goals", fact="Crash."), user_id="user-01", session_id="s",
+                       note_id=store.next_note_id("user-01"), today=TODAY, now=NOW)
+    store.write(orphan)  # then the process dies before the index is saved
+    assert set(store.stored("user-01")) == {kept, orphan.id} and index_ids(store, "user-01") == [kept]
+    assert store.helper_notes("user-01", TODAY) == ["Kept."]
+    result = session(store, "user-01", [])
+    assert orphan.id not in mem.entries and orphan.id not in store.stored("user-01") and result.undeleted == []
+
+
+def test_take_notes_raises_nothing_when_the_audience_or_recall_fails(store: NoteStore,
+                                                                      mem: FakeUserMemory) -> None:
+    [a] = seed(store, "user-01", ("goals", "A."))
+
+    def broken(*args, **kwargs):
+        raise PastError("503")
+
+    mem.ensure_audience = broken
+    mem.recall = broken
+    result = session(store, "user-01", [{"action": "delete", "note_id": a}, add("goals", "B.")])
+    assert not result.failed and result.deleted == [a] and result.added == [] and result.not_written == 1
+    assert index_ids(store, "user-01") == [] and a not in mem.entries and result.undeleted == []
+
+
+def test_expiry_stands_when_the_answer_fails(store: NoteStore, mem: FakeUserMemory) -> None:
+    [follow] = seed(store, "user-01", ("follow_up", "Ask about the exam."), today=date(2026, 10, 1))
+    bad = {"actions": [{"action": "delete", "note_id": "nope"}]}
+    result = take_notes(store, scripted(bad, bad), user_id="user-01", session_id="s", turns=TURNS,
+                        remember_me=True, today=TODAY)
+    assert result.failed and index_ids(store, "user-01") == [] and follow not in mem.entries
+
+
+def test_replaced_is_listed_even_when_the_new_write_fails(store: NoteStore, mem: FakeUserMemory) -> None:
+    [old] = seed(store, "user-01", ("goals", "Old."))
+
+    def refuse(entry):
+        raise PastError("400")
+
+    mem.ingest = refuse
+    result = session(store, "user-01", [{"action": "replace", "note_id": old, "kind": "goals", "fact": "New."}])
+    assert result.replaced == [old] and result.added == [] and result.not_written == 1
+    assert index_ids(store, "user-01") == [] and old not in mem.entries
+
+
+def test_any_exception_from_the_model_is_a_failed_answer(store: NoteStore) -> None:
+    seed(store, "user-01", ("goals", "A."))
+    before = files(store, "user-01")
+
+    class Down:
+        def structured(self, system, user, schema):
+            raise ConnectionError("no route to host")
+
+    result = take_notes(store, Down(), user_id="user-01", session_id="s", turns=TURNS, remember_me=True,
+                        today=TODAY)
+    assert result.failed and "no route" in result.reason and files(store, "user-01") == before

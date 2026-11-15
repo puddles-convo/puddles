@@ -130,9 +130,9 @@ Format: `NoteTakerInput` in [`schemas.py`](../../schemas.py). Example: [`example
 
 ## 4. Output
 
-JSON, requested as a structured output: a list of changes, which may be empty.
+JSON, requested as a structured output: an object with two fields. `forget_everything` is true only if the person asked the robot to forget everything about them. `actions` is a list of changes, which may be empty; the table and the example below describe that list.
 
-Format: `NoteAction (a list)` in [`schemas.py`](../../schemas.py).
+Format: `NoteTakerOutput` in [`puddles/inference/notes.py`](../../puddles/inference/notes.py), until it is agreed on issue #1; each action is a `NoteAction` in [`schemas.py`](../../schemas.py).
 
 | Field | Type | Meaning |
 |---|---|---|

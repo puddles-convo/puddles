@@ -20,7 +20,7 @@ NOTE_TAKER = "note-taker"
 RECALL_QUERY = "What should the robot remember about this person?"
 
 USER_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
-USER_ID_MAX = 64
+USER_ID_MAX = 33  # past.dev allows an audience name 40 characters, and the audience is person-<user_id>
 RESERVED_IDS = frozenset([*TRAINING_IDENTITIES, NOTE_TAKER, "project"])
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -110,6 +110,11 @@ def _read_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text()) if path.exists() else default
 
 
+def belongs_to(note_id: str, user_id: str) -> bool:
+    """True only for `note-<user_id>-<NNN>`. The number has no hyphen, so no two people can share an ID."""
+    return re.fullmatch(rf"note-{re.escape(user_id)}-\d{{3,}}", note_id) is not None
+
+
 def note_number(note_id: str) -> int:
     m = re.search(r"-(\d+)$", note_id)
     return int(m.group(1)) if m else 0
@@ -154,17 +159,29 @@ class NoteStore:
         return index
 
     def save_index(self, index: LiveNoteIndex) -> None:
-        """Write the index, then drop from notes.json every note that is not on it."""
+        """Write the index, then drop from notes.json every note not on it, queuing each for deletion.
+
+        So a note written but never put on the index (a crash between the two) is still deleted from past.dev.
+        """
         folder = self._dir(index.user_id)
+        foreign = [n.note_id for n in index.notes if not belongs_to(n.note_id, index.user_id)]
+        if foreign:
+            raise ValueError(f"the index for {index.user_id} names notes that are not theirs: {foreign}")
         _write_json(folder / "index.json", index.model_dump(mode="json"))
         live = {n.note_id for n in index.notes}
         stored = self.stored(index.user_id)
-        if set(stored) - live:
+        removed = [k for k in stored if k not in live]
+        if removed:
+            self._add_pending(index.user_id, removed)
             self._save_stored(index.user_id, {k: v for k, v in stored.items() if k in live})
 
     def stored(self, user_id: str) -> dict[str, UserNote]:
         data = _read_json(self._dir(user_id) / "notes.json", {})
-        return {k: UserNote.model_validate(v) for k, v in data.items()}
+        notes = {k: UserNote.model_validate(v) for k, v in data.items()}
+        for key, note in notes.items():
+            if note.id != key or note.user_id != user_id or not belongs_to(key, user_id):
+                raise ValueError(f"notes.json for {user_id} holds {key}, which is not one of their notes")
+        return notes
 
     def _save_stored(self, user_id: str, notes: dict[str, UserNote]) -> None:
         _write_json(self._dir(user_id) / "notes.json", {k: v.model_dump(mode="json") for k, v in notes.items()})
@@ -174,7 +191,7 @@ class NoteStore:
         path = self._dir(user_id) / "counter.json"
         n = int(_read_json(path, {"next": 1})["next"])
         _write_json(path, {"next": n + 1})
-        return f"note-{user_id.replace('-', '')}-{n:03d}"
+        return f"note-{user_id}-{n:03d}"  # the user ID exactly as it is
 
     def pending_deletes(self, user_id: str) -> list[str]:
         return list(_read_json(self._dir(user_id) / "pending_deletes.json", []))
@@ -183,8 +200,9 @@ class NoteStore:
         _write_json(self._dir(user_id) / "pending_deletes.json", ids)
 
     def _add_pending(self, user_id: str, ids: list[str]) -> None:
+        """Only the person's own note IDs, so a delete for one person can never reach another's entry."""
         pending = self.pending_deletes(user_id)
-        added = [i for i in dict.fromkeys(ids) if i not in pending]
+        added = [i for i in dict.fromkeys(ids) if i not in pending and belongs_to(i, user_id)]
         if added:
             self._save_pending(user_id, pending + added)
 
@@ -222,6 +240,8 @@ class NoteStore:
     def write(self, note: UserNote) -> None:
         """Send one note to the person's audience and wait. Only a confirmed note reaches notes.json."""
         user_id = check_user_id(note.user_id)
+        if not belongs_to(note.id, user_id):
+            raise ValueError(f"note {note.id} is not an ID of {user_id}'s notes")
         stored = self.stored(user_id)
         if note.id in stored:
             raise ValueError(f"note {note.id} is already stored")
@@ -249,7 +269,8 @@ class NoteStore:
     def take_off(self, user_id: str, note_ids: list[str]) -> None:
         """From the moment this returns the helper cannot see these notes."""
         index = self.index(user_id)
-        off = [n.note_id for n in index.notes if n.note_id in set(note_ids)]
+        wanted = set(note_ids)
+        off = [n.note_id for n in index.notes if n.note_id in wanted]
         if not off:
             return
         self._add_pending(user_id, off)
@@ -264,6 +285,8 @@ class NoteStore:
         except Exception:
             pass  # a delete is by entry ID and does not need the audience
         for note_id in self.pending_deletes(user_id):
+            if not belongs_to(note_id, user_id):
+                continue  # never send a delete for an ID that is not this person's
             if self._delete_one(note_id):
                 self._save_pending(user_id, [i for i in self.pending_deletes(user_id) if i != note_id])
         return self.pending_deletes(user_id)
