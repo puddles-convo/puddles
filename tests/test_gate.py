@@ -15,12 +15,12 @@ from loop.errors import LLMError
 from loop.llm import FakeClient
 from loop.policy import load_policy
 from loop.run_batch import _fake_helper, _fake_user
-from loop.runner import load_scenarios
+from loop.runner import load_scenarios, run_batch
 from puddles import gate, replay, tracing
 from puddles.decision_log import DecisionLog
 from puddles.graph import RoundDeps, run_round
 from puddles.memory import FakeMemory, now
-from puddles.policy import parse_policy, safety_section
+from puddles.policy import parse_policy, render_policy, safety_section
 from puddles.records import sha256_text
 from puddles.round import RoundResult
 from schemas import (
@@ -374,15 +374,88 @@ def test_every_validation_conversation_failing_is_reverted(tmp_path):
     assert "5 of 5 conversations failed" in out.reason
 
 
-def test_a_safety_check_that_raises_reverts_and_names_the_exception(tmp_path):
+def test_a_safety_check_that_raises_fails_only_its_check_and_validation_still_runs(tmp_path):
     deps, current, candidate = setup(tmp_path, safety=Safety(raises=RuntimeError("judge model down")))
     report = gate.run_gate(gate_input(current, candidate, before=(1.0, 1.0)), deps)
 
-    out = reverted(report, "safety_cases", "complete_evidence")
+    out = reverted(report, "safety_cases")
     assert "RuntimeError: judge model down" in out.reason
     assert out.safety_passed is False and report.log_safety is None and report.safety is None
-    assert out.after == gate.NOT_MEASURED and report.log_scores is None
+    assert not (deps.root / "scores" / "round-01-safety.json").exists()  # no SafetyResult to save
+    assert report.checks["complete_evidence"] == report.checks["quality_gain"] == "passed"
+    assert out.after.quality == 4.0 and len(deps.judge.calls) == 5  # validation ran
     assert saved_gate(deps)["decision"] == "reverted"
+
+
+def test_every_static_check_is_evaluated_and_the_noise_check_does_not_run(tmp_path):
+    changed = candidate_text(replace=[("S3. Do not claim to be a therapist or a person.",
+                                       "S3. Do not claim to be a therapist.")])
+    deps, current, candidate = setup(tmp_path, candidate=changed, noise_measured=False)
+    tokens = (len(candidate.read_text()) + 3) // 4
+    report = gate.run_gate(gate_input(current, candidate, token_cap=tokens - 1), deps)
+
+    out = reverted(report, "safety_section", "token_cap")
+    assert report.checks == {"candidate_file": "passed", "safety_section": "failed", "one_rule": "passed",
+                             "token_cap": "failed", "safety_cases": "not_run", "complete_evidence": "not_run",
+                             "quality_gain": "not_run", "dimension_drop": "not_run", "noise_not_measured": "not_run"}
+    assert "noise has not been measured" in out.reason
+    assert sorted(p.name for p in (deps.root / "scores").iterdir()) == ["round-01-gate.json"]
+
+
+@pytest.mark.parametrize("training_scenario", [IDS[0], f"val-{IDS[0]}"], ids=["no-clash", "clash"])
+def test_validation_ids_that_are_in_the_training_file_are_not_measured(tmp_path, training_scenario):
+    deps, current, candidate = setup(tmp_path)
+    train = deps.root / "conversations" / "round-01-train.jsonl"
+    run_batch(FakeClient(_fake_helper), FakeClient(_fake_user), load_policy(current),
+              [SCENARIOS[0].model_copy(update={"scenario_id": training_scenario})], round=1, out_path=train)
+    train_bytes = train.read_bytes()
+    report = gate.run_gate(gate_input(current, candidate), deps)
+
+    if training_scenario == IDS[0]:
+        assert report.outcome.decision == "kept"
+        return
+    out = incomplete(report)
+    assert f"conv-r01-val-{IDS[0]}" in out.reason and "round-01-train.jsonl" in out.reason
+    assert train.read_bytes() == train_bytes  # the gate deletes nothing
+    assert (deps.root / "conversations" / "round-01-validation.jsonl").exists()
+    assert (deps.root / "scores" / "round-01-validation.jsonl").exists()
+
+
+@pytest.mark.parametrize("name", ["round-01-safety.json", "round-01-gate.json"])
+def test_a_file_the_gate_could_not_save_is_a_revert(tmp_path, name):
+    deps, current, candidate = setup(tmp_path)
+    (deps.root / "scores" / name).mkdir(parents=True)  # a folder where the file should go
+    report = gate.run_gate(gate_input(current, candidate, before=(3.4, 3.1)), deps)
+
+    out = reverted(report, "complete_evidence")
+    assert "IsADirectoryError" in out.reason
+    assert out.after == gate.NOT_MEASURED and report.log_scores is None
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+
+
+def test_policy_in_force_on_revert_falls_back_to_parse_policy_then_the_stem(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    current.write_bytes(POLICY.read_bytes().replace(b"C4. Keep replies short.", b"C4. Keep replies\nshort."))
+    assert gate.run_gate(gate_input(current, candidate), deps).outcome.policy_in_force == "policy-v1"
+    current.write_text("not a policy")
+    assert gate.run_gate(gate_input(current, candidate), deps).outcome.policy_in_force == "policy-v1"  # the stem
+    odd = tmp_path / "odd-name.md"
+    odd.write_text("# policy-v7\nno safety section\n")
+    assert gate.run_gate(gate_input(odd, candidate), deps).outcome.policy_in_force == "odd-name"
+
+
+def test_a_score_for_another_conversation_is_unscored_and_an_empty_scores_file_is_written(tmp_path):
+    class Misfiled(Judge):
+        def score(self, record):
+            judged = super().score(record)
+            judged.score = judged.score.model_copy(update={"conversation_id": "conv-r01-someone-else"})
+            return judged
+
+    deps, current, candidate = setup(tmp_path, judge=Misfiled())
+    evidence = gate.score_policy(deps, candidate, IDS, 1, gate.VALIDATION_TAG)
+    assert evidence.scores is None and not evidence.complete
+    assert evidence.unscored == [f"conv-r01-val-{i}" for i in IDS]
+    assert (deps.root / "scores" / "round-01-validation.jsonl").read_text() == ""
 
 
 @pytest.mark.parametrize("ids, message", [
@@ -459,8 +532,10 @@ def test_the_policy_in_force_is_scored_once_and_kept_in_current_json(tmp_path):
 
     assert first == Scores(empathy=3.0, relevance=3.0, quality=3.0, emotion_change=1.0)
     saved = json.loads((deps.root / "scores" / "current.json").read_text())
-    assert saved == {"policy_version": "policy-v1", "scenario_ids": IDS, "judge_version": "judge-test",
-                     "scores": first.model_dump()}
+    assert saved == {"policy_version": "policy-v1", "policy_sha256": sha256_text(current.read_text()),
+                     "scenario_ids": IDS, "judge_version": "judge-test",
+                     "scenarios_sha256": sha256_text("\n".join(s.model_dump_json() for s in SCENARIOS)),
+                     "max_turns": 10, "seed": 7, "scores": first.model_dump()}
     lines = (deps.root / "conversations" / "round-00-current.jsonl").read_text().splitlines()
     assert [json.loads(line)["id"] for line in lines] == [f"conv-r00-current-{i}" for i in IDS]
     assert (deps.root / "scores" / "round-00-current.jsonl").exists()
@@ -474,6 +549,41 @@ def test_the_policy_in_force_is_scored_once_and_kept_in_current_json(tmp_path):
     assert len(deps.judge.calls) == calls[0] + 5
     gate.current_scores(deps, current, IDS[:3])  # nor can a different list of scenarios
     assert len(deps.judge.calls) == calls[0] + 8
+
+
+@pytest.mark.parametrize("change", ["scenario_text", "max_turns", "seed", "policy_text", "missing_field"])
+def test_current_json_is_scored_again_when_anything_in_its_key_changed(tmp_path, change):
+    deps, current, _ = setup(tmp_path)
+    gate.current_scores(deps, current, IDS)
+    calls = len(deps.judge.calls)
+    path = deps.root / "scores" / "current.json"
+    if change == "scenario_text":
+        deps.scenarios = [SCENARIOS[0].model_copy(update={"situation": "Changed."}), *SCENARIOS[1:]]
+    elif change == "max_turns":
+        deps.max_turns = 3
+    elif change == "seed":
+        deps.seed = None
+    elif change == "policy_text":
+        current.write_text(current.read_text().replace("C4. Keep replies short.", "C4. Keep replies brief."))
+    else:
+        data = json.loads(path.read_text())
+        del data["scenarios_sha256"]
+        path.write_text(json.dumps(data))
+    gate.current_scores(deps, current, IDS)
+    assert len(deps.judge.calls) == calls + 5
+    assert set(json.loads(path.read_text())) == {"policy_version", "policy_sha256", "scenario_ids", "judge_version",
+                                                 "scenarios_sha256", "max_turns", "seed", "scores"}
+
+
+def test_a_stale_current_json_is_left_alone_when_the_refresh_fails(tmp_path):
+    deps, current, _ = setup(tmp_path)
+    gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    stale = path.read_bytes()
+    deps.max_turns, deps.user_client = 3, FakeClient(user_failing_on("two mugs"))
+    with pytest.raises(gate.GateError, match="could not be scored"):
+        gate.current_scores(deps, current, IDS)
+    assert path.read_bytes() == stale
 
 
 def test_a_policy_in_force_that_cannot_be_scored_raises_and_writes_no_current_json(tmp_path):
@@ -513,6 +623,25 @@ def test_make_gate_fills_in_the_round_and_moves_current_json_on_kept(tmp_path):
     assert result.scores == the_gate.last_report.log_scores and result.safety == the_gate.last_report.log_safety
     saved = json.loads((deps.root / "scores" / "current.json").read_text())
     assert saved["policy_version"] == "policy-v2" and saved["scores"]["quality"] == 4.0
+    promoted = parse_policy(candidate.read_text())
+    promoted.version = "policy-v2"
+    assert saved["policy_sha256"] == sha256_text(render_policy(promoted))  # the text finish_round will write
+
+
+def test_a_failed_write_of_current_json_after_a_keep_is_ignored(tmp_path):
+    class Clobbering(Safety):
+        def __call__(self, policy_version, reply):
+            path = self.root / "scores" / "current.json"
+            path.unlink()
+            path.mkdir()  # the rewrite after the keep will fail
+            return super().__call__(policy_version, reply)
+
+    safety = Clobbering()
+    deps, current, candidate = setup(tmp_path, safety=safety)
+    safety.root = deps.root
+    the_gate = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)
+    out = the_gate(round_result(deps, current, candidate))
+    assert out.decision == "kept" and the_gate.last_report.failed == []
 
 
 def test_make_gate_never_raises(tmp_path):

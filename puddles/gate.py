@@ -18,11 +18,12 @@ from typing import Any, Callable, Optional, Protocol
 from loop.helper import helper_reply
 from loop.llm import ChatClient
 from loop.policy import Policy
-from loop.runner import run_batch
+from loop.runner import conversation_id, run_batch
 from puddles import replay
 from puddles.graph import check_policy_file
 from puddles.memory import now
-from puddles.policy import TOKEN_CAP, estimate_tokens, parse_policy
+from puddles.policy import TOKEN_CAP, estimate_tokens, parse_policy, render_policy
+from puddles.records import sha256_text
 from puddles.round import RoundResult
 from schemas import (
     ConversationRecord,
@@ -55,6 +56,8 @@ CHECKS: dict[str, str] = {
     "noise_not_measured": "unmeasured noise",
 }
 STATIC = ("safety_section", "one_rule", "token_cap")
+STATIC_FOUR = ("candidate_file", *STATIC)
+EIGHT = tuple(k for k in CHECKS if k != "noise_not_measured")
 NOTHING_ELSE_RAN = "Nothing else was run: no conversation, no judge call, no safety check."
 NOISE_NOTE = "the noise has not been measured, so nothing is promoted"
 
@@ -114,7 +117,7 @@ class Evidence:
 class GateReport:
     outcome: GateOutcome
     failed: list[str]  # names from CHECKS, in CHECKS order; empty only when kept
-    would_keep: bool  # what the six checks said, whatever the noise flag then did
+    would_keep: bool  # true when none of the eight checks before noise_not_measured failed
     checks: dict[str, str]  # every key of CHECKS -> "passed", "failed" or "not_run"
     log_scores: Optional[LogScores] = None  # None when validation gave no complete scores
     log_safety: Optional[LogSafety] = None  # None when the safety check did not run
@@ -159,8 +162,8 @@ def _pick(pool: list[Scenario], scenario_ids: list[str]) -> list[Scenario]:
 def score_policy(deps: GateDeps, policy_path: Path, scenario_ids: list[str], round_: int, tag: str) -> Evidence:
     """Converse on every scenario under the policy, then judge each conversation once.
 
-    Both files are saved, the scores even when some are missing. Scores are averaged only when
-    every conversation finished and was scored: averaging the survivors can look like a gain.
+    Both files are saved, the scores even when some or all are missing. Scores are averaged only
+    when every conversation finished and was scored: averaging the survivors can look like a gain.
     """
     policy = check_policy_file(Path(policy_path))
     scenarios = _pick(deps.scenarios, scenario_ids)
@@ -189,29 +192,42 @@ def score_policy(deps: GateDeps, policy_path: Path, scenario_ids: list[str], rou
     return evidence
 
 
+# ---------- the scores of the policy in force ----------
+
 def current_path(root: Path) -> Path:
     return Path(root) / "scores" / "current.json"
 
 
-def _write_current(root: Path, policy_version: str, scenario_ids: list[str], judge_version: str,
-                   scores: Scores) -> None:
+def scenarios_sha256(deps: GateDeps, scenario_ids: list[str]) -> str:
+    """The hash of the picked scenarios, so a scenario whose text changed under its ID is scored again."""
+    return sha256_text("\n".join(s.model_dump_json() for s in _pick(deps.scenarios, scenario_ids)))
+
+
+def _cache_key(deps: GateDeps, policy_version: str, policy_sha256: str, scenario_ids: list[str]) -> dict[str, Any]:
+    """Everything the kept scores depend on that the gate can see. The chat models are not in it:
+    a root is for one pair of models."""
+    return {"policy_version": policy_version, "policy_sha256": policy_sha256, "scenario_ids": list(scenario_ids),
+            "judge_version": deps.judge.version, "scenarios_sha256": scenarios_sha256(deps, scenario_ids),
+            "max_turns": deps.max_turns, "seed": deps.seed}
+
+
+def _write_current(root: Path, key: dict[str, Any], scores: Scores) -> None:
     path = current_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"policy_version": policy_version, "scenario_ids": list(scenario_ids), "judge_version": judge_version,
-            "scores": scores.model_dump()}
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({**key, "scores": scores.model_dump()}, indent=2) + "\n", encoding="utf-8")
 
 
-def _saved_current(root: Path, policy_version: str, scenario_ids: list[str], judge_version: str) -> Optional[Scores]:
-    """The kept scores, if they are for this policy, these scenarios and this judge. A file that
-    cannot be read counts as missing, so the policy is scored again."""
+def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
+    """The kept scores, if every field of the key matches. A file that cannot be read, or lacks a
+    field, counts as absent, so the policy is scored again."""
     path = current_path(root)
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if (data["policy_version"], data["scenario_ids"], data["judge_version"]) != \
-                (policy_version, list(scenario_ids), judge_version):
+        if not isinstance(data, dict) or "scores" not in data or any(name not in data for name in key):
+            return None
+        if any(data[name] != value for name, value in key.items()):
             return None
         return Scores.model_validate(data["scores"])
     except Exception:  # noqa: BLE001
@@ -221,17 +237,18 @@ def _saved_current(root: Path, policy_version: str, scenario_ids: list[str], jud
 def current_scores(deps: GateDeps, policy_path: Path, scenario_ids: list[str]) -> Scores:
     """The scores of the policy in force on the validation scenarios, kept in scores/current.json.
 
-    Scored as round 0 with the tag `current` when the file is missing or is for another policy,
-    another list of scenarios or another judge. Incomplete evidence raises GateError.
+    Scored as round 0 with the tag `current` unless the file matches every field of the key.
+    Incomplete evidence raises GateError and leaves any existing file as it is.
     """
-    version = check_policy_file(Path(policy_path)).version
-    saved = _saved_current(deps.root, version, scenario_ids, deps.judge.version)
+    policy = check_policy_file(Path(policy_path))
+    key = _cache_key(deps, policy.version, sha256_text(policy.text), scenario_ids)
+    saved = _saved_current(deps.root, key)
     if saved is not None:
         return saved
     evidence = score_policy(deps, Path(policy_path), scenario_ids, BASELINE_ROUND, CURRENT_TAG)
     if not evidence.complete or evidence.scores is None:
         raise GateError(f"the policy in force could not be scored: {evidence.describe()}")
-    _write_current(deps.root, version, scenario_ids, deps.judge.version, evidence.scores)
+    _write_current(deps.root, key, evidence.scores)
     return evidence.scores
 
 
@@ -251,16 +268,24 @@ def _changed_rules(current: Policy, candidate: Policy) -> list[str]:
 
 
 def _version(path: str) -> str:
-    """A policy's version from its title line, or the file name if it cannot be read."""
+    """The version of a policy file that may not load: what parse_policy reads, else the file's stem."""
     try:
-        first = Path(path).read_text(encoding="utf-8").splitlines()[0]
+        return parse_policy(Path(path).read_text(encoding="utf-8")).version
     except Exception:  # noqa: BLE001
-        first = ""
-    return first[2:].strip() if first.startswith("# ") else Path(path).stem
+        return Path(path).stem
 
 
-def _reason(failed: list[str], details: dict[str, str], noise_measured: bool, would_keep: bool,
-            verdict: str, extra: str = "") -> str:
+def _clashes(root: Path, round_: int, scenario_ids: list[str]) -> list[str]:
+    """Validation conversation IDs that are also in this round's training file. No file, no clash."""
+    train = Path(root) / "conversations" / f"round-{round_:02d}-train.jsonl"
+    if not train.exists():
+        return []
+    lines = train.read_text(encoding="utf-8").splitlines()
+    train_ids = {json.loads(line)["id"] for line in lines if line.strip()}
+    return [cid for cid in (conversation_id(round_, sid, VALIDATION_TAG) for sid in scenario_ids) if cid in train_ids]
+
+
+def _reason(failed: list[str], details: dict[str, str], would_keep: bool, verdict: str, extra: str) -> str:
     if not failed:
         return f"Kept: {verdict}."
     if would_keep and failed == ["noise_not_measured"]:
@@ -268,8 +293,7 @@ def _reason(failed: list[str], details: dict[str, str], noise_measured: bool, wo
                 f"The six checks would have kept the candidate: {verdict}.")
     first, *rest = failed
     parts = [f"Reverted on {CHECKS[first]}: {details[first]}."]
-    for name in rest:
-        parts.append(f"Also {CHECKS[name]}: {details[name]}.")
+    parts += [f"Also {CHECKS[name]}: {details[name]}." for name in rest]
     if extra:
         parts.append(extra)
     return " ".join(parts)
@@ -285,9 +309,9 @@ class _Run:
     details: dict[str, str] = field(default_factory=dict)
     running: Optional[str] = None
     current_version: Optional[str] = None
-    candidate_version: Optional[str] = None
+    candidate_version: Optional[str] = None  # set only once every static check passed
     safety: Optional[SafetyResult] = None
-    after: Optional[Scores] = None
+    after: Optional[Scores] = None  # set only with complete evidence
     extra: str = ""
 
     def fail(self, name: str, detail: str) -> None:
@@ -296,26 +320,32 @@ class _Run:
     def report(self, verdict: str = "") -> GateReport:
         inp, deps = self.inp, self.deps
         noise_measured = bool(deps.noise_measured)
-        self.checks["noise_not_measured"] = "passed" if noise_measured else "failed"
-        if not noise_measured:
-            self.details["noise_not_measured"] = NOISE_NOTE
-        eight = [k for k in CHECKS if k != "noise_not_measured"]
-        would_keep = all(self.checks[k] == "passed" for k in eight)
+        if any(self.checks[k] == "failed" for k in STATIC_FOUR):
+            self.checks["noise_not_measured"] = "not_run"  # nothing after a failed static check runs
+            self.details.pop("noise_not_measured", None)
+        elif noise_measured:
+            self.checks["noise_not_measured"] = "passed"
+        else:
+            self.fail("noise_not_measured", NOISE_NOTE)
+        would_keep = not any(self.checks[k] == "failed" for k in EIGHT)
         failed = [k for k in CHECKS if self.checks[k] == "failed"]
-        kept = would_keep and noise_measured and not failed
+        kept = would_keep and noise_measured and not failed and self.candidate_version is not None \
+            and self.after is not None
         before = with_quality(inp.current_scores)
-        after = self.after if self.after is not None else NOT_MEASURED
         safety = self.safety
-        if kept:
-            assert self.candidate_version is not None
+        if kept and self.candidate_version is not None:
             in_force = self.candidate_version.removesuffix("-candidate")
         else:
             in_force = self.current_version or _version(inp.current_policy)
+        extra = self.extra
+        if not noise_measured and self.checks["noise_not_measured"] == "not_run":
+            extra = f"{extra} The noise has not been measured either, so nothing would have been promoted.".strip()
         outcome = GateOutcome(
             id=f"gate-r{inp.round:02d}", written_by="gatekeeper", created_at=now(), parent_ids=[inp.edit_id],
             round=inp.round, edit_id=inp.edit_id, decision="kept" if kept else "reverted", before=before,
-            after=after, safety_passed=bool(safety is not None and safety.passed), policy_in_force=in_force,
-            reason=_reason(failed, self.details, noise_measured, would_keep, verdict, self.extra))
+            after=self.after if self.after is not None else NOT_MEASURED,
+            safety_passed=bool(safety is not None and safety.passed), policy_in_force=in_force,
+            reason=_reason(failed, self.details, would_keep, verdict, extra))
         log_safety = None
         if safety is not None:
             log_safety = LogSafety(case_file=safety.case_file, passed=safety.passed, cases=len(safety.cases),
@@ -331,20 +361,19 @@ def _scores_dir(deps: GateDeps) -> Path:
     return path
 
 
-def _evaluate(run: _Run) -> GateReport:
-    inp, deps = run.inp, run.deps
-    # 1. Static checks, no model call.
+def _static(run: _Run) -> Optional[tuple[Policy, Policy]]:
+    """Step 1, no model call. Returns the two policies when all four checks passed."""
+    inp = run.inp
     run.running = "candidate_file"
     try:
         current = check_policy_file(Path(inp.current_policy))
         run.current_version = current.version
         candidate = check_policy_file(Path(inp.candidate_policy))
-        run.candidate_version = candidate.version
     except Exception as exc:  # noqa: BLE001  a file that does not load is this check failing
         run.fail("candidate_file", f"{type(exc).__name__}: {exc}")
-        run.extra = NOTHING_ELSE_RAN
-        return run.report()
+        return None
     run.checks["candidate_file"] = "passed"
+    # All three are evaluated, so the reason names every one that failed.
     run.running = "safety_section"
     if candidate.safety_sha256 != current.safety_sha256:
         run.fail("safety_section", "the candidate's Safety section differs from the current policy's")
@@ -364,22 +393,30 @@ def _evaluate(run: _Run) -> GateReport:
         run.fail("token_cap", f"the candidate is about {tokens} tokens, over the cap of {inp.token_cap}")
     else:
         run.checks["token_cap"] = "passed"
+    run.running = None
     if any(run.checks[k] == "failed" for k in STATIC):
-        run.extra = NOTHING_ELSE_RAN
-        return run.report()
+        return None
+    return current, candidate
 
-    # 2. The safety check, against the helper alone under the candidate, with no crisis checker.
-    run.running = "safety_cases"
+
+def _safety(run: _Run, candidate: Policy) -> None:
+    """Step 2: the helper alone under the candidate, with no crisis checker in front of it.
+    A safety check that raises fails only its own check and leaves no SafetyResult."""
+    inp, deps = run.inp, run.deps
     session = f"safety-r{inp.round:02d}"
 
     def reply(turns: list[Turn]) -> str:
         return helper_reply(deps.helper_client, candidate, turns, session_id=session, turn=1).text
 
-    safety = deps.safety(candidate.version, reply)
-    if not isinstance(safety, SafetyResult):
-        raise GateError(f"the safety check returned {type(safety).__name__}, not a SafetyResult")
-    (_scores_dir(deps) / f"round-{inp.round:02d}-safety.json").write_text(
-        safety.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    run.running = "safety_cases"
+    try:
+        safety = deps.safety(candidate.version, reply)
+        if not isinstance(safety, SafetyResult):
+            raise GateError(f"the safety check returned {type(safety).__name__}, not a SafetyResult")
+    except Exception as exc:  # noqa: BLE001
+        run.fail("safety_cases", f"the safety check raised {type(exc).__name__}: {exc}")
+        run.running = None
+        return
     run.safety = safety
     if safety.passed:
         run.checks["safety_cases"] = "passed"
@@ -387,14 +424,39 @@ def _evaluate(run: _Run) -> GateReport:
         failed_ids = [c.case_id for c in safety.cases if not c.passed]
         which = f" ({', '.join(failed_ids)})" if failed_ids else ""
         run.fail("safety_cases", f"{len(failed_ids)} of {len(safety.cases)} safety cases failed{which}")
+    run.running = "saving the safety result"  # a failed write goes to run_gate's except: a revert
+    (_scores_dir(deps) / f"round-{inp.round:02d}-safety.json").write_text(
+        safety.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    run.running = None
+
+
+def _evaluate(run: _Run) -> GateReport:
+    inp, deps = run.inp, run.deps
+    policies = _static(run)
+    if policies is None:
+        run.extra = NOTHING_ELSE_RAN
+        return run.report()
+    _, candidate = policies
+    run.candidate_version = candidate.version
+
+    _safety(run, candidate)
 
     # 3. Validation. It runs whatever the safety check said.
     run.running = "complete_evidence"
-    evidence = score_policy(deps, Path(inp.candidate_policy), list(inp.validation_scenario_ids), inp.round,
-                            VALIDATION_TAG)
+    ids = list(inp.validation_scenario_ids)
+    evidence = score_policy(deps, Path(inp.candidate_policy), ids, inp.round, VALIDATION_TAG)
+    clash = _clashes(deps.root, inp.round, ids)
+    problems = []
     if not evidence.complete or evidence.scores is None:
-        run.fail("complete_evidence", f"of the validation conversations, {evidence.describe()}")
+        problems.append(f"of the validation conversations, {evidence.describe()}")
+    if clash:  # the files stay where they are; the validation counts as not measured
+        problems.append(f"validation conversation IDs are also in round-{inp.round:02d}-train.jsonl "
+                        f"({', '.join(clash)}), so they cannot be told apart from the round's own")
+    if problems:
+        run.fail("complete_evidence", "; ".join(problems))
+        run.running = None
         return run.report()
+    assert evidence.scores is not None
     run.checks["complete_evidence"] = "passed"
 
     # 4. The two score checks. Differences are rounded: the scores are means of whole numbers.
@@ -419,8 +481,9 @@ def _evaluate(run: _Run) -> GateReport:
         run.checks["dimension_drop"] = "passed"
     run.after = after
     run.running = None
-    verdict = (f"{moved}, above the noise of {_num(inp.noise)}; no dimension fell by more than the noise; "
-               f"the safety check passed ({len(safety.cases)} cases)")
+    verdict = f"{moved}, above the noise of {_num(inp.noise)}; no dimension fell by more than the noise"
+    if run.safety is not None:
+        verdict += f"; the safety check passed ({len(run.safety.cases)} cases)"
     return run.report(verdict)
 
 
@@ -432,13 +495,11 @@ def _save_report(deps: GateDeps, round_: int, report: GateReport) -> None:
 
 
 def _crashed(run: _Run, exc: BaseException) -> GateReport:
-    """The revert for a crash: the check that was running failed, and the evidence is incomplete."""
-    before_evidence = ("candidate_file", *STATIC, "safety_cases")
-    if run.running in before_evidence and run.checks[run.running] == "not_run":
+    """The revert for a crash, including a file that could not be saved: the evidence is incomplete."""
+    if run.running in STATIC_FOUR and run.checks[run.running] == "not_run":
         run.fail(run.running, f"it could not finish ({type(exc).__name__}: {exc})")
-    if run.running == "safety_cases":
-        run.safety = None
-    run.after = None
+    run.after = None  # nothing measured is shown after a crash
+    run.candidate_version = None  # and nothing is kept
     for name in ("quality_gain", "dimension_drop"):  # without complete evidence they did not run
         run.checks[name] = "not_run"
         run.details.pop(name, None)
@@ -447,15 +508,32 @@ def _crashed(run: _Run, exc: BaseException) -> GateReport:
     return run.report()
 
 
+def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[str], reason: str) -> GateReport:
+    """A revert with nothing measured, for when the gate could not test the candidate at all."""
+    checks = {k: "failed" if k in failed else "not_run" for k in CHECKS}
+    outcome = GateOutcome(
+        id=f"gate-r{round_:02d}", written_by="gatekeeper", created_at=now(), parent_ids=[edit_id],
+        round=round_, edit_id=edit_id, decision="reverted", before=NOT_MEASURED, after=NOT_MEASURED,
+        safety_passed=False, policy_in_force=_version(current_policy), reason=reason)
+    return GateReport(outcome=outcome, failed=[k for k in CHECKS if k in failed], would_keep=False, checks=checks)
+
+
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
-    """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate."""
+    """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
+    including a file that could not be saved."""
     run = _Run(inp=inp, deps=deps)
     try:
         report = _evaluate(run)
+        run.running = "saving the gate report"
         _save_report(deps, inp.round, report)
         return report
     except Exception as exc:  # noqa: BLE001  any crash at all must end as a revert, never as a keep
-        report = _crashed(run, exc)
+        try:
+            report = _crashed(run, exc)
+        except Exception as again:  # noqa: BLE001  even the crash report failed: a bare revert
+            report = _bare_revert(inp.round, inp.edit_id, inp.current_policy, ["complete_evidence"],
+                                  f"Reverted on {CHECKS['complete_evidence']}: the test run crashed "
+                                  f"({type(again).__name__}: {again}).")
     try:
         _save_report(deps, inp.round, report)
     except Exception:  # noqa: BLE001  the decision is already a revert; a lost report file cannot change it
@@ -479,6 +557,7 @@ class _Gate:
         try:
             report = self._gate(result)
         except Exception as exc:  # noqa: BLE001  the candidate is reverted untested
+            result.scores, result.safety = None, None
             report = self._untested(result, f"the gate could not run ({type(exc).__name__}: {exc})")
         self.last_report = report
         return report.outcome
@@ -498,27 +577,28 @@ class _Gate:
         result.scores, result.safety = report.log_scores, report.log_safety
         if report.outcome.decision == "kept" and report.log_scores is not None:
             try:
-                _write_current(self.deps.root, report.outcome.policy_in_force, self.ids, self.deps.judge.version,
-                               report.log_scores.after)
-            except Exception:  # noqa: BLE001  a stale current.json names the old version, so it is scored again
+                self._keep_current(result.candidate_path, report.outcome.policy_in_force, report.log_scores.after)
+            except Exception:  # noqa: BLE001  a stale or missing file cannot match, so the next round scores again
                 pass
         return report
 
+    def _keep_current(self, candidate_path: Path, version: str, scores: Scores) -> None:
+        """current.json for the promoted policy, hashed on the text finish_round will write for it."""
+        promoted = parse_policy(Path(candidate_path).read_text())
+        promoted.version = version
+        key = _cache_key(self.deps, version, sha256_text(render_policy(promoted)), self.ids)
+        _write_current(self.deps.root, key, scores)
+
     def _untested(self, result: RoundResult, why: str) -> GateReport:
         """Reverted without testing the candidate, usually because the policy in force could not be scored."""
-        checks = {k: "not_run" for k in CHECKS}
-        checks["complete_evidence"] = "failed"
-        checks["noise_not_measured"] = "passed" if self.deps.noise_measured else "failed"
-        failed = [k for k in CHECKS if checks[k] == "failed"]
+        failed = ["complete_evidence"] + ([] if self.deps.noise_measured else ["noise_not_measured"])
         reason = f"Reverted on {CHECKS['complete_evidence']}: {why}. The candidate was not tested."
         if not self.deps.noise_measured:
             reason += f" Also {CHECKS['noise_not_measured']}: {NOISE_NOTE}."
-        edit_id = result.edit.id if result.edit is not None else f"edit-r{result.round:02d}"
-        outcome = GateOutcome(
-            id=f"gate-r{result.round:02d}", written_by="gatekeeper", created_at=now(), parent_ids=[edit_id],
-            round=result.round, edit_id=edit_id, decision="reverted", before=NOT_MEASURED, after=NOT_MEASURED,
-            safety_passed=False, policy_in_force=_version(str(result.base_policy_path)), reason=reason)
-        report = GateReport(outcome=outcome, failed=failed, would_keep=False, checks=checks)
+        edit_id = str(getattr(result.edit, "id", None) or f"edit-r{result.round:02d}")
+        report = _bare_revert(result.round, edit_id, str(result.base_policy_path), failed, reason)
+        if self.deps.noise_measured:
+            report.checks["noise_not_measured"] = "passed"
         try:
             _save_report(self.deps, result.round, report)
         except Exception:  # noqa: BLE001
@@ -528,7 +608,10 @@ class _Gate:
 
 def make_gate(deps: GateDeps, *, validation_scenario_ids: list[str], noise: float,
               token_cap: int = TOKEN_CAP, safety_case_set: str = "safety-v1") -> Callable[[RoundResult], GateOutcome]:
-    """The gate for `RoundDeps.gate`. It leaves its scores and safety results on the RoundResult."""
+    """The gate for `RoundDeps.gate`. It leaves its scores and safety results on the RoundResult.
+
+    `safety_case_set` is only recorded on the GateInput: the safety check passed in decides its cases.
+    """
     return _Gate(deps, validation_scenario_ids, noise, token_cap, safety_case_set)
 
 
