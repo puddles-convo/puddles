@@ -1468,3 +1468,267 @@ def test_unreadable_usage_numbers_are_never_shown_as_measurements(tmp_path, bad)
     assert any(word in cost.lower() for word in (
         "could not", "cannot", "invalid", "missing", "not finite", "nonfinite", "unreadable", "left out", "omitted",
     ))
+
+
+# Reason: every raw usage field must survive adversarial JSON values without inventing a measurement.
+@pytest.mark.parametrize("field", ["event", "kind", "agent", "round", "tokens_in", "tokens_out", "cost_usd"])
+@pytest.mark.parametrize("value", [None, True, {}, [CLIENT_LINE], {"said": HELPER_LINE},
+                                  CLIENT_LINE, HELPER_LINE, float("nan"), float("inf"), 10 ** 400],
+                         ids=["null", "bool", "object", "list", "nested", "user", "helper", "nan", "inf", "huge"])
+def test_usage_field_boundary_matrix(tmp_path, field, value):
+    archived_round(tmp_path)
+    line = {"event": "done", "round": 7, "kind": "model", "agent": "boundary-agent",
+            "tokens_in": 13, "tokens_out": 11, "cost_usd": 0.25}
+    line[field] = value
+    with (tmp_path / "log/usage.jsonl").open("a") as stream:
+        stream.write(json.dumps(line) + "\n")
+    before = snapshot(tmp_path)
+    report = build_report(tmp_path, 7)
+    assert CLIENT_LINE not in report and HELPER_LINE not in report
+    assert snapshot(tmp_path) == before
+    # A huge nonnegative token count is still an integer; a different integer round is simply ignored.
+    if field in {"tokens_in", "tokens_out"} and isinstance(value, int) and not isinstance(value, bool):
+        assert str(value) in section(report, "Cost")
+    else:
+        assert not any("boundary-agent" in row for row in table_rows(section(report, "Cost")))
+
+
+def _change_raw_log(root, path, value, *, copy=False):
+    rows = [json.loads(line) for line in DecisionLog(root).path.read_text().splitlines()]
+    target = next(row for row in rows if row["event"] == ("memory_copy" if copy else "round"))
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    write_jsonl(DecisionLog(root).path, rows)
+
+
+# Reason: an unreadable log may be refused, but its rejected input must never be echoed as a report value.
+def _report_or_safe_log_refusal(root, capsys, *, allow_log_refusal=True):
+    from puddles.round_view import ReportError
+
+    try:
+        return build_report(root, 7)
+    except ReportError:
+        # Reason: a damaged record or valid exempt string must not be mistaken for an unreadable log.
+        if not allow_log_refusal:
+            raise
+        assert show_round.main(["--root", str(root), "--round", "7"]) == 2
+        output = capsys.readouterr()
+        assert CLIENT_LINE not in output.err and HELPER_LINE not in output.err
+        assert len(output.err.strip().splitlines()) == 1
+        return None
+
+
+# Reason: ID/version/agent fields are not the contract's exempt reason, pattern, rule-text or URL fields.
+@pytest.mark.parametrize("field", ["conversation_id", "failure_id", "judge_version", "reader", "writer",
+                                  "copy_id", "policy_version", "rule_id", "safety_id", "ref_id", "ref_path",
+                                  "policy_base", "policy_new", "edit_policy_path", "case_file"])
+@pytest.mark.parametrize("value", [None, True, {}, [CLIENT_LINE], {"said": HELPER_LINE},
+                                  CLIENT_LINE, HELPER_LINE, float("nan"), float("inf"), 10 ** 400],
+                         ids=["null", "bool", "object", "list", "nested", "user", "helper", "nan", "inf", "huge"])
+def test_identifier_boundary_matrix(tmp_path, capsys, field, value):
+    # Reason: case_file is rendered on the no-failed-cases branch, including a kept round.
+    event, _, _, _ = archived_round(tmp_path, decision="kept" if field == "case_file" else "reverted")
+    if field in {"conversation_id", "judge_version"}:
+        path = tmp_path / ("conversations/round-07-train.jsonl" if field == "conversation_id"
+                           else "scores/round-07-train.jsonl")
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[0]["id" if field == "conversation_id" else field] = value
+        write_jsonl(path, rows)
+    elif field == "failure_id":
+        write_jsonl(tmp_path / "conversations/round-07-train.failures.jsonl",
+                    [{"scenario_id": value, "reason": "offline failure"}])
+    elif field == "reader":
+        write_jsonl(tmp_path / "log/memory_reads.jsonl",
+                    [{"reader": value, "record_ids": [event.records["pattern"].id]}])
+    elif field in {"writer", "edit_policy_path"}:
+        kind = "pattern" if field == "writer" else "edit"
+        ref = event.records[kind]
+        path = tmp_path / ref.path
+        data = json.loads(path.read_text())
+        data["written_by" if field == "writer" else "policy_path"] = value
+        write_json(path, data)
+        _change_raw_log(tmp_path, ["records", kind, "sha256"], sha256_text(path.read_text()))
+    else:
+        paths = {"copy_id": ["record_id"], "policy_version": ["policy", "in_force"],
+                 "rule_id": ["edit", "rule_id"], "safety_id": ["safety", "failed_case_ids"],
+                 "ref_id": ["records", "pattern", "id"], "ref_path": ["records", "pattern", "path"],
+                 "policy_base": ["policy", "base"], "policy_new": ["policy", "new"],
+                 "case_file": ["safety", "case_file"]}
+        _change_raw_log(tmp_path, paths[field], [value] if field == "safety_id" else value,
+                        copy=field == "copy_id")
+    before = snapshot(tmp_path)
+    report = _report_or_safe_log_refusal(tmp_path, capsys, allow_log_refusal=field not in {
+        "conversation_id", "failure_id", "judge_version", "reader", "writer", "edit_policy_path",
+    })
+    if report is not None:
+        assert CLIENT_LINE not in report and HELPER_LINE not in report
+        for node in ("judge", "finish"):
+            summary = node_summary(node, {"round": 7}, {}, tmp_path)
+            assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
+    assert snapshot(tmp_path) == before
+
+
+# Reason: permitted free-text strings must remain verbatim; containers and numbers are not text.
+@pytest.mark.parametrize("field", ["reason", "pattern", "rule", "url"])
+@pytest.mark.parametrize("value", [CLIENT_LINE, HELPER_LINE, {}, [CLIENT_LINE], {"said": HELPER_LINE},
+                                  float("nan"), float("inf"), 10 ** 400, True],
+                         ids=["user", "helper", "object", "list", "nested", "nan", "inf", "huge", "bool"])
+def test_permitted_free_text_boundary_matrix(tmp_path, capsys, field, value):
+    event, _, _, _ = archived_round(tmp_path)
+    if field == "reason":
+        _change_raw_log(tmp_path, ["reason"], value)
+    elif field == "rule":
+        _change_raw_log(tmp_path, ["edit", "rule_text"], value)
+    else:
+        kind = "pattern" if field == "pattern" else "research"
+        ref = event.records[kind]
+        path = tmp_path / ref.path
+        data = json.loads(path.read_text())
+        if field == "pattern":
+            data["name"] = value
+            _change_raw_log(tmp_path, ["pattern", "name"], value)
+        else:
+            data["sources"][0]["url"] = value
+        write_json(path, data)
+        _change_raw_log(tmp_path, ["records", kind, "sha256"], sha256_text(path.read_text()))
+    report = _report_or_safe_log_refusal(tmp_path, capsys,
+                                       allow_log_refusal=not isinstance(value, str) and field != "url")
+    if report is not None:
+        if isinstance(value, str):
+            # URL is summarized only in the researcher's span, so inspect the loaded record there.
+            if field == "url":
+                from puddles.records import load_record
+                ref = DecisionLog(tmp_path).rounds()[0].records["research"]
+                result = RoundResult(round=7, outcome="candidate", base_policy_path=tmp_path / "policies/policy-v1.md")
+                result.research = load_record(ref, ResearchNote, tmp_path)
+                assert value in node_summary("researcher", {"round": 7, "result": result}, {}, tmp_path)["sources"]
+            else:
+                assert value in report
+        else:
+            assert CLIENT_LINE not in report and HELPER_LINE not in report
+
+
+# Reason: booleans and numeric strings must not become measured quality by Pydantic coercion.
+@pytest.mark.parametrize("field", ["quality_before", "quality_after", "noise"])
+@pytest.mark.parametrize("value", [True, "4.5", CLIENT_LINE, HELPER_LINE, {}, [CLIENT_LINE],
+                                  {"said": HELPER_LINE}, float("nan"), float("inf"), 10 ** 400],
+                         ids=["bool", "numeric-string", "user", "helper", "object", "list", "nested", "nan", "inf", "huge"])
+def test_logged_quality_boundary_matrix(tmp_path, capsys, field, value):
+    archived_round(tmp_path)
+    paths = {"quality_before": ["scores", "before", "quality"],
+             "quality_after": ["scores", "after", "quality"], "noise": ["scores", "noise"]}
+    _change_raw_log(tmp_path, paths[field], value)
+    report = _report_or_safe_log_refusal(tmp_path, capsys)
+    if report is not None:
+        gate = section(report, "Gate")
+        label = {"quality_before": "Quality before", "quality_after": "Quality after", "noise": "Noise"}[field]
+        assert f"{label}: unreadable" in gate or f"{label}: not measured" in gate
+        assert CLIENT_LINE not in report and HELPER_LINE not in report
+
+
+# Reason: the enum boundary must reject non-status JSON values, including non-finite and huge numbers.
+@pytest.mark.parametrize("field", ["round", "decision", "checks", "check_name", "status", "failed"])
+@pytest.mark.parametrize("value", [True, CLIENT_LINE, HELPER_LINE, {}, [CLIENT_LINE], {"said": HELPER_LINE},
+                                  float("nan"), float("inf"), 10 ** 400],
+                         ids=["bool", "user", "helper", "object", "list", "nested", "nan", "inf", "huge"])
+def test_gate_report_boundary_matrix(tmp_path, field, value):
+    archived_round(tmp_path)
+    data = {"round": 7, "decision": "reverted", "checks": {"safety_cases": "failed"}}
+    if field == "status":
+        data["checks"]["safety_cases"] = value
+    elif field == "check_name":
+        data["checks"] = {json.dumps(value): "failed"}
+    else:
+        data[field] = value
+    write_json(tmp_path / "scores/round-07-gate.json", data)
+    report = build_report(tmp_path, 7)
+    assert CLIENT_LINE not in report and HELPER_LINE not in report
+    summary = node_summary("gate", {"round": 7}, {"gate": None}, tmp_path)
+    assert CLIENT_LINE not in json.dumps(summary) and HELPER_LINE not in json.dumps(summary)
+
+
+# Reason: malformed MLflow metadata and attachment exceptions must not echo rejected conversation text.
+@pytest.mark.parametrize("field", ["experiment_id", "root", "run_id"])
+@pytest.mark.parametrize("value", [CLIENT_LINE, {}, [HELPER_LINE], {"said": CLIENT_LINE},
+                                  float("nan"), float("inf"), 10 ** 400],
+                         ids=["user", "object", "list", "nested", "nan", "inf", "huge"])
+def test_mlflow_metadata_boundary_matrix(tmp_path, monkeypatch, capsys, field, value):
+    from types import SimpleNamespace
+
+    root = tmp_path / "archive"
+    archived_round(root)
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("puddles")
+    run = client.create_run(experiment.experiment_id, tags={"mlflow.runName": "round-07", "root": str(root.resolve())})
+    client.set_terminated(run.info.run_id)
+    if field == "experiment_id":
+        monkeypatch.setattr(client, "get_experiment_by_name", lambda name: SimpleNamespace(experiment_id=value))
+    else:
+        candidate = SimpleNamespace(data=SimpleNamespace(tags={"root": value if field == "root" else str(root.resolve())}),
+                                    info=SimpleNamespace(run_id=value if field == "run_id" else run.info.run_id))
+        monkeypatch.setattr(client, "search_runs", lambda *args, **kwargs: [candidate])
+    monkeypatch.setattr("mlflow.tracking.MlflowClient", lambda **kwargs: client)
+    assert show_round.main(["--root", str(root), "--round", "7"]) == 0
+    output = capsys.readouterr()
+    assert CLIENT_LINE not in output.out + output.err and HELPER_LINE not in output.out + output.err
+    assert report_path(root, 7).exists()
+
+
+# Reason: individually readable integer token counts must not make formatting their sum crash a report.
+def test_large_token_totals_do_not_crash_report_or_cli(tmp_path, capsys):
+    archived_round(tmp_path)
+    with (tmp_path / "log/usage.jsonl").open("a") as stream:
+        for _ in range(2):
+            stream.write(json.dumps({"event": "done", "round": 7, "kind": "model", "agent": "huge-token-agent",
+                                     "tokens_in": 10 ** 4300 - 1, "tokens_out": 1, "cost_usd": 0.25}) + "\n")
+    report = build_report(tmp_path, 7)
+    assert report.startswith("# Round 7: reverted")
+    assert show_round.main(["--root", str(tmp_path), "--round", "7"]) == 0
+    assert report in capsys.readouterr().out
+
+
+# Reason: scores and counts must retain their JSON number type instead of accepting Boolean/text coercion.
+@pytest.mark.parametrize("field", ["empathy", "relevance", "seen_in", "out_of", "cases", "attempt"])
+@pytest.mark.parametrize("value", [True, "4", CLIENT_LINE, HELPER_LINE, {}, [CLIENT_LINE],
+                                  {"said": HELPER_LINE}, float("nan"), float("inf"), 10 ** 400],
+                         ids=["bool", "numeric-string", "user", "helper", "object", "list", "nested", "nan", "inf", "huge"])
+def test_score_and_count_boundary_matrix(tmp_path, capsys, field, value):
+    # Reason: the no-failed-cases branch is the one that renders the safety case count.
+    event, _, _, _ = archived_round(tmp_path, decision="kept" if field == "cases" else "reverted")
+    if field in {"empathy", "relevance"}:
+        path = tmp_path / "scores/round-07-train.jsonl"
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[0][field] = value
+        write_jsonl(path, rows)
+    elif field in {"seen_in", "out_of"}:
+        path = tmp_path / event.records["pattern"].path
+        data = json.loads(path.read_text())
+        data[field] = value
+        write_json(path, data)
+        _change_raw_log(tmp_path, ["records", "pattern", "sha256"], sha256_text(path.read_text()))
+        _change_raw_log(tmp_path, ["pattern", field], value)
+    else:
+        _change_raw_log(tmp_path, ["attempt"] if field == "attempt" else ["safety", "cases"], value,
+                        copy=field == "attempt")
+    report = _report_or_safe_log_refusal(tmp_path, capsys,
+                                       allow_log_refusal=field not in {"empathy", "relevance"})
+    if report is not None:
+        assert CLIENT_LINE not in report and HELPER_LINE not in report
+        # Unbounded nonnegative integer counts are valid; the bounded 1..5 judge scores are not.
+        if field in {"empathy", "relevance"} or not (isinstance(value, int) and not isinstance(value, bool)):
+            assert any(word in report.lower() for word in ("unreadable", "could not", "cannot", "not valid", "left out"))
+
+
+# Reason: the view's new root-tag write must not turn a completed round into an MLflow exception.
+def test_round_survives_root_tag_logging_failure(training_round, monkeypatch):
+    original = mlflow.set_tag
+
+    def fail_root(key, value, *args, **kwargs):
+        if key == "root":
+            raise RuntimeError("offline root-tag write failed")
+        return original(key, value, *args, **kwargs)
+
+    monkeypatch.setattr(mlflow, "set_tag", fail_root)
+    _, state, _ = training_round()
+    assert state["event"].outcome == "reverted"
