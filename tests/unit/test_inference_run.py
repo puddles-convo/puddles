@@ -23,3 +23,19 @@ def test_missing_policy_is_an_error(tmp_path):
     messages.write_text("hi\n", encoding="utf-8")
     assert inference_run.main(["--fake", "--policy", str(tmp_path / "none.md"),
                                "--messages", str(messages), "--out", str(tmp_path / "t.jsonl")]) == 2
+
+
+def test_deadline_raises_the_http_timeout(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setenv("HELPER_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("HELPER_MODEL", "m")
+    monkeypatch.setattr(inference_run, "run_turn", lambda session, text: seen.append(
+        (session.helper_client.timeout, session.checker_client.timeout)) or (_ for _ in ()).throw(SystemExit))
+    messages = tmp_path / "m.txt"
+    messages.write_text("hi\n", encoding="utf-8")
+    try:
+        inference_run.main(["--policy", "policies/policy-v2.md", "--messages", str(messages),
+                            "--out", str(tmp_path / "t.jsonl"), "--deadline", "300"])
+    except SystemExit:
+        pass
+    assert seen == [(300.0, 300.0)]

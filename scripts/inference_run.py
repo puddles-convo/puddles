@@ -70,7 +70,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             from loop.llm import client_from_env
 
-            helper_client, checker_client = client_from_env("HELPER"), client_from_env("HELPER")
+            clients = client_from_env("HELPER"), client_from_env("HELPER")
+            for client in clients:  # a slow model's requests must outlast the raised deadline
+                client.timeout = max(client.timeout, args.deadline or 0.0)
+            helper_client, checker_client = clients
         messages = [m.strip() for m in Path(args.messages).read_text(encoding="utf-8").splitlines() if m.strip()]
         notes = ([n.strip() for n in Path(args.notes).read_text(encoding="utf-8").splitlines() if n.strip()]
                  if args.notes else [])
