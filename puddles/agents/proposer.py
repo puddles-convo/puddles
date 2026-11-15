@@ -95,7 +95,7 @@ def apply(out: ProposerOutput, policy_text: str, log: DecisionLog, pattern: Fail
     new_version = candidate_version(policy.version)
     candidate, rule_id = apply_edit(policy, out.action, out.rule_id, out.rule_text, new_version,
                                     used_ids=log.used_rule_ids())
-    rel = f"policies/{new_version}.md"
+    rel = f"policies/{new_version}-r{round_:02d}.md"  # one file per round, so logged hashes stay valid
     (root / "policies").mkdir(parents=True, exist_ok=True)
     (root / rel).write_text(render_policy(candidate))
     edit = PolicyEdit(id=f"edit-r{round_:02d}", written_by=IDENTITY, created_at=now(),
