@@ -6,8 +6,9 @@
 
 --fake uses a scripted helper, checker and note-taker, and an in-process past.dev: no keys, no network.
 Without it both clients come from HELPER_* (the checker runs on the helper's endpoint), the notes live
-on past.dev (PAST_API_KEY) and the note-taker is the OpenAI model (OPENAI_API_KEY). With --training no
-nothing typed is kept, except the notes under notes/<user_id>/ when the person agreed to be remembered.
+on past.dev (PAST_API_KEY) and the note-taker is the OpenAI model (OPENAI_API_KEY, PUDDLES_AGENT_MODEL),
+reached through the OpenAI SDK with --training yes and over plain HTTP with --training no. With --training
+no nothing typed is kept, except the notes under notes/<user_id>/ when the person agreed to be remembered.
 
 The fake checker answers `none` unless the message holds one of these markers, so a session can be
 scripted from a file: [checker:concern], [checker:crisis-self], [checker:crisis-danger],
@@ -32,7 +33,7 @@ from puddles import tracing
 from puddles.graph import check_policy_file
 from puddles.inference import crisis
 from puddles.inference.crisis import CrisisPath
-from puddles.inference.live import finish_session, start_notes, tracing_off
+from puddles.inference.live import PlainLLM, finish_session, start_notes, tracing_off
 from puddles.inference.note_store import FakeUserMemory, NoteStore, PastUserMemory, UserMemory
 from puddles.inference.notes import NotesResult
 from puddles.inference.session_log import session_path
@@ -170,8 +171,10 @@ def main(argv: Sequence[str] | None = None, stdin: TextIO | None = None, stdout:
             missing = [name for name in NOTES_KEYS if not os.environ.get(name)]
             if missing:
                 raise ConfigError(f"{' and '.join(missing)} not set; the notes need them")
-            # Never wrapped: it reports its own requests, and MLflow traces them only after tracing.setup.
-            memory, note_llm = PastUserMemory(), OpenAILLM()
+            memory = PastUserMemory()
+            # With consent, OpenAILLM, never wrapped: it reports its own requests and MLflow traces them after
+            # tracing.setup. Without, never the OpenAI SDK: another session can turn autologging on at any time.
+            note_llm = OpenAILLM() if training else PlainLLM.from_env()
         store = NoteStore(memory, Path(args.notes_root) if args.notes_root is not None else root)
     except (ConfigError, PolicyError, OSError, UnicodeDecodeError, ValueError, PastError, AgentFailed) as exc:
         detail = str(exc)

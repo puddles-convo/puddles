@@ -11,13 +11,21 @@ import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
-from puddles.inference.note_store import NoteStore, check_user_id, expires_on
+from pydantic import BaseModel
+
+from loop.errors import ConfigError
+from loop.llm import JSONChatClient, OpenAICompatClient
+from puddles.config import load_config, output_limit
+from puddles.inference.note_store import NOTE_TAKER, NoteStore, check_user_id, expires_on
 from puddles.inference.notes import NotesResult, take_notes
 from puddles.inference.turn import Session, end_session
-from puddles.llm import LLM
+from puddles.llm import LLM, OpenAILLM
 from schemas import ConversationRecord
+
+T = TypeVar("T", bound=BaseModel)
+OPENAI_DEFAULT_URL = "https://api.openai.com/v1"  # what the OpenAI SDK uses when OPENAI_BASE_URL is not set
 
 
 def start_notes(store: NoteStore, user_id: str, *, today: date | None = None) -> list[str]:
@@ -36,6 +44,47 @@ def _on_file(store: NoteStore, user_id: str, today: date) -> list[str]:
     return [stored[n.note_id].fact for n in store.index(user_id).notes
             if n.note_id in stored and n.note_id not in pending
             and ((last := expires_on(n)) is None or today <= last)]
+
+
+class PlainLLM:
+    """The note-taker's model for a session without consent for training: never through the OpenAI SDK.
+
+    MLflow's autologging instruments the SDK, and one session with consent can turn it on for the whole
+    process while this one is running. This sends the request with `loop.llm`'s own HTTP client, which no
+    autologging watches, and validates the answer with its JSON-answer call. No span, no usage line.
+    """
+
+    def __init__(self, client: JSONChatClient, *, max_tokens: int, temperature: float = 0.0) -> None:
+        self.client = client
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+    @classmethod
+    def from_env(cls) -> PlainLLM:
+        """From what `OpenAILLM` reads: OPENAI_API_KEY, OPENAI_BASE_URL if set, PUDDLES_AGENT_MODEL,
+        PUDDLES_AGENT_TEMPERATURE if set, and the output limit in the run's config file."""
+        key = os.environ.get("OPENAI_API_KEY")
+        model = os.environ.get("PUDDLES_AGENT_MODEL")
+        missing = [name for name, value in (("OPENAI_API_KEY", key), ("PUDDLES_AGENT_MODEL", model)) if not value]
+        if missing:
+            raise ConfigError(" and ".join(missing) + " not set; the note-taker needs them")
+        raw = os.environ.get("PUDDLES_AGENT_TEMPERATURE")
+        try:
+            temperature = float(raw) if raw else 0.0
+        except ValueError as exc:
+            raise ConfigError("PUDDLES_AGENT_TEMPERATURE is not a number") from exc
+        base_url = os.environ.get("OPENAI_BASE_URL") or OPENAI_DEFAULT_URL
+        client = OpenAICompatClient(base_url, model, api_key=key)  # type: ignore[arg-type]  # checked above
+        return cls(client, max_tokens=output_limit(load_config().output_limits, NOTE_TAKER), temperature=temperature)
+
+    def structured(self, system: str, user: str, schema: type[T]) -> T:
+        """A reply that fails validation is retried once by the client, then raises `loop.errors.SchemaError`."""
+        return self.client.complete_json(system, [{"role": "user", "content": user}], schema,
+                                         max_tokens=self.max_tokens, temperature=self.temperature)
+
+    def structured_with_search(self, system: str, user: str, schema: type[T], search: Callable[[str], list[dict]],
+                               max_searches: int) -> T:
+        raise NotImplementedError("the note-taker does not search")
 
 
 def tracing_off() -> None:
@@ -62,10 +111,13 @@ def finish_session(session: Session, store: NoteStore, llm: LLM, *, today: date 
     if session.user_id is None:
         raise ValueError("the session has no user_id, so its notes cannot be found")
     if not session.consent_for_training:
-        tracing_off()
+        tracing_off()  # a second guard only: another session can turn it back on at any moment
         tracing = sys.modules.get("puddles.tracing")  # not imported here, so that this module does not import MLflow
         if tracing is not None and isinstance(llm, tracing.TracedLLM):
             raise ValueError("training use is off, so the note-taker's model must not be traced")
+        if isinstance(llm, OpenAILLM):
+            raise ValueError("training use is off, so the note-taker must not go through the OpenAI SDK; "
+                             "use PlainLLM")
     user_id = session.user_id
     turns = list(session.turns)  # end_session clears them
     notes = NotesResult()

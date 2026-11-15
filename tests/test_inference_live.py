@@ -332,35 +332,172 @@ def test_missing_notes_keys_exit_2_before_any_message(tmp_path, capsys, monkeypa
     assert stdin.read() == "hello\n" and not (tmp_path / "r").exists()
 
 
-def test_real_mode_without_training_uses_an_unwrapped_model_and_no_setup(tmp_path, capsys, monkeypatch):
+def test_finish_session_refuses_openai_llm_without_training_consent(tmp_path):
+    from puddles.llm import OpenAILLM
+
+    llm = OpenAILLM.__new__(OpenAILLM)  # no SDK client is built; the type alone is refused
+    session = make_session(user_id=PERSON, remember_me=True, consent_for_training=False)
+    with pytest.raises(ValueError):
+        finish_session(session, NoteStore(FakeUserMemory(), tmp_path), llm)
+    assert len(session.turns) == 2 and not (tmp_path / "notes").exists()
+
+
+# ---------- real mode: PlainLLM over loop.llm's HTTP, OpenAILLM only with consent ----------
+
+def completion(content: str) -> bytes:
+    return json.dumps({"id": "c1", "object": "chat.completion", "created": 0, "model": "stand-in",
+                       "choices": [{"index": 0, "finish_reason": "stop",
+                                    "message": {"role": "assistant", "content": content}}],
+                       "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
+
+
+EMPTY_ANSWER = json.dumps({"forget_everything": False, "actions": []})
+
+
+class Opener:
+    """`urllib.request.urlopen` stubbed, as tests/unit/test_llm.py does: what `loop.llm` really sends, no socket.
+
+    A request holding `pause_on` waits at the opener, before anything is sent, until `release` is set.
+    `fail` answers HTTP 400 with an error whose text repeats the person's words.
+    """
+
+    def __init__(self, replies: list[str] | None = None, *, fail: bool = False, pause_on: str | None = None) -> None:
+        import threading
+
+        self.replies = list(replies or [])
+        self.fail = fail
+        self.pause_on = pause_on
+        self.bodies: list[str] = []
+        self.reached, self.release = threading.Event(), threading.Event()
+        if pause_on is None:
+            self.release.set()
+
+    def __call__(self, request, timeout=None):
+        import urllib.error
+
+        body = request.data.decode()
+        self.bodies.append(body)
+        if self.pause_on is not None and self.pause_on in body:
+            self.reached.set()
+            assert self.release.wait(20)
+        if self.fail:
+            words = PHRASE if PHRASE in body else "?"
+            error = json.dumps({"error": {"message": f"cannot use the words {words}"}}).encode()
+            raise urllib.error.HTTPError(request.full_url, 400, f"Bad Request: {words}", {}, io.BytesIO(error))
+        content = self.replies.pop(0) if self.replies else EMPTY_ANSWER
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+
+        return Response(completion(content))
+
+
+def stand_in_openai():
+    """`OpenAILLM` itself, its SDK client on an `httpx.MockTransport`: no network, every request recorded."""
+    import httpx
+    from openai import OpenAI
+
+    from puddles.llm import OpenAILLM
+
+    bodies: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content.decode())
+        return httpx.Response(200, content=completion(EMPTY_ANSWER), headers={"content-type": "application/json"})
+
+    class StandIn(OpenAILLM):
+        def __init__(self) -> None:
+            super().__init__(model="stand-in", output_limits={"default": 100})
+            self.client = OpenAI(api_key="placeholder", base_url="http://stand-in.invalid/v1", max_retries=0,
+                                 http_client=httpx.Client(transport=httpx.MockTransport(answer)))
+
+    return StandIn, bodies
+
+
+def real_mode(monkeypatch, opener: Opener, openai_llm) -> None:
+    """Real mode with every outside service stood in for: helper endpoint, past.dev, both note-taker routes."""
+    import urllib.request
+
     import loop.llm
     import scripts.chat
 
-    seen: list[object] = []
     path = crisis.load_path()
-
-    def answer(system, messages):
-        return "none | - | ok" if system == path.system else "A reply."
-
-    class Model(ScriptedLLM):
-        def structured(self, system, user, schema):
-            seen.append(self)
-            return schema()
-
-    monkeypatch.setattr(loop.llm, "client_from_env", lambda prefix: FakeClient(answer))
+    monkeypatch.setattr(loop.llm, "client_from_env",
+                        lambda prefix: FakeClient(lambda s, m: "none | - | ok" if s == path.system else "A reply."))
     monkeypatch.setattr(scripts.chat, "PastUserMemory", FakeUserMemory)
-    monkeypatch.setattr(scripts.chat, "OpenAILLM", Model)
-    monkeypatch.setattr(tracing, "setup", lambda *a, **k: pytest.fail("setup without training consent"))
+    monkeypatch.setattr(scripts.chat, "OpenAILLM", openai_llm)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
     for name in ("PAST_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.setenv(name, "placeholder")
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "stand-in")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+
+def real_session(tmp_path: Path, text: str, training: str, user: str, sid: str, uri: str) -> tuple[int, str]:
+    import scripts.chat
+
     out = io.StringIO()
-    assert scripts.chat.main(["--policy", POLICY, "--root", str(tmp_path / "r")],
-                             stdin=io.StringIO("hello\n"), stdout=out) == 0
-    assert len(seen) == 1 and type(seen[0]) is Model
-    assert out.getvalue().splitlines()[-1] == "kept: nothing" and not (tmp_path / "r").exists()
+    code = scripts.chat.main(["--policy", POLICY, "--root", str(tmp_path / "root"), "--user-id", user,
+                              "--session-id", sid, "--training", training, "--mlflow", uri],
+                             stdin=io.StringIO(text), stdout=out)
+    return code, out.getvalue()
 
 
-# ---------- 6. training on, then off, in the same process, with the real OpenAI adapter ----------
+def test_real_mode_without_training_uses_plain_http_and_no_setup(tmp_path, monkeypatch):
+    class NoSDK:
+        def __init__(self, *a, **k):
+            pytest.fail("the OpenAI SDK was used without training consent")
+
+    opener = Opener()
+    real_mode(monkeypatch, opener, NoSDK)
+    monkeypatch.setattr(tracing, "setup", lambda *a, **k: pytest.fail("setup without training consent"))
+    code, out = real_session(tmp_path, f"the {PHRASE}\n", "no", PERSON, "s1", f"sqlite:///{tmp_path}/x.db")
+    assert code == 0 and out.splitlines()[-1] == "kept: nothing" and not (tmp_path / "root").exists()
+    [body] = opener.bodies                         # one request, the note-taker's, through loop.llm
+    assert PHRASE in body and json.loads(body)["model"] == "stand-in"
+
+
+def test_plain_llm_from_env_needs_key_and_model(monkeypatch):
+    from loop.errors import ConfigError
+
+    from puddles.inference.live import PlainLLM
+
+    monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
+    monkeypatch.delenv("PUDDLES_AGENT_MODEL", raising=False)
+    with pytest.raises(ConfigError):
+        PlainLLM.from_env()
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "stand-in")
+    monkeypatch.delenv("OPENAI_API_KEY")
+    with pytest.raises(ConfigError):
+        PlainLLM.from_env()
+
+
+def test_plain_llm_validates_the_answer_and_retries_once(monkeypatch):
+    import urllib.request
+
+    from loop.errors import SchemaError
+
+    from puddles.inference.live import PlainLLM
+
+    monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "stand-in")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://stand-in.invalid/v1")
+    opener = Opener(["not an object", EMPTY_ANSWER])
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    llm = PlainLLM.from_env()
+    assert llm.structured("system", "user", NoteTakerOutput) == NoteTakerOutput()
+    assert len(opener.bodies) == 2
+    assert json.loads(opener.bodies[0])["response_format"]["type"] == "json_schema"
+    opener.replies = ["not an object", "still not"]
+    with pytest.raises(SchemaError):
+        llm.structured("system", "user", NoteTakerOutput)
+
+
+# ---------- 6. training on, then off, in the same process ----------
 
 def test_tracing_off_does_not_import_mlflow():
     import subprocess
@@ -374,81 +511,95 @@ def test_tracing_off_does_not_import_mlflow():
 EARLIER = "amber-lighthouse-kettle"          # typed in the consenting session, so traced by consent
 
 
-def stand_in_openai(fail: bool):
-    """`OpenAILLM` itself, its SDK client on an `httpx.MockTransport`: no network, every request recorded."""
-    import httpx
-    from openai import OpenAI
+def traced_with(words: str) -> list[str]:
+    import mlflow
 
-    from puddles.llm import OpenAILLM
-
-    bodies: list[str] = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        body = request.content.decode()
-        bodies.append(body)
-        if fail and EARLIER not in body:  # the consenting session's request answers; the later one fails
-            words = PHRASE if PHRASE in body else "?"
-            return httpx.Response(400, json={"error": {"message": f"cannot use the words {words}", "type": "x"}})
-        content = json.dumps({"forget_everything": False, "actions": []})
-        return httpx.Response(200, json={
-            "id": "c1", "object": "chat.completion", "created": 0, "model": "stand-in",
-            "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": content}}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
-
-    class StandIn(OpenAILLM):
-        def __init__(self) -> None:
-            super().__init__(model="stand-in", output_limits={"default": 100})
-            self.client = OpenAI(api_key="placeholder", base_url="http://stand-in.invalid/v1", max_retries=0,
-                                 http_client=httpx.Client(transport=httpx.MockTransport(answer)))
-
-    return StandIn, bodies
+    mlflow.flush_trace_async_logging()
+    return [s.name for t in mlflow.search_traces(return_type="list") for s in t.data.spans
+            if words in json.dumps(s.inputs, default=str) + json.dumps(s.outputs, default=str)]
 
 
 @pytest.mark.parametrize("fail", [False, True], ids=["answering", "failing"])
 def test_6_training_on_then_off_in_one_process_leaves_no_trace(fail, tmp_path, capsys, caplog, monkeypatch):
-    import loop.llm
     import mlflow
-    import scripts.chat
 
     monkeypatch.chdir(tmp_path)
     uri = f"sqlite:///{tmp_path}/mlflow.db"
-    path = crisis.load_path()
-    model, bodies = stand_in_openai(fail)
-    monkeypatch.setattr(loop.llm, "client_from_env",
-                        lambda prefix: FakeClient(lambda s, m: "none | - | ok" if s == path.system else "A reply."))
-    monkeypatch.setattr(scripts.chat, "PastUserMemory", FakeUserMemory)
-    monkeypatch.setattr(scripts.chat, "OpenAILLM", model)
-    for name in ("PAST_API_KEY", "OPENAI_API_KEY"):
-        monkeypatch.setenv(name, "placeholder")
-
-    def session(text: str, training: str, sid: str) -> tuple[int, str, str]:
-        capsys.readouterr()
-        out = io.StringIO()
-        code = scripts.chat.main(["--policy", POLICY, "--root", str(tmp_path / "root"), "--user-id", PERSON,
-                                  "--session-id", sid, "--training", training, "--mlflow", uri],
-                                 stdin=io.StringIO(text), stdout=out)
-        return code, out.getvalue(), capsys.readouterr().err
-
+    model, sdk_bodies = stand_in_openai()
+    opener = Opener(fail=fail)
+    real_mode(monkeypatch, opener, model)
     try:
-        assert session(f"before that, the {EARLIER}\n", "yes", "s-on")[0] == 0
-        mlflow.flush_trace_async_logging()
-        before = mlflow.search_traces(return_type="list")
-        traced = [s.name for t in before for s in t.data.spans if EARLIER in json.dumps(s.inputs, default=str)]
-        assert any("Completions" in name for name in traced)   # autologging traced the consenting note-taker
+        assert real_session(tmp_path, f"before that, the {EARLIER}\n", "yes", PERSON, "s-on", uri)[0] == 0
+        assert any("Completions" in name for name in traced_with(EARLIER))  # autologging traced the consenting one
         runs_before = runs()
+        capsys.readouterr()
         caplog.clear()
 
-        code, out, err = session(f"I keep thinking about the {PHRASE}\n", "no", "s-off")
-        mlflow.flush_trace_async_logging()
+        code, out = real_session(tmp_path, f"I keep thinking about the {PHRASE}\n", "no", PERSON, "s-off", uri)
+        err = capsys.readouterr().err
         assert code == 0 and out.splitlines()[-1] == "kept: nothing"
-        assert PHRASE in bodies[-1]                # the note-taker was asked, with the person's words
-        after = mlflow.search_traces(return_type="list")
-        assert sorted(t.info.trace_id for t in after) == sorted(t.info.trace_id for t in before)
+        assert PHRASE in opener.bodies[0] and all(PHRASE not in b for b in sdk_bodies)  # asked, never via the SDK
+        assert traced_with(PHRASE) == []
         assert runs() == runs_before
         assert holding(tmp_path, PHRASE) == []     # files, the sqlite store and ./mlruns
         assert PHRASE not in out + err + caplog.text
         assert ("notes: the notes step failed" in err) == fail
     finally:
+        mlflow.openai.autolog(disable=True)
+        mlflow.langchain.autolog(disable=True)
+
+
+@pytest.mark.parametrize("fail", [False, True], ids=["answering", "failing"])
+def test_6_overlap_a_consenting_session_cannot_trace_a_private_one_in_flight(fail, tmp_path, capsys, caplog,
+                                                                            monkeypatch):
+    """A (training off) waits just before its note-taker request; B (training on) runs to the end; A goes on."""
+    import threading
+
+    import mlflow
+
+    import puddles.inference.notes as notes
+
+    monkeypatch.chdir(tmp_path)
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    model, sdk_bodies = stand_in_openai()
+    opener = Opener(fail=fail)
+    real_mode(monkeypatch, opener, model)
+    reached, release = threading.Event(), threading.Event()
+    render = notes.render_user
+
+    def paused_render(inp):
+        """The note-taker's prompt is built just before its request, whichever route it takes: A waits here."""
+        if any(PHRASE in t.text for t in inp.turns):
+            reached.set()
+            assert release.wait(20)
+        return render(inp)
+
+    monkeypatch.setattr(notes, "render_user", paused_render)
+    result: dict[str, tuple[int, str]] = {}
+    person_a = threading.Thread(target=lambda: result.update(a=real_session(
+        tmp_path, f"I keep thinking about the {PHRASE}\n", "no", PERSON, "s-a", uri)))
+    try:
+        capsys.readouterr()
+        person_a.start()
+        assert reached.wait(20)             # A's note-taker is about to send
+        code_b, out_b = real_session(tmp_path, f"before that, the {EARLIER}\n", "yes", "person-b", "s-b", uri)
+        assert code_b == 0 and out_b.splitlines()[-1].startswith("kept: ")
+        assert any("Completions" in name for name in traced_with(EARLIER))  # autologging is on while A waits
+        runs_before = runs()
+        release.set()
+        person_a.join(20)
+        assert not person_a.is_alive()
+        code_a, out_a = result["a"]
+        err = capsys.readouterr().err
+        assert code_a == 0 and out_a.splitlines()[-1] == "kept: nothing"
+        assert traced_with(PHRASE) == []
+        assert runs() == runs_before
+        assert holding(tmp_path, PHRASE) == []     # files, the sqlite store, ./mlruns and trace artifacts
+        assert PHRASE not in out_a + out_b + err + caplog.text
+        assert ("notes: the notes step failed" in err) == fail
+        assert any(PHRASE in b for b in opener.bodies) and all(PHRASE not in b for b in sdk_bodies)
+    finally:
+        release.set()
+        person_a.join(20)
         mlflow.openai.autolog(disable=True)
         mlflow.langchain.autolog(disable=True)
