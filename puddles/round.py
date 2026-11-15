@@ -7,14 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
+import httpx
+
 from puddles.agents import critic, proposer, researcher
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM
 from puddles.memory import READS_PATH, Memory, PastError, entry_for, now
 from puddles.policy import parse_policy, render_policy
 from puddles.records import load_record, save_record, sha256_text
-import httpx
-
 from schemas import (
     FailurePattern,
     GateOutcome,
