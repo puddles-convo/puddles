@@ -155,12 +155,14 @@ class OpenAICompatClient:
     """
 
     def __init__(self, base_url: str, model: str, api_key: str | None = None,
-                 timeout: float = 60.0, extra_body: dict[str, Any] | None = None) -> None:
+                 timeout: float = 60.0, extra_body: dict[str, Any] | None = None,
+                 max_tokens_param: str = "max_tokens") -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.extra_body = dict(extra_body or {})
+        self.max_tokens_param = max_tokens_param  # the body field for the output limit
         self.last_usage: CallUsage | None = None
         self.supports_response_format = True
 
@@ -200,7 +202,7 @@ class OpenAICompatClient:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, *messages],
-            "max_tokens": max_tokens,
+            self.max_tokens_param: max_tokens,
             "temperature": temperature,
         }
         if seed is not None:
@@ -282,6 +284,8 @@ def client_from_env(prefix: str) -> OpenAICompatClient:
 
     {prefix}_EXTRA_BODY, also optional, is a JSON object merged into every request body. It is
     where a server-specific switch goes, such as the one that turns a model's thinking mode off.
+    {prefix}_MAX_TOKENS_PARAM, also optional, names the body field for the output limit:
+    `max_tokens` (the default) or `max_completion_tokens`.
     """
     values = {}
     for name in (f"{prefix}_URL", f"{prefix}_MODEL"):
@@ -298,5 +302,10 @@ def client_from_env(prefix: str) -> OpenAICompatClient:
             raise ConfigError(f"environment variable {extra_name} is not valid JSON") from exc
         if not isinstance(extra, dict):
             raise ConfigError(f"environment variable {extra_name} must be a JSON object")
+    param_name = f"{prefix}_MAX_TOKENS_PARAM"
+    param = os.environ.get(param_name) or "max_tokens"
+    if param not in ("max_tokens", "max_completion_tokens"):
+        raise ConfigError(f"environment variable {param_name} must be max_tokens or max_completion_tokens")
     return OpenAICompatClient(values[f"{prefix}_URL"], values[f"{prefix}_MODEL"],
-                              api_key=os.environ.get(f"{prefix}_API_KEY") or None, extra_body=extra)
+                              api_key=os.environ.get(f"{prefix}_API_KEY") or None, extra_body=extra,
+                              max_tokens_param=param)
