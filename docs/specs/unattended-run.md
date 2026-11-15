@@ -81,6 +81,10 @@ hash for that record. Record IDs are not taken from a result's free text. (Entri
 run in the same past.dev project carry the same IDs, `pattern-r01` and so on, and were being served
 as this run's records.)
 
+**2.6 A recall query fits the service's limit.** A recall query is cut to the memory service's limit
+of 1,000 characters before it is sent. (Found in the first real training round: the critic's query,
+built from a judge's note, was longer; the service answered 400 and the critic ran without memory.)
+
 ## 3. The judge and the agents (`puddles/eval/judge.py` single-model judge, `puddles/agents/`, `puddles/policy.py`, `puddles/llm.py`)
 
 **3.1 Strategy labels are normalised before they are checked.** In the single-model judge, a label is
