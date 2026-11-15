@@ -35,8 +35,11 @@ def render_user(inp: ResearcherInput) -> str:
             f"</failure_pattern>\n\n<earlier_queries>\n{bullet_lines(inp.earlier_queries)}\n</earlier_queries>")
 
 
-def check(out: ResearcherOutput, inp: ResearcherInput, returned_urls: set[str]) -> list[str]:
+def check(out: ResearcherOutput, inp: ResearcherInput, returned_urls: set[str], searched: set[str]) -> list[str]:
     problems = []
+    unrun = [q for q in out.queries if normalise(q) not in searched]
+    if unrun:
+        problems.append(f"these queries were not searched: {unrun}")
     earlier = {normalise(q) for q in inp.earlier_queries}
     if not 1 <= len(out.queries) <= MAX_SEARCHES:
         problems.append(f"run between 1 and {MAX_SEARCHES} searches")
@@ -56,17 +59,19 @@ def run(inp: ResearcherInput, llm: LLM, search: Search) -> tuple[ResearcherOutpu
     user = render_user(inp)
     log: list[dict] = []
     returned: set[str] = set()
+    searched: set[str] = set()
 
     def logged_search(query: str) -> list[dict]:
         results = search(query)
         log.append({"query": query, "results": results})
         returned.update(r["url"] for r in results)
+        searched.add(normalise(query))
         return results
 
     out = call_checked(
         lambda fb: llm.structured_with_search(SYSTEM, user + fb, ResearcherOutput, logged_search,
                                               MAX_SEARCHES),
-        lambda o: check(o, inp, returned), "researcher")
+        lambda o: check(o, inp, returned, searched), "researcher")
     return out, log
 
 
