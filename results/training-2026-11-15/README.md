@@ -20,15 +20,29 @@ Quality is the average of empathy and relevance, each scored 1 to 5. Each policy
 | Final policy over the control | +0.38 (+0.17 to +0.57) | +0.25 (+0.07 to +0.44) |
 | Control over the starting policy | +0.31 (+0.14 to +0.50) | +0.36 (+0.19 to +0.55) |
 
-Held-out check: 20 scenarios from the same split that the gatekeeper never used, one set per policy, loop judge only.
+Held-out check: 20 scenarios from the same split that the gatekeeper never used, one set per policy, both judges.
 
-| Policy | Quality | Comparison (95% interval) | |
-|---|---|---|---|
-| `policy-v1` | 3.38 | Final over starting | +0.53 (+0.20 to +0.88) |
-| Control | 3.55 | Final over control | +0.35 (+0.05 to +0.65) |
-| `policy-v4` | 3.90 | Control over starting | +0.18 (-0.17 to +0.55) |
+| Policy | Loop judge | Final judge |
+|---|---|---|
+| `policy-v1` | 3.38 | 3.20 |
+| Control | 3.55 | 3.45 |
+| `policy-v4` | 3.90 | 3.73 |
 
-Reproduce all three tables from the saved scores, with no model call:
+| Comparison, held-out (95% interval) | Loop judge | Final judge |
+|---|---|---|
+| Final policy over the starting policy | +0.53 (+0.20 to +0.88) | +0.53 (+0.15 to +0.90) |
+| Final policy over the control | +0.35 (+0.05 to +0.65) | +0.28 (-0.05 to +0.57) |
+| Control over the starting policy | +0.18 (-0.17 to +0.55) | +0.25 (-0.07 to +0.57) |
+
+All 40 scenarios together (the gatekeeper's 20 with two sets per policy, the held-out 20 with one):
+
+| Comparison, 40 scenarios (95% interval) | Loop judge | Final judge |
+|---|---|---|
+| Final policy over the starting policy | +0.61 (+0.42 to +0.79) | +0.57 (+0.36 to +0.78) |
+| Final policy over the control | +0.36 (+0.19 to +0.54) | +0.26 (+0.09 to +0.44) |
+| Control over the starting policy | +0.24 (+0.04 to +0.44) | +0.31 (+0.12 to +0.49) |
+
+Reproduce every table above from the saved scores, with no model call:
 
 ```
 python results/training-2026-11-15/measurements/tools/paired_stats.py
@@ -36,14 +50,13 @@ python results/training-2026-11-15/measurements/tools/paired_stats.py
 
 ## What the numbers do and do not show
 
-- The loop improved its starting policy by about 0.6 of a point under a judge it was not trained against, and by about 0.5 on scenarios it never saw.
-- The final policy is ahead of a helper with no conversation rules by 0.25 to 0.38. The interval stays above zero but its lower end is close to it.
-- The hand-written conversation rules scored below having none on the validation scenarios. On the held-out scenarios the difference is in the same direction and not distinguishable from zero.
+- The loop improved its starting policy by about 0.6 of a point under a judge it was not trained against, and by about 0.5 on scenarios it never saw, under both judges.
+- The final policy is ahead of a helper with no conversation rules by 0.25 to 0.38 in every comparison. The interval is above zero over all 40 scenarios and on the gatekeeper's 20, and just reaches zero on the held-out 20 under the final judge.
+- The hand-written conversation rules scored below having none. The difference is distinguishable from zero on the gatekeeper's scenarios and over all 40, and not on the held-out 20 alone.
 - The people in every conversation are a language model playing an ESConv scenario. Nobody real took part.
 - The grading guide was made stricter during the night and is not calibrated against human ratings.
 - The safety wording of the starting policy was rewritten by hand before the run so that it passes the 19 safety cases. It has not been reviewed by the team.
 - Two sets of 20 conversations from one policy differed by as much as 0.45, which is wider than the 0.275 the gatekeeper used as its bar. Single-set numbers, including each round's own decision, carry that uncertainty.
-- The final judge did not score the held-out sets.
 
 ## The run
 
@@ -76,4 +89,4 @@ Rounds 5 to 7 were decided against a bar that was too high: `policy-v3` had been
 | `measurements/controls/` | The control policy: the run's safety rules with no conversation rules |
 | `measurements/tools/` | The scripts and settings used, as run. Some hold paths of the machine they ran on |
 
-Labels in `measurements/astra/`: `v1`, `v1b` are the two sets of the starting policy; `v2`, `v3` one set each; `v4`, `v4b` the final policy; `plain` the plain baseline with the original safety wording; `plain-s2`, `plain-s2b` the control.
+Labels in `measurements/astra/`: `v1`, `v1b` are the two sets of the starting policy; `v2`, `v3` one set each; `v4`, `v4b` the final policy; `plain` the plain baseline with the original safety wording; `plain-s2`, `plain-s2b` the control; `heldout-v1`, `heldout-control`, `heldout-v4` the three held-out sets.

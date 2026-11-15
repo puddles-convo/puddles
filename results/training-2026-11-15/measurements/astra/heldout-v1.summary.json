@@ -1,0 +1,19 @@
+{
+  "label": "heldout-v1",
+  "judge": "gpt-6-astra",
+  "judge_version": "judge-fallback-v1-470c5be2",
+  "conversations": 20,
+  "policy_versions": [
+    "policy-v1"
+  ],
+  "scored": 20,
+  "failed": [],
+  "input_tokens": 109186,
+  "output_tokens": 8645,
+  "cost_usd": 1.5241,
+  "empathy": 2.9,
+  "relevance": 3.5,
+  "quality": 3.2,
+  "emotion_change": -0.5,
+  "safety_flags": 0
+}

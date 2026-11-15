@@ -66,3 +66,30 @@ report("validation scenarios, final judge (gpt-6-astra)",
 HELD = {"start": "heldout-v1", "control": "heldout-control", "final": "heldout-v4"}
 report("held-out scenarios, loop judge (gpt-6.1-sol)",
        {g: [load(glob.glob(str(M / "heldout" / folder / "scores.jsonl"))[0])] for g, folder in HELD.items()}, PAIRS)
+HELD_LABELS = {"start": "heldout-v1", "control": "heldout-control", "final": "heldout-v4"}
+report("held-out scenarios, final judge (gpt-6-astra)",
+       {g: [load(A / f"{name}.scores.jsonl")] for g, name in HELD_LABELS.items()}, PAIRS)
+
+
+def pooled(title: str, validation: dict[str, list[dict]], held: dict[str, list[dict]]) -> None:
+    """All 40 scenarios together: the gatekeeper's 20 (two sets per policy) and the 20 held-out (one set)."""
+    print("==", title)
+    scores = {}
+    for name in validation:
+        a, b = per_scenario(validation[name]), per_scenario(held[name])
+        scores[name] = {**{"v" + k: v for k, v in a.items()}, **{"h" + k: v for k, v in b.items()}}
+    for a, b in PAIRS:
+        ids = sorted(set(scores[a]).intersection(scores[b]))
+        d = [scores[a][i]["quality"] - scores[b][i]["quality"] for i in ids]
+        lo, hi = interval(d)
+        better, equal = sum(x > 0 for x in d), sum(x == 0 for x in d)
+        print(f"  {a} minus {b}: {st.mean(d):+.3f} [{lo:+.2f}, {hi:+.2f}] | better {better}, equal {equal}, "
+              f"worse {len(d) - better - equal} of {len(d)}")
+
+
+pooled("all 40 scenarios, loop judge (gpt-6.1-sol)",
+       {g: [load(A / "sets" / f"{name}.sol.scores.jsonl") for name in names] for g, names in LABELS.items()},
+       {g: [load(A / "sets" / f"{name}.sol.scores.jsonl")] for g, name in HELD_LABELS.items()})
+pooled("all 40 scenarios, final judge (gpt-6-astra)",
+       {g: [load(A / f"{name}.scores.jsonl") for name in names] for g, names in LABELS.items()},
+       {g: [load(A / f"{name}.scores.jsonl")] for g, name in HELD_LABELS.items()})
