@@ -152,6 +152,8 @@ def test_1_what_a_session_leaves_behind(remember_me, training, apart, tmp_path, 
 class Failing:
     """A note-taker whose error repeats the person's words, as a real model's error text can."""
 
+    untraced = True   # scripted: no request, no record of its own
+
     def structured(self, system, user, schema):
         raise RuntimeError(f"could not read the conversation: {user}")
 
@@ -262,8 +264,14 @@ def test_finish_session_with_no_user_id_does_nothing(tmp_path):
     assert len(session.turns) == 2
 
 
+def marked(llm):
+    """A scripted model saying it makes no request and keeps no record, so it may run without training consent."""
+    llm.untraced = True
+    return llm
+
+
 def test_finish_session_hands_the_turns_to_the_note_taker_and_clears_the_session(tmp_path):
-    llm = ScriptedLLM()
+    llm = marked(ScriptedLLM())
     llm.add(NoteTakerOutput, {"actions": []})
     session = make_session(user_id=PERSON, consent_for_training=False)
     record, notes = finish_session(session, NoteStore(FakeUserMemory(), tmp_path), llm)
@@ -275,7 +283,7 @@ def test_finish_session_hands_the_turns_to_the_note_taker_and_clears_the_session
 
 
 def test_finish_session_with_no_turns_skips_the_note_taker(tmp_path):
-    llm = ScriptedLLM()
+    llm = marked(ScriptedLLM())
     session = make_session(user_id=PERSON)
     session.turns.clear()
     assert finish_session(session, NoteStore(FakeUserMemory(), tmp_path), llm) == (None, NotesResult())
@@ -603,3 +611,163 @@ def test_6_overlap_a_consenting_session_cannot_trace_a_private_one_in_flight(fai
         person_a.join(20)
         mlflow.openai.autolog(disable=True)
         mlflow.langchain.autolog(disable=True)
+
+
+# ---------- with consent off, only a model known to be untraced is let through ----------
+
+STAND_IN_URL = "http://stand-in.invalid/v1"
+ANSWERED = "copper-meadow-lantern"          # in the note-taker's answer only
+
+
+def plain_client():
+    from loop.llm import OpenAICompatClient
+
+    return OpenAICompatClient(STAND_IN_URL, "stand-in", api_key="placeholder")
+
+
+def priced_meter(root: Path):
+    from puddles.usage import Meter, ModelPrice, Prices
+
+    return Meter(root, Prices(models={"stand-in": ModelPrice(1.0, 1.0)}))
+
+
+class SubClient(type(plain_client())):  # type: ignore[misc]
+    """A subclass of OpenAICompatClient: it could override anything, so it is not the client itself."""
+
+
+class Wrapper:
+    """An object around an OpenAICompatClient that forwards every call: it could record anything."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    def complete(self, *a, **k):
+        return self.inner.complete(*a, **k)
+
+    def complete_json(self, *a, **k):
+        return self.inner.complete_json(*a, **k)
+
+
+REFUSED = ["swapped-traced-client", "lying-plain", "subclass-client", "wrapper-client", "unmarked-scripted",
+           "truthy-not-true"]
+
+
+def refused_model(name: str, meter_root: Path):
+    """A way round the allow-list, built without a request."""
+    from puddles.inference.live import PlainLLM
+    from puddles.tracing import TracedClient
+
+    if name in ("swapped-traced-client", "lying-plain"):
+        llm = PlainLLM(plain_client(), max_tokens=100)
+        llm.client = TracedClient(plain_client(), "notes", meter=priced_meter(meter_root))  # after construction
+        if name == "lying-plain":
+            llm.untraced = True                 # a PlainLLM is judged by its client only
+        return llm
+    if name == "subclass-client":
+        return PlainLLM(SubClient(STAND_IN_URL, "stand-in", api_key="placeholder"), max_tokens=100)
+    if name == "wrapper-client":
+        return PlainLLM(Wrapper(plain_client()), max_tokens=100)
+    if name == "unmarked-scripted":
+        return ScriptedLLM()
+    llm = ScriptedLLM()
+    llm.untraced = 1                            # truthy, but not True
+    return llm
+
+
+def test_verifiers_reproduction_is_refused_at_construction_and_nothing_is_written(tmp_path, store, monkeypatch):
+    """PlainLLM(TracedClient(raw, "notes", meter=meter)): refused before any request; no trace, no usage file."""
+    import urllib.request
+
+    import mlflow
+
+    from puddles.inference.live import PlainLLM
+    from puddles.tracing import TracedClient
+
+    opener = Opener()
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    meter_root = tmp_path / "meter"
+    with pytest.raises(ValueError):
+        PlainLLM(TracedClient(plain_client(), "notes", meter=priced_meter(meter_root)), max_tokens=100)
+    assert opener.bodies == [] and not meter_root.exists()
+    mlflow.flush_trace_async_logging()
+    assert mlflow.search_traces(return_type="list") == [] and holding(tmp_path, PHRASE) == []
+
+
+@pytest.mark.parametrize("name", REFUSED)
+def test_without_training_consent_anything_not_known_untraced_is_refused(name, tmp_path, store, monkeypatch):
+    import urllib.request
+
+    import mlflow
+
+    opener = Opener()
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    meter_root = tmp_path / "meter"
+    llm = refused_model(name, meter_root)
+    session = make_session(user_id=PERSON, remember_me=True, consent_for_training=False)
+    with pytest.raises(ValueError):
+        finish_session(session, NoteStore(FakeUserMemory(), tmp_path / "people"), llm)
+    assert opener.bodies == [] and getattr(llm, "prompts", {}) == {}     # refused before any request
+    assert len(session.turns) == 2 and not (tmp_path / "people").exists() and not meter_root.exists()
+    mlflow.flush_trace_async_logging()
+    assert mlflow.search_traces(return_type="list") == [] and holding(tmp_path, PHRASE) == []
+
+
+def test_without_training_consent_a_marked_scripted_model_runs(tmp_path):
+    llm = marked(ScriptedLLM())
+    llm.add(NoteTakerOutput, {"actions": [{"action": "add", "kind": "situation", "fact": FACT}]})
+    session = make_session(user_id=PERSON, remember_me=True, consent_for_training=False)
+    record, notes = finish_session(session, NoteStore(FakeUserMemory(), tmp_path), llm)
+    assert record is None and not notes.failed and len(notes.added) == 1
+    assert PHRASE in llm.prompts[NoteTakerOutput][0]
+
+
+@pytest.mark.parametrize("name", REFUSED)
+def test_with_training_consent_all_of_them_are_accepted_as_before(name, tmp_path, store, monkeypatch):
+    import urllib.request
+
+    opener = Opener()
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    llm = refused_model(name, tmp_path / "meter")
+    if isinstance(llm, ScriptedLLM):
+        llm.add(NoteTakerOutput, {"actions": []})
+    session = make_session(user_id=PERSON, remember_me=True, consent_for_training=True, root=tmp_path / "root")
+    _, notes = finish_session(session, NoteStore(FakeUserMemory(), tmp_path / "people"), llm)
+    assert not notes.failed                 # not refused, and the note-taker ran
+    if isinstance(llm, ScriptedLLM):
+        assert PHRASE in llm.prompts[NoteTakerOutput][0]
+    else:
+        assert len(opener.bodies) == 1 and PHRASE in opener.bodies[0]
+
+
+def test_the_allowed_plain_llm_writes_nothing_of_its_own(tmp_path, store, monkeypatch, caplog):
+    """Under the caller's meter and open span, with every logger listening: the request goes out and
+    the answer comes back, and neither is in a usage line, a span or a log record."""
+    import logging
+    import urllib.request
+
+    import mlflow
+
+    from puddles.inference.live import PlainLLM
+    from puddles.usage import metering
+
+    caplog.set_level(logging.DEBUG)
+    added = {"action": "add", "kind": "situation", "fact": f"likes the {ANSWERED}"}
+    opener = Opener([json.dumps({"forget_everything": False, "actions": [added]})])
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    meter_root = tmp_path / "meter"
+    people = tmp_path / "people"
+    session = make_session(user_id=PERSON, remember_me=True, consent_for_training=False)
+    with metering(priced_meter(meter_root), "notes"), mlflow.start_span(name="caller"):
+        record, notes = finish_session(session, NoteStore(FakeUserMemory(), people),
+                                       PlainLLM(plain_client(), max_tokens=100))
+    mlflow.flush_trace_async_logging()
+    assert record is None and not notes.failed and len(notes.added) == 1
+    [body] = opener.bodies
+    assert PHRASE in body                                   # it was asked
+    assert not meter_root.exists()                          # no usage line
+    spans = [s for t in mlflow.search_traces(return_type="list") for s in t.data.spans]
+    assert [s.name for s in spans] == ["caller"]            # no span of its own under the caller's
+    assert traced_with(PHRASE) == [] and traced_with(ANSWERED) == []
+    assert PHRASE not in caplog.text and ANSWERED not in caplog.text
+    assert holding(tmp_path, PHRASE) == []
+    assert holding(tmp_path, ANSWERED) == [notes_dir(people) / "notes.json"]   # the note, by consent, only there

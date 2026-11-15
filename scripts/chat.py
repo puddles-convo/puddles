@@ -105,7 +105,13 @@ def fake_helper() -> FakeClient:
 
 
 class FakeNoteTaker:
-    """A note-taker that acts only on markers in the conversation; it is never shown the markers' meaning."""
+    """A note-taker that acts only on markers in the conversation; it is never shown the markers' meaning.
+
+    It makes no request and keeps no record, so `finish_session` lets it through without training consent.
+    With --training yes it is wrapped in `TracedLLM`, which does not carry the mark.
+    """
+
+    untraced = True
 
     def structured(self, system: str, user: str, schema: type[T]) -> T:
         conversation = user.rsplit("<conversation>\n", 1)[-1].rsplit("\n</conversation>", 1)[0]

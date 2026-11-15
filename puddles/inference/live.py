@@ -55,6 +55,9 @@ class PlainLLM:
     """
 
     def __init__(self, client: JSONChatClient, *, max_tokens: int, temperature: float = 0.0) -> None:
+        tracing = sys.modules.get("puddles.tracing")  # not imported here: if it never was, nothing is a TracedClient
+        if tracing is not None and isinstance(client, tracing.TracedClient):
+            raise ValueError("PlainLLM must not be given a traced client")
         self.client = client
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -105,6 +108,19 @@ def tracing_off() -> None:
         module.autolog(disable=True)
 
 
+def known_untraced(llm: object) -> bool:
+    """The allow-list for a session without consent for training; anything else could be traced.
+
+    A `PlainLLM` (the type itself) whose client is exactly `OpenAICompatClient`, not a subclass and not
+    a wrapper: that client writes no span, no usage line and no log record. Or a scripted model that
+    says, with `untraced = True`, that it makes no request and keeps no record; a `PlainLLM` is judged
+    by its client only.
+    """
+    if isinstance(llm, PlainLLM):
+        return type(llm) is PlainLLM and type(llm.client) is OpenAICompatClient
+    return getattr(llm, "untraced", False) is True
+
+
 def finish_session(session: Session, store: NoteStore, llm: LLM, *, today: date | None = None,
                    now: datetime | None = None) -> tuple[Optional[ConversationRecord], NotesResult]:
     """End the session, then run the note-taker on a copy of what was said. Both results are returned."""
@@ -118,6 +134,9 @@ def finish_session(session: Session, store: NoteStore, llm: LLM, *, today: date 
         if isinstance(llm, OpenAILLM):
             raise ValueError("training use is off, so the note-taker must not go through the OpenAI SDK; "
                              "use PlainLLM")
+        if not known_untraced(llm):
+            raise ValueError("training use is off, so the note-taker's model must be known to be untraced: "
+                             "a PlainLLM over loop.llm's OpenAICompatClient, or a scripted model marked untraced")
     user_id = session.user_id
     turns = list(session.turns)  # end_session clears them
     notes = NotesResult()
