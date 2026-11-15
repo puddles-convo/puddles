@@ -1,0 +1,77 @@
+{
+  "frames": [
+    "/Users/moamen/Documents/puddles/figures/fig1-preview-0.5.png",
+    "/Users/moamen/Documents/puddles/figures/fig1-preview-4.png",
+    "/Users/moamen/Documents/puddles/figures/fig1-preview-8.png",
+    "/Users/moamen/Documents/puddles/figures/fig1-preview-16.png",
+    "/Users/moamen/Documents/puddles/figures/fig1-preview-22.png"
+  ],
+  "script_disabled_svg": true,
+  "nested_clocks_verified": true,
+  "single_paths_sampled": 10,
+  "single_wire_crossings": [],
+  "single_wire_shared_segments": [],
+  "planned_paths": [
+    {
+      "id": "planned_score",
+      "path": "edge_2-path-0",
+      "dasharray": "8 6",
+      "particles": false
+    },
+    {
+      "id": "planned_scores",
+      "path": "edge_3-path-0",
+      "dasharray": "8 6",
+      "particles": false
+    }
+  ],
+  "title_fonts": [
+    {
+      "text": "Helper",
+      "font": "34px",
+      "projected": 23.62088122605364
+    },
+    {
+      "text": "Critic",
+      "font": "34px",
+      "projected": 23.62088122605364
+    },
+    {
+      "text": "Failure patterns",
+      "font": "34px",
+      "projected": 23.62088122605364
+    },
+    {
+      "text": "Research notes",
+      "font": "34px",
+      "projected": 23.62088122605364
+    },
+    {
+      "text": "Policy edits",
+      "font": "34px",
+      "projected": 23.62088122605364
+    },
+    {
+      "text": "Gate outcomes",
+      "font": "34px",
+      "projected": 23.62088122605364
+    }
+  ],
+  "semantic_icons_changed": {
+    "sim": true,
+    "helper": true,
+    "judge": true,
+    "critic": true,
+    "researcher": true,
+    "proposer": true,
+    "gate": true
+  },
+  "cloud_stars": 360,
+  "single_wire_block_intrusions": [],
+  "cloud_geometry_and_smil_equal_after_translation_and_id_normalization": true,
+  "cloud_changes_at_all_phases": true,
+  "script_disabled_normal_playback_changes": true,
+  "player_embedded_bytes_equal": true,
+  "player_initial_and_post_replay_motion": true,
+  "svg_sha256": "8469805699d6b652bf794f4d8ac4eaa139e551e884f98c6885f23db514618115"
+}
