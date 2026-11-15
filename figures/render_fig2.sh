@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-: "${GLASS_DIAGRAMS_ROOT:=/Users/moamen/Documents/glass-diagrams}"
+: "${GLASS_DIAGRAMS_ROOT:=$HOME/Documents/glass-diagrams}"
 export PYTHONPATH="$GLASS_DIAGRAMS_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 BIN="${GLASS_DIAGRAMS_BIN:-$HOME/.local/share/glass-diagrams/uv-venv/bin}"
 "$BIN/python" figures/gen_fig2.py

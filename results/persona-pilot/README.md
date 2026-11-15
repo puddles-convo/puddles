@@ -7,8 +7,8 @@ Branch `persona-pilot` at commit 7619ac5 (just merged with `integration`, which 
 Command, run through the team's wrapper, which loads the keys and sets the models without printing them:
 
 ```
-sh /Users/moamen/.hermes/cache/scratch/train/with_env_train.sh \
-  /Users/moamen/Documents/puddles-runall-venv/bin/python -m scripts.persona_pilot \
+sh <env-wrapper> \
+  python -m scripts.persona_pilot \
   --personas fixtures/personas.json --policy policies/policy-v2.md \
   --out results/persona-pilot --turns 6 --workers 6
 ```
