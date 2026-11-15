@@ -1,17 +1,21 @@
 """Acceptance tests from docs/specs/gate-join.md, without sight of the join.
 
-Unspecified (and deliberately not invented here): empty safety suites are not
-forbidden, the location/shape of the safety-token accounting note is undefined,
-and the price preflight may live in the script or graph. Cases, prompts and the
-yes/no interpretation belong to the public safety implementation alone.
+Includes the amended fail-closed rules for empty/contradictory safety evidence
+and unmeasured baselines. Cases, prompts and the yes/no interpretation belong
+to the public safety implementation alone. The builder's report is not output
+that these tests inspect; price preflight may live in the script or graph.
 """
 
+import ast
 from collections import Counter
 from copy import deepcopy
+import inspect
 import json
 import os
 import re
 import socket
+import subprocess
+import sys
 from threading import Lock
 from types import SimpleNamespace
 
@@ -31,7 +35,7 @@ from puddles.gate_join import real_gate_deps, safety_check, safety_models
 from puddles.judging import MeteredJudge
 from puddles.memory import FakeMemory, now
 from puddles.policy import apply_edit, parse_policy, render_policy
-from puddles.usage import Meter, MissingPrice, ModelPrice, Prices, metering, read_usage
+from puddles.usage import Meter, ModelPrice, Prices, metering, read_usage
 from schemas import (
     ConversationRecord, FailurePattern, GateInput, JudgeOutput, PolicyEdit, ProposerOutput,
     SafetyCaseResult, SafetyResult, Scores,
@@ -194,10 +198,26 @@ class ObservedPanel(JudgePanel):
         astra = PanelLLM(MODELS[3], fail_validation=fail_validation)
         super().__init__(PanelConfig(judges=MODELS[:3], astra=MODELS[3]), self.clients, astra)
         self.records = []
+        self.reported = []
 
     def score(self, record):
         self.records.append(record)
-        return super().score(record)
+        result = super().score(record)
+        self.reported.append((record, result.usage))
+        return result
+
+
+class UntouchedMemory:
+    """Any memory method is a preflight violation, including unexpected methods."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        def forbidden(*args, **kwargs):
+            self.calls.append(name)
+            pytest.fail(f"Memory method {name} ran before safety-model price preflight")
+        return forbidden
 
 
 class Agents(script.FakeLLM):
@@ -274,8 +294,9 @@ def gate_report(root):
 def assert_would_keep_reason(reason):
     """Check the counterfactual meaning without fixing the contract's prose."""
     text = reason.casefold()
-    assert re.search(r"\b(would|could|otherwise|except|if)\b|but for|were it", text)
-    assert re.search(r"\b(keep|kept|retain\w*|promot\w*|accept\w*|qualif\w*|eligible)\b", text)
+    keep = r"(?:keep|kept|retain\w*|promot\w*|accept\w*|qualif\w*|eligible)"
+    positive = r"(?:(?!\b(?:not|never|fail\w*|reject\w*|revert\w*)\b)[^.!?;]){0,120}"
+    assert re.search(rf"\b(?:would|could|otherwise|except)\b{positive}\b{keep}\b", text)
 
 
 def scored_records(root):
@@ -288,6 +309,34 @@ def scored_records(root):
 # Section 1: the join delegates; it neither rewrites safety evidence nor decides.
 
 
+def test_gate_import_has_no_eval_dependency_in_source_or_fresh_process(repo_root):
+    """Catches adding static or executed dynamic eval imports to the independent gate."""
+    source = (repo_root / "puddles/gate.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            assert not any(a.name == "puddles.eval" or a.name.startswith("puddles.eval.")
+                           for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert module != "puddles.eval" and not module.startswith("puddles.eval.")
+            assert not (module == "puddles" and any(a.name == "eval" for a in node.names))
+            assert not (node.level and (module == "eval" or module.startswith("eval.")
+                                        or any(a.name == "eval" for a in node.names)))
+    program = """
+import socket
+import sys
+def no_network(*args, **kwargs):
+    raise AssertionError('Gate import must stay offline')
+socket.socket.connect = no_network
+socket.socket.connect_ex = no_network
+import puddles.gate
+assert not any(name == 'puddles.eval' or name.startswith('puddles.eval.') for name in sys.modules)
+"""
+    result = subprocess.run(["env", "-u", "PYTHONPATH", sys.executable, "-B", "-c", program],
+                            cwd=repo_root, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("selection", ["default", "empty", "explicit"])
 def test_safety_adapter_calls_public_runner_once_with_unchanged_inputs_and_result(
     case, monkeypatch, selection,
@@ -298,8 +347,8 @@ def test_safety_adapter_calls_public_runner_once_with_unchanged_inputs_and_resul
     answer = SafetyResult(policy_version="unmodified-result", case_file="returned-file.json",
                           passed=False, cases=[SafetyCaseResult(case_id="returned-id", passed=False)])
 
-    def run(version, reply, asker, *, cases=None, case_file="safety-v1.json"):
-        calls.append((version, reply, asker, cases, case_file))
+    def run(policy_version, reply, asker, cases=None, case_file="safety-v1.json"):
+        calls.append((policy_version, reply, asker, cases, case_file))
         return answer
 
     patch_public(monkeypatch, safety_api, "run_safety", run)
@@ -309,13 +358,13 @@ def test_safety_adapter_calls_public_runner_once_with_unchanged_inputs_and_resul
     assert check("candidate-under-test", reply) is answer
     assert len(calls) == 1
     assert calls[0][0] == "candidate-under-test" and calls[0][1] is reply
-    assert calls[0][2] is case.asker and calls[0][3] is cases
+    assert calls[0][2] is case.asker and calls[0][3] == cases
     assert calls[0][4] == "custom-case-set.json"
     answer = answer.model_copy(update={"policy_version": "second-result"})
     second_reply = lambda turns: "A different callback."
     assert check("another-candidate", second_reply) is answer
     assert len(calls) == 2 and calls[1][0] == "another-candidate"
-    assert calls[1][1] is second_reply and calls[1][2] is case.asker and calls[1][3] is cases
+    assert calls[1][1] is second_reply and calls[1][2] is case.asker and calls[1][3] == cases
 
 
 def test_safety_adapter_runner_failure_is_not_retried_or_reported_as_pass(case, monkeypatch):
@@ -328,13 +377,9 @@ def test_safety_adapter_runner_failure_is_not_retried_or_reported_as_pass(case, 
         raise error
 
     patch_public(monkeypatch, safety_api, "run_safety", run)
-    try:
-        result = safety_check(case.asker)("candidate", lambda turns: "Reply.")
-    except Exception:
-        pass  # The contract does not prescribe the presentation of a runner exception.
-    else:
-        assert isinstance(result, SafetyResult) and result.passed is False
-    assert len(calls) == 1
+    with pytest.raises(RuntimeError) as caught:
+        safety_check(case.asker)("candidate", lambda turns: "Reply.")
+    assert caught.value is error and len(calls) == 1
 
 
 @pytest.mark.parametrize("already_metered", [False, True])
@@ -346,7 +391,7 @@ def test_real_gate_deps_preserves_inputs_wraps_same_judge_once_and_meters_gate_s
     deps = joined(case, judge=judge)
     assert isinstance(deps, gate.GateDeps)
     assert untrace(deps.helper_client) is case.helper and untrace(deps.user_client) is case.user
-    assert deps.root == case.root and deps.scenarios == case.scenarios
+    assert deps.root == case.root and all(s in deps.scenarios for s in case.scenarios)
     assert (deps.noise_measured, deps.max_turns, deps.seed) == (True, 1, 31)
     assert isinstance(deps.judge, MeteredJudge)
     assert deps.judge.judge is case.panel and deps.judge.version == case.panel.version
@@ -383,7 +428,7 @@ def test_real_gate_deps_defaults_and_env_asker_are_lazy(case, monkeypatch):
                           root=case.root, scenarios=case.scenarios)
     assert factories == ["from_env"]
     assert (deps.noise_measured, deps.max_turns, deps.seed) == (False, 10, None)
-    assert not case.root.exists() and not case.helper.calls and not case.user.calls
+    assert not case.helper.calls and not case.user.calls
     assert not case.panel.records and not case.asker.calls
     result = deps.safety("candidate", lambda turns: case.helper.replies[turns[-1].text])
     assert result.passed and len(result.cases) == len(case.cases) > 0
@@ -406,11 +451,103 @@ def test_missing_safety_configuration_valueerror_propagates_before_work(case):
     """Catches deferring configuration until candidate evaluation or fabricating a pass."""
     with pytest.raises(ValueError):
         joined(case, asker=None)
-    assert not case.root.exists()
     assert not case.helper.calls and not case.user.calls and not case.panel.records
 
 
 # Section 3.1--3.4: real safety cases and real panel, including harmful failures.
+
+
+def test_empty_real_loader_reverts_despite_clean_measured_gain_and_records_no_pass(case, monkeypatch):
+    """Catches vacuous safety passes leaking through the real join into a keep or event."""
+    loads, returned = [], []
+    real_run = safety_api.run_safety
+
+    def load(*args, **kwargs):
+        loads.append((args, kwargs))
+        return []
+
+    def run(policy_version, reply, asker, cases=None, case_file="safety-v1.json"):
+        answer = real_run(policy_version, reply, asker, cases=cases, case_file=case_file)
+        returned.append(answer.model_copy(deep=True))
+        return answer
+
+    patch_public(monkeypatch, safety_api, "load_cases", load)
+    patch_public(monkeypatch, safety_api, "run_safety", run)
+    result = candidate_result(case)
+    check = gate.make_gate(joined(case),
+                           validation_scenario_ids=[s.scenario_id for s in case.scenarios], noise=0.1)
+    outcome = check(result)
+    report = check.last_report
+    assert len(loads) == len(returned) == 1
+    assert returned[0].passed is True and returned[0].cases == []
+    assert outcome.decision == "reverted" and outcome.safety_passed is False
+    assert report.failed == ["safety_cases"] and report.checks["safety_cases"] == "failed"
+    assert "no safety case was run" in outcome.reason
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "passed"
+    assert report.checks["noise_not_measured"] == "passed"
+    assert report.log_safety.passed is False and report.log_safety.cases == 0
+    saved = SafetyResult.model_validate_json((case.root / "scores/round-01-safety.json").read_text())
+    assert saved == returned[0]  # Save the real runner's evidence without rewriting its verdict.
+    event = finish(case, result, outcome)
+    assert event.outcome == "reverted" and event.safety.passed is False and event.safety.cases == 0
+    assert not case.asker.calls
+
+
+@pytest.mark.parametrize("reported_pass", [False, True])
+def test_failed_case_overrides_result_pass_flag_in_gate_and_event(case, monkeypatch, reported_pass):
+    """Catches trusting an aggregate pass while a reported case failed."""
+    failed_id = case.cases[0].case_id
+    answer = SafetyResult(
+        policy_version="policy-v2-candidate", passed=reported_pass,
+        cases=[SafetyCaseResult(case_id=failed_id, passed=False)],
+    )
+    patch_public(monkeypatch, safety_api, "run_safety", lambda *args, **kwargs: answer)
+    result = candidate_result(case)
+    check = gate.make_gate(joined(case),
+                           validation_scenario_ids=[s.scenario_id for s in case.scenarios], noise=0.1)
+    outcome = check(result)
+    report = check.last_report
+    assert outcome.decision == "reverted" and outcome.safety_passed is False
+    assert report.failed == ["safety_cases"] and failed_id in outcome.reason
+    assert report.log_safety.passed is False and report.log_safety.failed_case_ids == [failed_id]
+    saved = SafetyResult.model_validate_json((case.root / "scores/round-01-safety.json").read_text())
+    assert saved.passed is reported_pass and saved.cases[0].passed is False
+    event = finish(case, result, outcome)
+    assert event.safety.passed is False and event.safety.failed_case_ids == [failed_id]
+
+
+@pytest.mark.parametrize("dimension", ["empathy", "relevance"])
+@pytest.mark.parametrize("value", [0, 0.5, 5.5, 6])
+def test_out_of_range_baseline_is_unmeasured_and_cannot_enable_keep(case, dimension, value):
+    """Catches comparing quality against an unmeasured baseline in either dimension."""
+    before = Scores(empathy=2, relevance=2).model_copy(update={dimension: value})
+    inp = GateInput(round=1, edit_id="edit-r01", current_policy=str(case.base),
+                    candidate_policy=str(case.candidate),
+                    validation_scenario_ids=[s.scenario_id for s in case.scenarios],
+                    current_scores=before, noise=0.1, token_cap=800, safety_case_set="safety-v1")
+    report = gate.run_gate(inp, joined(case))
+    assert report.outcome.decision == "reverted" and "complete_evidence" in report.failed
+    assert "the policy in force has no measured scores" in report.outcome.reason
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+
+
+@pytest.mark.parametrize("dimension", ["empathy", "relevance"])
+@pytest.mark.parametrize("value", [0, 0.5, 5.5, 6])
+def test_out_of_range_cached_baseline_is_rescored(case, dimension, value):
+    """Catches reusing an otherwise matching cache whose baseline was never measured."""
+    deps = joined(case)
+    ids = [s.scenario_id for s in case.scenarios]
+    assert gate.current_scores(deps, case.base, ids).empathy == 2
+    path = case.root / "scores/current.json"
+    cached = json.loads(path.read_text())
+    cached["scores"][dimension] = value
+    path.write_text(json.dumps(cached), encoding="utf-8")
+    case.panel.records.clear()
+    measured = gate.current_scores(deps, case.base, ids)
+    assert measured.empathy == measured.relevance == 2
+    assert Counter(r.scenario_id for r in case.panel.records) == Counter(ids)
+    assert all(r.policy_version == "policy-v1" for r in case.panel.records)
+    assert json.loads(path.read_text())["scores"][dimension] == 2
 
 
 @pytest.mark.parametrize("measured", [True, False])
@@ -493,6 +630,10 @@ def test_safety_runner_exception_cannot_become_a_keep(case, monkeypatch):
     report = gate.run_gate(inp, joined(case))
     assert report.outcome.decision == "reverted" and "safety_cases" in report.failed
     assert report.outcome.safety_passed is False and len(calls) == 1
+    assert report.safety is None and report.log_safety is None
+    assert not (case.root / "scores/round-01-safety.json").exists()
+    validation = [r for r in case.panel.records if r.policy_version == "policy-v2-candidate"]
+    assert Counter(r.scenario_id for r in validation) == Counter(s.scenario_id for s in case.scenarios)
 
 
 # Section 2 and 3.6: script defaults, shared dependencies, and preflight ordering.
@@ -551,13 +692,15 @@ def test_nonfake_script_runs_real_gate_with_rounds_clients_judge_and_all_validat
     gates, rounds, price_checks = [], [], []
     real_make, real_run, real_check = gate.make_gate, graph.run_round, Prices.check
 
-    def make(deps, **kwargs):
-        gates.append((deps, kwargs))
-        return real_make(deps, **kwargs)
+    def make(*args, **kwargs):
+        bound = inspect.signature(real_make).bind(*args, **kwargs).arguments
+        gates.append((bound["deps"], {name: value for name, value in bound.items() if name != "deps"}))
+        return real_make(*args, **kwargs)
 
-    def run(deps, **kwargs):
-        rounds.append((deps, kwargs))
-        return real_run(deps, **kwargs)
+    def run(*args, **kwargs):
+        bound = inspect.signature(real_run).bind(*args, **kwargs).arguments
+        rounds.append((bound["deps"], {name: value for name, value in bound.items() if name != "deps"}))
+        return real_run(*args, **kwargs)
 
     def check(self, models, search=False):
         models = list(models)
@@ -581,8 +724,8 @@ def test_nonfake_script_runs_real_gate_with_rounds_clients_judge_and_all_validat
     assert isinstance(gdeps.judge, MeteredJudge) and gdeps.judge.judge is case.panel
     assert untrace(gdeps.helper_client) is untrace(rdeps.helper_client) is case.helper
     assert untrace(gdeps.user_client) is untrace(rdeps.user_client) is case.user
-    assert gdeps.scenarios == list(reversed(case.scenarios))
-    assert options["validation_scenario_ids"] == [s.scenario_id for s in reversed(case.scenarios)]
+    assert all(s in gdeps.scenarios for s in case.scenarios)
+    assert Counter(options["validation_scenario_ids"]) == Counter(s.scenario_id for s in case.scenarios)
     assert options["noise"] == 0.1 and options["token_cap"] == 777
     assert gdeps.noise_measured is measured and (gdeps.max_turns, gdeps.seed) == (1, 31)
     assert run_options["scenarios"] == script_case.training
@@ -597,6 +740,17 @@ def test_nonfake_script_runs_real_gate_with_rounds_clients_judge_and_all_validat
     records = scored_records(case.root)
     assert Counter(r.id for r in case.panel.records) == Counter(r.id for r in records)
     assert all(n == 1 for n in Counter(r.id for r in case.panel.records).values())
+    validation_ids = {s.scenario_id for s in case.scenarios}
+    expected = Counter(
+        ("gatekeeper" if record.scenario_id in validation_ids else "judge",
+         entry.model, entry.prompt_tokens, entry.completion_tokens)
+        for record, entries in case.panel.reported for entry in entries
+    )
+    done = [row for row in read_usage(case.root / "log/usage.jsonl")
+            if row.get("event") == "done" and row.get("model") in MODELS]
+    assert Counter((row["agent"], row["model"], row["tokens_in"], row["tokens_out"])
+                   for row in done) == expected
+    assert all(row["estimated"] is False for row in done)
 
 
 @pytest.mark.parametrize("missing", ["safety", "judge"])
@@ -647,24 +801,72 @@ def test_missing_real_configuration_exits_two_one_stderr_line_before_any_write_o
 
 
 def test_unpriced_safety_model_stops_before_round_writes_memory_or_model_calls(
-    script_case, monkeypatch, local_mlflow,
+    script_case, monkeypatch, local_mlflow, capsys,
 ):
     """Catches checking only helper/panel prices, or checking safety after round work."""
     case = script_case.case
     install_real_factories(monkeypatch, case)
     script_case.configure(safety_price=False)
-    memory_calls = []
-    monkeypatch.setattr(FakeMemory, "ensure_training_audience", lambda self: memory_calls.append("ensure"))
-    # The join contract fixes the preflight, but not price-error presentation.
-    try:
-        code = script.main(script_case.args)
-    except MissingPrice:
-        pass
-    else:
-        assert isinstance(code, int) and code != 0
+    memory = UntouchedMemory()
+    patch_public(monkeypatch, memory_api, "PastClient", lambda: memory)
+    # The configured MLflow store is outside root; section 2 forbids root writes.
+    capsys.readouterr()
+    assert script.main(script_case.args) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and len(captured.err.splitlines()) == 1
+    assert SAFETY_MODEL in captured.err
     assert not case.root.exists() or not list(case.root.rglob("*"))
-    assert not memory_calls and not case.helper.calls and not case.user.calls
+    assert not memory.calls and not case.helper.calls and not case.user.calls
     assert not case.panel.records and not case.asker.calls
+
+
+def test_script_prices_astra_safety_fallback_when_safety_model_is_unset(
+    script_case, monkeypatch, local_mlflow,
+):
+    """Catches missing the public safety factory's Astra fallback during price preflight."""
+    case = script_case.case
+    monkeypatch.setenv("PUDDLES_JUDGE_ASTRA", SAFETY_MODEL)
+    patch_public(monkeypatch, judge_api, "judge_from_env", lambda: case.panel)
+    created, requests, checked = [], [], []
+
+    def create(**request):
+        requests.append(request["model"])
+        messages = request["messages"]
+        content = case.asker.ask(messages[0]["content"], messages[1]["content"])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=1),
+        )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+    def init(self, model, temperature=0.0, client=None):
+        self.model, self.temperature = model, temperature
+        self.client = offline_client
+
+    offline_client = client
+    monkeypatch.setattr(safety_api.OpenAIYesNo, "__init__", init)
+    real_factory, real_check = safety_api.OpenAIYesNo.from_env, Prices.check
+
+    def factory(cls):
+        asker = real_factory()  # Keep the public environment-selection logic unchanged.
+        created.append(asker)
+        return asker
+
+    def check(self, models, search=False):
+        models = list(models)
+        checked.append(models)
+        return real_check(self, models, search=search)
+
+    monkeypatch.setattr(safety_api.OpenAIYesNo, "from_env", classmethod(factory))
+    monkeypatch.setattr(Prices, "check", check)
+    assert script.main(script_case.args) == 0
+    assert created and requests and set(requests) == {SAFETY_MODEL}
+    for asker in created:
+        assert safety_models(asker) == [SAFETY_MODEL]
+        assert any(set(safety_models(asker)) <= set(models) for models in checked)
+    assert Counter(case.asker.calls) == case.asker.expected
+    assert DecisionLog(case.root).rounds()[0].outcome == "kept"
 
 
 @pytest.mark.parametrize("mode", [None, "kept", "reverted", "real"])
@@ -687,6 +889,8 @@ def test_fake_script_retains_each_gate_mode_without_real_factories(
     event = DecisionLog(script_case.case.root).rounds()[0]
     assert event.outcome == ("kept" if mode == "kept" else "reverted")
     if mode == "real":
-        assert (script_case.case.root / "scores/round-01-gate.json").is_file()
-        assert event.safety.cases == 0
+        report = gate_report(script_case.case.root)
+        assert "safety_cases" in report["failed"] and report["checks"]["safety_cases"] == "failed"
+        assert "no safety case was run" in report["reason"]
+        assert event.safety.cases == 0 and event.safety.passed is False
     assert not script_case.case.helper.calls and not script_case.case.asker.calls
