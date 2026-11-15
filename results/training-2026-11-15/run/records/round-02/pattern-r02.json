@@ -1,0 +1,33 @@
+{
+  "id": "pattern-r02",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T11:35:01Z",
+  "parent_ids": [
+    "conv-r02-esconv-train-0257",
+    "conv-r02-esconv-train-0770",
+    "conv-r02-esconv-train-0853",
+    "conv-r02-esconv-train-0905",
+    "conv-r02-esconv-train-0173",
+    "conv-r02-esconv-train-0603",
+    "conv-r02-esconv-train-0305",
+    "conv-r02-esconv-train-0265"
+  ],
+  "round": 2,
+  "name": "Repeats the user's account instead of deepening the conversation",
+  "description": "After the user shares a feeling or detail, the helper often restates it in similar words and follows with another question, without adding new understanding or meaningfully advancing the discussion. This recurs across turns and can make support feel formulaic; questions sometimes revisit things the user has already explained.",
+  "seen_in": 8,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r02-esconv-train-0257",
+    "conv-r02-esconv-train-0770",
+    "conv-r02-esconv-train-0853",
+    "conv-r02-esconv-train-0905",
+    "conv-r02-esconv-train-0173",
+    "conv-r02-esconv-train-0603",
+    "conv-r02-esconv-train-0305",
+    "conv-r02-esconv-train-0265"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

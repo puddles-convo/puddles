@@ -1,0 +1,37 @@
+{
+  "id": "research-r10",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T14:13:22Z",
+  "parent_ids": [
+    "pattern-r10"
+  ],
+  "round": 10,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling skills empathic conjecture tentative interpretation checking understanding training guide",
+    "counsellor reflections of meaning synthesising underlying themes advanced listening university counselling skills",
+    "counselling skills paraphrase reflection add new perspective client meaning training material"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://learn.scu.edu.au/bbcswebdav/courses/WELF1003-2021-3/welf1003_sg_07.html",
+      "title": "welf1003: Topic 7 Microskills 3 – responding",
+      "quote": "",
+      "technique": "Listen for meaning as well as the client’s words, and respond to discrepancies or new perspectives the client has offered rather than simply repeating their account."
+    },
+    {
+      "url": "http://www.uihi.org/wp-content/uploads/2013/08/MI-Workshop-Handout3-Reflective-Listening-Final-070313.pdf",
+      "title": "Reflective Listening",
+      "quote": "",
+      "technique": "Use a complex reflection as a statement that tentatively guesses at the client’s meaning or what they have not yet said, rather than only restating their words."
+    },
+    {
+      "url": "https://counseling.education/counseling/skills/reflecting.html",
+      "title": "Reflecting & Listening Skills | counseling.education",
+      "quote": "",
+      "technique": "Deepen a reflection by integrating the client’s content with their feelings and the personal meaning it may hold, instead of reflecting content alone."
+    }
+  ]
+}

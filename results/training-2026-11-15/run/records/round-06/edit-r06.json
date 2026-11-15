@@ -1,0 +1,20 @@
+{
+  "id": "edit-r06",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T12:48:10Z",
+  "parent_ids": [
+    "pattern-r06",
+    "research-r06"
+  ],
+  "round": 6,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r06",
+  "base_policy_version": "policy-v3",
+  "new_policy_version": "policy-v4-candidate",
+  "policy_path": "policies/policy-v4-candidate-r06.md",
+  "summary": "Reword C1 to directly interrupt the recurring reflection-then-question cadence while keeping questions purposeful. Unlike the reverted edit, this does not ask the helper to explore a possible connection to the person’s concern.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Begin with a brief reflection that tentatively connects what the person said to its feeling or meaning, rather than merely restating it; do not automatically end with a question—sometimes let validation stand, offer space, or make a concise observation, and ask only a question that purposefully advances the conversation, because repeated reflection-question loops can feel formulaic and leave little room to reflect."
+}

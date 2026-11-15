@@ -1,0 +1,37 @@
+{
+  "id": "research-r03",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T11:53:15Z",
+  "parent_ids": [
+    "pattern-r03"
+  ],
+  "round": 3,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling skills probing questions explore ambivalence discrepancy training manual university",
+    "motivational interviewing elicit change talk importance confidence ruler open questions training guide",
+    "counselling microskills focusing concretizing explore personal meaning feelings professional training guide"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://motivationalinterviewing.org/sites/default/files/module_5l_double-sided_reflections.pdf",
+      "title": "Skill Development: Double-Sided Reflections",
+      "quote": "",
+      "technique": "When a person expresses mixed feelings, reflect both sides with empathy, then pause or invite them to explore the conflict together rather than repeating a suggestion."
+    },
+    {
+      "url": "https://www.med.unc.edu/cfar/2025/11/mi-questions-evoking-change-talk-through-importance-and-confidence-rulers/",
+      "title": "Evoking Change Talk Through “Importance and Confidence” Rulers",
+      "quote": "",
+      "technique": "After asking a person to rate importance or confidence, ask why their rating is not lower and not higher, then what might move it higher, to explore their reasons, barriers, and possible next steps."
+    },
+    {
+      "url": "https://sbirt.uiowa.edu/sites/sbirt.uiowa.edu/files/2020-02/sbirt_mi_part_2_-_2018_-_final.pdf",
+      "title": "Motivational Interviewing: Steps and Core Skills",
+      "quote": "",
+      "technique": "Once you understand the person’s perspective, respectfully evoke their thoughts, feelings, motivation, and concerns, directing the conversation toward the underlying concerns that shape their readiness."
+    }
+  ]
+}

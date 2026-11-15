@@ -1,0 +1,29 @@
+{
+  "id": "pattern-r05",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T12:28:37Z",
+  "parent_ids": [
+    "conv-r05-esconv-train-0653",
+    "conv-r05-esconv-train-0027",
+    "conv-r05-esconv-train-0672",
+    "conv-r05-esconv-train-0809",
+    "conv-r05-esconv-train-0508",
+    "conv-r05-esconv-train-0037",
+    "conv-r05-esconv-train-0449",
+    "conv-r05-esconv-train-0223"
+  ],
+  "round": 5,
+  "name": "Moves into practical steps before exploring the emotional concern",
+  "description": "After a user expresses distress or names a specific fear, the helper quickly offers a plan, script, or coping action instead of first exploring what is troubling them. Phrasing the suggestion as “Would it help…?” does not by itself ensure the concern has been understood, and the helper may return to problem-solving after the user has stated an emotional need.",
+  "seen_in": 4,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r05-esconv-train-0653",
+    "conv-r05-esconv-train-0027",
+    "conv-r05-esconv-train-0508",
+    "conv-r05-esconv-train-0449"
+  ],
+  "same_as_pattern_id": "pattern-r04",
+  "seen_in_high": null
+}

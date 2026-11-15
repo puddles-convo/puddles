@@ -1,0 +1,43 @@
+{
+  "id": "research-r01",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T11:07:29Z",
+  "parent_ids": [
+    "pattern-r01"
+  ],
+  "round": 1,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling training empathic reflection deeper meaning feeling paraphrase reflection skills guide university",
+    "motivational interviewing complex reflections moving beyond repetition training guide reflective listening",
+    "counselling skills active listening summarising themes avoiding repetitive questions training resource"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://counseling.education/counseling/skills/reflecting.html",
+      "title": "Reflecting & Listening Skills",
+      "quote": "Counselors often go beyond simple repetition and include their own interpretations of the client's emotions or existential meaning to increase the \"depth\" of the session.",
+      "technique": "Move beyond reflecting content alone by tentatively connecting what the person said with their feelings or the meaning it may hold for them."
+    },
+    {
+      "url": "http://www.uihi.org/wp-content/uploads/2013/08/MI-Workshop-Handout3-Reflective-Listening-Final-070313.pdf",
+      "title": "Reflective Listening",
+      "quote": "A reflection seeks to summarize what the person means; it makes a guess.",
+      "technique": "Offer a concise reflective statement that makes a curious, tentative guess about the speaker’s meaning rather than turning every response into a question."
+    },
+    {
+      "url": "https://pressbooks.pub/basicinterviewingskills/chapter/lesson-three-reflecting-and-summarizing/",
+      "title": "Discussion 3 – Basic Social Work Interviewing Skills and Techniques: A Workbook for Application",
+      "quote": "Summarizing ... [creates] a consolidated response. This can incorporate both reflections of feeling and content.",
+      "technique": "When the conversation needs to progress, pull together its main points and feelings in a brief summary instead of asking the person to repeat details already shared."
+    },
+    {
+      "url": "https://www.unodc.org/documents/treatnet/Volume-B/Module-2/Volume_B_Module_2_Workshop_3.pdf",
+      "title": "Leader’s Guide: Motivating Clients for Treatment and Addressing Resistance",
+      "quote": "even the best open questions can begin to feel like “Motivational Interrogation” ... So be sure to balance these with lots of reflections",
+      "technique": "Balance open questions with reflections so the exchange does not become an interrogation; use reflections to follow the person’s train of thought."
+    }
+  ]
+}

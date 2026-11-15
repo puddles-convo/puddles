@@ -1,0 +1,28 @@
+{
+  "id": "gate-r06",
+  "schema_version": 4,
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-15T12:57:53Z",
+  "parent_ids": [
+    "edit-r06"
+  ],
+  "round": 6,
+  "edit_id": "edit-r06",
+  "decision": "reverted",
+  "before": {
+    "empathy": 3.85,
+    "relevance": 4.45,
+    "quality": 4.15,
+    "emotion_change": 0.2
+  },
+  "after": {
+    "empathy": 3.7,
+    "relevance": 4.15,
+    "quality": 3.9250000000000003,
+    "emotion_change": 0.45
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v3",
+  "reason": "Reverted on no quality gain above the noise (check 5): quality fell by 0.225, which is not more than the noise of 0.275. Also a dimension falling by more than the noise (check 6): relevance fell by 0.30, more than the noise of 0.275.",
+  "prediction_met": null
+}

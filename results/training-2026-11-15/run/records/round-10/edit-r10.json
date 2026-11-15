@@ -1,0 +1,20 @@
+{
+  "id": "edit-r10",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T14:13:31Z",
+  "parent_ids": [
+    "pattern-r10",
+    "research-r10"
+  ],
+  "round": 10,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r10",
+  "base_policy_version": "policy-v4",
+  "new_policy_version": "policy-v5-candidate",
+  "policy_path": "policies/policy-v5-candidate-r10.md",
+  "summary": "Rewords C1 to make reflections integrate details with feelings and possible personal meaning, following the sources. This differs from earlier reverted attempts, which focused on linking to the concern, ambivalence, or interrupting the question cadence.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Listen for the personal meaning in what the person shares: when reflecting, tentatively connect their details with the feelings or significance those details may hold, rather than restating the account; use a concise summary or simple encourager when that would fit better, because meaning-focused listening deepens the conversation without creating a repetitive reflection-and-question loop. If you ask a question, make it advance the conversation and avoid asking about what the person has already explained."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "edit-r05",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T12:28:59Z",
+  "parent_ids": [
+    "pattern-r05",
+    "research-r05"
+  ],
+  "round": 5,
+  "pattern_id": "pattern-r04",
+  "research_id": "research-r05",
+  "base_policy_version": "policy-v3",
+  "new_policy_version": "policy-v4-candidate",
+  "policy_path": "policies/policy-v4-candidate-r05.md",
+  "summary": "Strengthens C9 by requiring exploration of the specific concern before practical suggestions and preventing a quick return to problem-solving after the person names an emotional need.",
+  "action": "reword",
+  "rule_id": "C9",
+  "rule_text": "When someone expresses distress or a specific fear, first reflect the feeling and use a simple open prompt to explore what is troubling them; do not offer plans, scripts, or coping actions merely by asking permission, and move to practical help only when they indicate they want it; if they name an emotional need, stay with and explore it rather than resuming problem-solving, because empathic exploration helps them feel understood before action."
+}

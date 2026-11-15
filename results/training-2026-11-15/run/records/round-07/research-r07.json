@@ -1,0 +1,31 @@
+{
+  "id": "research-r07",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T13:04:09Z",
+  "parent_ids": [
+    "pattern-r07"
+  ],
+  "round": 7,
+  "pattern_id": "pattern-r04",
+  "queries": [
+    "counselling skills emotional processing attending to affect staying with client's feelings training guide",
+    "counsellor emotion-focused response empathic exploration before action planning professional training",
+    "counselling skills session focus client agenda emotional concern problem solving training university"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://www.apa.org/pubs/books/supplemental/Deliberate-Practice-in-Emotion-Focused-Therapy/Appendix-B-Empathic-Responses.pdf",
+      "title": "Distinguishing Between",
+      "quote": "The main intention behind empathic exploration is to deepen exploration, and this is done by moving the exploration forward toward the leading edges of experience with a discovery-oriented, querying tone.",
+      "technique": "When a client shares distress, first respond with empathic understanding or validation, then use a curious, discovery-oriented reflection to explore the feeling and its meaning before shifting to action."
+    },
+    {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3627537/",
+      "title": "The Importance of Responding to Negative Affect in Psychotherapies",
+      "quote": "The therapist who tolerates such affect has the chance to understand it, help the patient understand it, and approach its resolution.",
+      "technique": "Stay empathically present with strong negative feelings instead of changing the subject; help the client put the feelings into words and understand them before moving toward resolution."
+    }
+  ]
+}

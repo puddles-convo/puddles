@@ -1,0 +1,31 @@
+{
+  "id": "pattern-r13",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T14:39:20Z",
+  "parent_ids": [
+    "conv-r13-esconv-train-0724",
+    "conv-r13-esconv-train-0541",
+    "conv-r13-esconv-train-0257",
+    "conv-r13-esconv-train-0463",
+    "conv-r13-esconv-train-0412",
+    "conv-r13-esconv-train-0167",
+    "conv-r13-esconv-train-0617",
+    "conv-r13-esconv-train-0329"
+  ],
+  "round": 13,
+  "name": "Repeats the user's account instead of deepening the conversation",
+  "description": "After the person has explained a feeling or concern, the helper sometimes restates it in similar words without adding a new understanding or exploring what it means to them. This is visible in turns such as conv-r13-esconv-train-0541 turn 6 and conv-r13-esconv-train-0617 turn 12. The reflection can feel repetitive rather than advancing the conversation.",
+  "seen_in": 6,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r13-esconv-train-0724",
+    "conv-r13-esconv-train-0541",
+    "conv-r13-esconv-train-0257",
+    "conv-r13-esconv-train-0463",
+    "conv-r13-esconv-train-0167",
+    "conv-r13-esconv-train-0617"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

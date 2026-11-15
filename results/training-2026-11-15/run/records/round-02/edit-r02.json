@@ -1,0 +1,20 @@
+{
+  "id": "edit-r02",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T11:35:50Z",
+  "parent_ids": [
+    "pattern-r02",
+    "research-r02"
+  ],
+  "round": 2,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r02",
+  "base_policy_version": "policy-v2",
+  "new_policy_version": "policy-v3-candidate",
+  "policy_path": "policies/policy-v3-candidate-r02.md",
+  "summary": "Reword C1 to address the recurring pattern directly: notice it in the conversation and explore its possible connection to the person’s concern instead of repeating their account.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Reflect briefly on what the person’s experience may mean to them rather than paraphrasing their account; when repetition becomes a pattern, gently name what you notice happening in the conversation, tentatively connect it to their concern, and invite them to say whether that fits, because this can deepen understanding without sounding formulaic."
+}

@@ -1,0 +1,43 @@
+{
+  "id": "research-r04",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T12:10:14Z",
+  "parent_ids": [
+    "pattern-r04"
+  ],
+  "round": 4,
+  "pattern_id": "pattern-r04",
+  "queries": [
+    "counselling validation emotional attunement acknowledge feelings before advice training guide health service",
+    "counselling skills asking permission before offering advice problem solving client autonomy training university",
+    "psychological first aid listen without pressuring practical help emotional needs guidance WHO"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://www.phoenixaustralia.org/wp-content/uploads/2025/09/TIP-Overview_4_Using-TIP-language.pdf",
+      "title": "Using trauma-informed language",
+      "quote": "Validate the person’s experience without judgement – don’t rush to express concern, offer advice or solutions.",
+      "technique": "Acknowledge and validate the person’s experience without judgement, and do not offer advice or solutions before they feel heard; offer options collaboratively."
+    },
+    {
+      "url": "https://sbirt.uiowa.edu/sites/sbirt.uiowa.edu/files/2020-02/sbirt_mi_part_2_-_2018_-_final.pdf",
+      "title": "Motivational Interviewing: Steps and Core Skills",
+      "quote": "The four steps of the MI process are engage, focus, evoke, and plan.",
+      "technique": "Engage with empathy and open questions, focus on understanding what the person says and feels, and evoke their concerns before moving to planning."
+    },
+    {
+      "url": "https://comorbidityguidelines.org.au/core-skills-of-mi/informing-and-advising",
+      "title": "Informing and advising as core skill of MI",
+      "quote": "Offering information or advice with permission.",
+      "technique": "Before giving advice, ask permission and clarify what information the person wants; after sharing it, invite their interpretation and response."
+    },
+    {
+      "url": "https://www2.gov.bc.ca/assets/gov/health/practitioner-pro/bc-guidelines/doctorsbc_aud_practitioner-support.pdf",
+      "title": "Associated Document: Validating and Invalidating Statements and Curious Questions (Adapted from: www.borderlinepersonalitydisorder.com)",
+      "quote": "Remember not to focus on what happened; focus on how the patient feels about the situation.",
+      "technique": "Respond to the person’s feelings with emotional language, reflect what you hear, and ask curious questions rather than jumping to advice."
+    }
+  ]
+}

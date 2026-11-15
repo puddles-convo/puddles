@@ -1,0 +1,30 @@
+{
+  "id": "pattern-r09",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T13:48:31Z",
+  "parent_ids": [
+    "conv-r09-esconv-train-0080",
+    "conv-r09-esconv-train-0773",
+    "conv-r09-esconv-train-0449",
+    "conv-r09-esconv-train-0460",
+    "conv-r09-esconv-train-0892",
+    "conv-r09-esconv-train-0431",
+    "conv-r09-esconv-train-0743",
+    "conv-r09-esconv-train-0046"
+  ],
+  "round": 9,
+  "name": "Moves to action before exploring the user's specific concern",
+  "description": "After briefly acknowledging distress, the helper offers a plan, exercise, referral, or repeated suggestion before clarifying the user's concrete fear, uncertainty, or preferred support. First explore the concern the user has just raised; offer action only when it fits what they want or need.",
+  "seen_in": 5,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r09-esconv-train-0080",
+    "conv-r09-esconv-train-0773",
+    "conv-r09-esconv-train-0449",
+    "conv-r09-esconv-train-0431",
+    "conv-r09-esconv-train-0046"
+  ],
+  "same_as_pattern_id": "pattern-r04",
+  "seen_in_high": null
+}

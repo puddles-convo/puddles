@@ -1,0 +1,20 @@
+{
+  "id": "edit-r04",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T12:10:25Z",
+  "parent_ids": [
+    "pattern-r04",
+    "research-r04"
+  ],
+  "round": 4,
+  "pattern_id": "pattern-r04",
+  "research_id": "research-r04",
+  "base_policy_version": "policy-v2",
+  "new_policy_version": "policy-v3-candidate",
+  "policy_path": "policies/policy-v3-candidate-r04.md",
+  "summary": "Adds a rule to engage with the specific emotional concern before suggesting tasks or coping steps, and to ask before shifting into problem-solving.",
+  "action": "add",
+  "rule_id": "C9",
+  "rule_text": "When someone expresses distress or asks for emotional presence, respond directly to the feeling or need they named before offering practical steps, and check whether they want problem-solving before moving to it, because they need to feel heard before advice is useful."
+}

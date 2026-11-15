@@ -1,0 +1,37 @@
+{
+  "policy_version": "policy-v4",
+  "policy_sha256": "d5c4dfd500b63a9387220de35698b7cb50b7cb52b7291c96d976525dac76effe",
+  "scenario_ids": [
+    "esconv-validation-0009",
+    "esconv-validation-0012",
+    "esconv-validation-0014",
+    "esconv-validation-0017",
+    "esconv-validation-0018",
+    "esconv-validation-0022",
+    "esconv-validation-0023",
+    "esconv-validation-0024",
+    "esconv-validation-0038",
+    "esconv-validation-0054",
+    "esconv-validation-0061",
+    "esconv-validation-0082",
+    "esconv-validation-0093",
+    "esconv-validation-0101",
+    "esconv-validation-0107",
+    "esconv-validation-0111",
+    "esconv-validation-0129",
+    "esconv-validation-0137",
+    "esconv-validation-0149",
+    "esconv-validation-0166"
+  ],
+  "judge_version": "judge-fallback-v1-d30d3e41",
+  "scenarios_sha256": "895620c7ee847130ec68a695f6eb1f76e9730407c866bbe6e151b8dd71b7e482",
+  "max_turns": 6,
+  "seed": 7,
+  "measured": "fresh",
+  "scores": {
+    "empathy": 3.85,
+    "relevance": 4.15,
+    "quality": 4.0,
+    "emotion_change": 0.25
+  }
+}

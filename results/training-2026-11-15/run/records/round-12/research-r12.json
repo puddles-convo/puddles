@@ -1,0 +1,31 @@
+{
+  "id": "research-r12",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T14:34:27Z",
+  "parent_ids": [
+    "pattern-r12"
+  ],
+  "round": 12,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling training immediacy process comments here and now deepen exploration university",
+    "counselling skills focusing responses client narrative emotional depth training manual",
+    "counselling skills empathic challenge discrepancy gentle confrontation training guide"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://www.apa.org/pubs/books/supplemental/Helping-Skills-Fifth/Lab8.pdf",
+      "title": "LAB 8: Challenge of Discrepancy",
+      "quote": "The initial helper starts by using exploration skills to help the client explore.",
+      "technique": "First use reflections, restatements, and open questions to explore the concern and establish support; only then gently name a discrepancy you have noticed and invite the client to respond."
+    },
+    {
+      "url": "https://counseling.education/counseling/skills/challenging.html",
+      "title": "Challenging Skills",
+      "quote": "Process comments are one form of immediacy that involve the counselor cueing the client to focus on the interpersonal process in the session rather than the session content.",
+      "technique": "When it may help deepen awareness, gently comment on an observable shift in the here-and-now interaction and ask what the client noticed or felt, rather than repeating a reflection of their story."
+    }
+  ]
+}

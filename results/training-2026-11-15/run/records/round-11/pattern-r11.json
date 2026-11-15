@@ -1,0 +1,30 @@
+{
+  "id": "pattern-r11",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T14:28:58Z",
+  "parent_ids": [
+    "conv-r11-esconv-train-0582",
+    "conv-r11-esconv-train-0462",
+    "conv-r11-esconv-train-0360",
+    "conv-r11-esconv-train-0644",
+    "conv-r11-esconv-train-0156",
+    "conv-r11-esconv-train-0233",
+    "conv-r11-esconv-train-0190",
+    "conv-r11-esconv-train-0651"
+  ],
+  "round": 11,
+  "name": "Repeats reflections without deepening the conversation",
+  "description": "After the person shares a feeling or concern, the helper often restates it in similar words and follows with another prompt or suggestion, rather than adding a new understanding or meaningfully exploring what the concern means to them. This can make the exchange feel formulaic.",
+  "seen_in": 5,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r11-esconv-train-0462",
+    "conv-r11-esconv-train-0360",
+    "conv-r11-esconv-train-0233",
+    "conv-r11-esconv-train-0190",
+    "conv-r11-esconv-train-0651"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

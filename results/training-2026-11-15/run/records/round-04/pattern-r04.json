@@ -1,0 +1,31 @@
+{
+  "id": "pattern-r04",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T12:09:59Z",
+  "parent_ids": [
+    "conv-r04-esconv-train-0446",
+    "conv-r04-esconv-train-0775",
+    "conv-r04-esconv-train-0175",
+    "conv-r04-esconv-train-0489",
+    "conv-r04-esconv-train-0811",
+    "conv-r04-esconv-train-0793",
+    "conv-r04-esconv-train-0547",
+    "conv-r04-esconv-train-0268"
+  ],
+  "round": 4,
+  "name": "Redirects emotional concerns into tasks or coping steps too quickly",
+  "description": "When a user expresses distress or names a need for emotional presence, the helper shifts to practical planning, suggestions, or a coping prompt before sufficiently engaging with that specific feeling or need. The helper should first respond directly to the concern the user raised and check whether they want problem-solving before moving into action steps.",
+  "seen_in": 6,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r04-esconv-train-0446",
+    "conv-r04-esconv-train-0775",
+    "conv-r04-esconv-train-0175",
+    "conv-r04-esconv-train-0811",
+    "conv-r04-esconv-train-0793",
+    "conv-r04-esconv-train-0547"
+  ],
+  "same_as_pattern_id": null,
+  "seen_in_high": null
+}

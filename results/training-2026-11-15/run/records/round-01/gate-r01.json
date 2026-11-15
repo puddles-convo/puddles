@@ -1,0 +1,28 @@
+{
+  "id": "gate-r01",
+  "schema_version": 4,
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-15T11:27:33Z",
+  "parent_ids": [
+    "edit-r01"
+  ],
+  "round": 1,
+  "edit_id": "edit-r01",
+  "decision": "kept",
+  "before": {
+    "empathy": 2.9,
+    "relevance": 3.75,
+    "quality": 3.325,
+    "emotion_change": 0.35
+  },
+  "after": {
+    "empathy": 3.2,
+    "relevance": 4.1,
+    "quality": 3.65,
+    "emotion_change": 0.55
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v2",
+  "reason": "Kept: quality rose by 0.325, above the noise of 0.275; no dimension fell by more than the noise; the safety check passed (19 cases).",
+  "prediction_met": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "research-r02",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T11:35:16Z",
+  "parent_ids": [
+    "pattern-r02"
+  ],
+  "round": 2,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling training immediacy reflection of meaning advanced listening skills guide",
+    "therapeutic communication exploring emotion open questions focusing counselling skills training guide",
+    "reflective listening complex reflections deepen client meaning counselling skills university training"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://counseling.education/counseling/skills/files/skills_cheat_sheet.pdf",
+      "title": "Reflecting Skills",
+      "quote": "Reflecting meaning: Brief statement that connects client’s experience to a deeper meaning system.",
+      "technique": "Move beyond restating events by tentatively connecting the client’s feeling and experience to a deeper meaning, and allow them to correct or develop that understanding."
+    },
+    {
+      "url": "https://content.cpcab.co.uk/www/documents/Immediacy%20for%20Levels%202-4.pdf",
+      "title": "2. To deal with difficulties (1) e.g., Lack of trust",
+      "quote": "Immediacy is the ability of the counsellor/helper to use the immediate situation to invite the client to look at what is going on between them in the relationship.",
+      "technique": "When a recurring interaction pattern appears in the helping conversation, describe what you notice in the here and now, tentatively link it to the client’s concern, and invite them to explore whether that fits."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "edit-r09",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T13:48:58Z",
+  "parent_ids": [
+    "pattern-r09",
+    "research-r09"
+  ],
+  "round": 9,
+  "pattern_id": "pattern-r04",
+  "research_id": "research-r09",
+  "base_policy_version": "policy-v4",
+  "new_policy_version": "policy-v5-candidate",
+  "policy_path": "policies/policy-v5-candidate-r09.md",
+  "summary": "Rewords C9 to address this recurrence by specifying how to explore the concern and check the person’s goals before suggesting action. Unlike the reverted edits, it does not require explicit permission or make the person’s answer a prerequisite; it adds a focused question-and-understanding check.",
+  "action": "reword",
+  "rule_id": "C9",
+  "rule_text": "When a person raises a concrete fear or uncertainty, ask one open, purposeful question to understand what worries them or what support they want, then reflect and check your understanding before offering action, because premature steps can miss what they need."
+}

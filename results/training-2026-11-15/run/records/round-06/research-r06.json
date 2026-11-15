@@ -1,0 +1,37 @@
+{
+  "id": "research-r06",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T12:47:59Z",
+  "parent_ids": [
+    "pattern-r06"
+  ],
+  "round": 6,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling skills responding without a question empathic statement silence validation training guide",
+    "counselling communication reflections pauses therapeutic silence open questions purposeful training resource",
+    "active listening counsellor reflecting feelings allow space without asking questions university counselling skills"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://oklahoma.gov/content/dam/ok/en/odmhsas/documents/training/bhcm/BHCM%20Active%20Listening%20ppt%20training.pdf",
+      "title": "Active",
+      "quote": "A Simple refection tells your client that you understand the meaning of their words. Good to use during the engagement phase but be careful not to rely on these only or you may soon be circling. [...] Reflecting does not involve you asking questions.",
+      "technique": "Use reflection as a statement rather than attaching a question by default, and vary your response when reflections start to make the conversation circle."
+    },
+    {
+      "url": "https://pressbooks.pub/app/uploads/sites/2296/2023/05/Responsive_microskills_techniques.pdf",
+      "title": "MICROSKILLS AND TECHNIQUES FOR CENTRING RELATIONSHIPS IN COUNSELLING",
+      "quote": "Embracing silence: Listen, wait, and be present while both counsellor and client actively reflect. Purpose: Create space for client reflection and processing.",
+      "technique": "After acknowledging the client, allow a pause and remain present so they have room to reflect, rather than automatically prompting them with another question."
+    },
+    {
+      "url": "https://www.nhpco.org/wp-content/uploads/Empathic_Responses.pdf",
+      "title": "Horizontal Job Aid Template",
+      "quote": "Judicious use of strategic silence helps to elicit patients’ feelings. You can still respond empathically with body language [...] Pitfall to avoid: Rushing to fill the silence.",
+      "technique": "When the client may need time, use attentive nonverbal presence and let silence stand instead of rushing to fill it with another question."
+    }
+  ]
+}

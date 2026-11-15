@@ -1,0 +1,92 @@
+{
+  "root": "/Users/moamen/.hermes/cache/scratch/train/baseline",
+  "runs": [
+    {
+      "policy_version": "policy-v1",
+      "run": 1,
+      "n": 20,
+      "seconds": 514.1171104579989,
+      "input_tokens": 242505,
+      "output_tokens": 16454,
+      "cost_usd": 0.2751303,
+      "conversations_failed": [],
+      "unscored": [],
+      "complete": true,
+      "empathy": 4.8,
+      "relevance": 4.8,
+      "quality": 4.8,
+      "emotion_change": 0.45,
+      "seed": 7,
+      "max_turns": 6,
+      "judge_version": "judge-fallback-v1-c9f6604e",
+      "scenario_ids_sha256": "68dc860ccde99cac91ff324aa82b9703df8a1070ed2676e539fded9cd28ad54e"
+    },
+    {
+      "policy_version": "policy-v1",
+      "run": 2,
+      "n": 20,
+      "seconds": 527.384149666992,
+      "input_tokens": 241603,
+      "output_tokens": 16953,
+      "cost_usd": 0.2799161,
+      "conversations_failed": [],
+      "unscored": [],
+      "complete": true,
+      "empathy": 4.95,
+      "relevance": 4.9,
+      "quality": 4.925,
+      "emotion_change": 0.4,
+      "seed": 7,
+      "max_turns": 6,
+      "judge_version": "judge-fallback-v1-c9f6604e",
+      "scenario_ids_sha256": "68dc860ccde99cac91ff324aa82b9703df8a1070ed2676e539fded9cd28ad54e"
+    },
+    {
+      "policy_version": "policy-v1",
+      "run": 3,
+      "n": 20,
+      "seconds": 509.02781012500054,
+      "input_tokens": 241943,
+      "output_tokens": 16943,
+      "cost_usd": 0.2790996,
+      "conversations_failed": [],
+      "unscored": [],
+      "complete": true,
+      "empathy": 4.95,
+      "relevance": 4.9,
+      "quality": 4.925,
+      "emotion_change": 0.35,
+      "seed": 7,
+      "max_turns": 6,
+      "judge_version": "judge-fallback-v1-c9f6604e",
+      "scenario_ids_sha256": "68dc860ccde99cac91ff324aa82b9703df8a1070ed2676e539fded9cd28ad54e"
+    }
+  ],
+  "groups": [
+    {
+      "fingerprint": {
+        "judge_version": "judge-fallback-v1-c9f6604e",
+        "max_turns": 6,
+        "scenario_ids_sha256": "68dc860ccde99cac91ff324aa82b9703df8a1070ed2676e539fded9cd28ad54e",
+        "seed": 7
+      },
+      "policies": {
+        "policy-v1": {
+          "runs": [
+            1,
+            2,
+            3
+          ],
+          "complete": 3,
+          "noise": 0.125,
+          "mean_scores": {
+            "empathy": 4.8999999999999995,
+            "relevance": 4.866666666666667,
+            "quality": 4.883333333333333,
+            "emotion_change": 0.39999999999999997
+          }
+        }
+      }
+    }
+  ]
+}
