@@ -23,8 +23,8 @@ from puddles import replay
 from puddles.graph import check_policy_file
 from puddles.memory import now
 from puddles.policy import TOKEN_CAP, estimate_tokens, parse_policy, render_policy
-from puddles.records import sha256_text
-from puddles.round import RoundResult
+from puddles.records import sha256_bytes, sha256_text
+from puddles.round import RoundResult, read_policy_text
 from schemas import (
     ConversationRecord,
     GateInput,
@@ -134,16 +134,23 @@ def _read_text(path: Path | str) -> str:
     return Path(path).read_bytes().decode("utf-8")
 
 
+def _sha256_file(path: Path | str) -> str:
+    """The hash of a file's bytes: for valid UTF-8, the same as sha256_text of `_read_text`."""
+    return sha256_bytes(Path(path).read_bytes())
+
+
 def _load_tied(path: Path | str, what: str, expected: Optional[str] = None) -> Policy:
     """Load a policy, hashing the file before and after the load.
 
     The two hashes and the hash of the loaded text must agree, and equal `expected` when given:
     otherwise the file changed under the gate, and the evidence would be about other bytes.
     """
-    before = sha256_text(_read_text(path))
-    policy = check_policy_file(Path(path))
-    after = sha256_text(_read_text(path))
+    before = _sha256_file(path)
     first = expected if expected is not None else before
+    if before != first:  # before loading: a file that no longer decodes is a change, not a crash
+        raise _Changed(f"the {what} changed while it was being tested")
+    policy = check_policy_file(Path(path))
+    after = _sha256_file(path)
     if not before == sha256_text(policy.text) == after == first:
         raise _Changed(f"the {what} changed while it was being tested")
     return policy
@@ -244,7 +251,8 @@ def _cache_key(deps: GateDeps, policy_version: str, policy_sha256: str, scenario
 def _write_current(root: Path, key: dict[str, Any], scores: Scores) -> None:
     path = current_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({**key, "scores": scores.model_dump()}, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({**key, "scores": scores.model_dump()}, indent=2) + "\n", encoding="utf-8",
+                    newline="")  # no newline translation on any platform
 
 
 def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
@@ -254,7 +262,9 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # JSON, not a policy: nothing is hashed from these bytes and line endings carry no meaning,
+        # so any are accepted. A file that does not decode or parse counts as absent.
+        data = json.loads(path.read_bytes().decode("utf-8"))
         if not isinstance(data, dict) or "scores" not in data or any(name not in data for name in key):
             return None
         if any(data[name] != value for name, value in key.items()):
@@ -310,7 +320,7 @@ def _changed_rules(current: Policy, candidate: Policy) -> list[str]:
 def _version(path: str) -> str:
     """The version of a policy file that may not load: what parse_policy reads, else the file's stem."""
     try:
-        return parse_policy(Path(path).read_text(encoding="utf-8")).version
+        return parse_policy(Path(path).read_bytes().decode("utf-8")).version
     except Exception:  # noqa: BLE001
         return Path(path).stem
 
@@ -320,7 +330,7 @@ def _clashes(root: Path, round_: int, scenario_ids: list[str]) -> list[str]:
     train = Path(root) / "conversations" / f"round-{round_:02d}-train.jsonl"
     if not train.exists():
         return []
-    lines = train.read_text(encoding="utf-8").splitlines()
+    lines = train.read_bytes().decode("utf-8").splitlines()  # undecodable: a crash, so a revert
     train_ids = {json.loads(line)["id"] for line in lines if line.strip()}
     return [cid for cid in (conversation_id(round_, sid, VALIDATION_TAG) for sid in scenario_ids) if cid in train_ids]
 
@@ -493,7 +503,7 @@ def _recheck(run: _Run) -> None:
     """Both files must still hold the text the checks were made on."""
     for path, sha, what in ((run.inp.candidate_policy, run.candidate_sha256, "candidate"),
                             (run.inp.current_policy, run.current_sha256, "policy in force")):
-        if sha is None or sha256_text(_read_text(path)) != sha:
+        if sha is None or _sha256_file(path) != sha:
             raise _Changed(f"the {what} changed while it was being tested")
 
 
@@ -722,7 +732,7 @@ def ensure_starting_meta(root: Path, start_policy: Path) -> Path:
 
     No parent, every Conversation rule a base rule, no learned rules. An existing file is left alone.
     """
-    text = Path(start_policy).read_text()
+    text = read_policy_text(Path(start_policy))  # its bytes, so policy_sha256 is the hash of the file
     start = parse_policy(text)
     path = replay.meta_path(Path(root), start.version)
     if path.exists():
@@ -730,5 +740,5 @@ def ensure_starting_meta(root: Path, start_policy: Path) -> Path:
     # With no rounds, expected_meta gives every rule as a base rule and the Safety hash replay checks.
     meta = replay.expected_meta([], start, start, text).model_copy(update={"parent": None})
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(meta.model_dump_json(indent=2) + "\n")
+    path.write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="")
     return path

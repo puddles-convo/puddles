@@ -9,12 +9,13 @@ from typing import Callable, Literal, Optional
 
 import httpx
 
+from loop.errors import PolicyError
 from puddles import replay
 from puddles.agents import critic, proposer, researcher
 from puddles.decision_log import DecisionLog, DecisionLogError
 from puddles.llm import LLM
 from puddles.memory import READS_PATH, Memory, PastError, entry_for, now
-from puddles.policy import parse_policy, render_policy, safety_section
+from puddles.policy import PolicyEditError, apply_edit, parse_policy, render_policy, safety_section
 from puddles.records import load_record, record_path, save_record, sha256_bytes, sha256_text
 from schemas import (
     FailurePattern,
@@ -230,13 +231,44 @@ def prepare_round(log: DecisionLog, memory: Memory, root: Path, start_policy: Pa
     return replay.check(log, root, start_policy)
 
 
+def read_policy_text(path: Path, expected_sha256: Optional[str] = None,
+                     changed: Optional[Exception] = None) -> str:
+    """A policy file's text exactly as its bytes are: read once, decoded as UTF-8, no newline
+    translation, so the hash of the text is the hash of the bytes on disk.
+
+    With `expected_sha256`, the bytes must have that hash, or `changed` is raised; it is checked on
+    the bytes, so a file that no longer decodes is a change, not a crash. Then the strict loader's
+    rules (`puddles.graph.check_policy_file`): valid UTF-8, no byte-order mark, no carriage return.
+    Anything else raises `PolicyError` before the caller writes anything.
+    """
+    changed = changed or PolicyChanged(f"{path} is not the text that was measured; nothing was written")
+    data = Path(path).read_bytes()
+    if expected_sha256 is not None and sha256_bytes(data) != expected_sha256:
+        raise changed
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PolicyError(f"{path}: not valid UTF-8 ({exc})") from exc
+    if text.startswith("﻿"):
+        raise PolicyError(f"{path}: starts with a byte-order mark")
+    if "\r" in text:
+        raise PolicyError(f"{path}: contains a carriage return; use Unix line endings")
+    # A second look, as the gate hashes around a loader: the file as text mode reads it must be
+    # exactly these bytes, so nothing translated and nothing moved between the two reads.
+    if Path(path).read_text(encoding="utf-8") != text:
+        raise changed
+    return text
+
+
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
                  root: Path, start_policy: Optional[Path] = None) -> RoundEvent:
     """Log the round, copy its records into memory, then run the replay check.
 
     It works in two halves. First it reads every file it needs once (the base policy, the
     candidate, the starting policy, the round's record files) and makes every check it can:
-    the gate's hashes, the round not being logged already, and the replay check run on what the
+    the gate's hashes (whatever the decision, on the files' bytes), the candidate being the base
+    with the logged edit applied (when scores or a safety result are filed), the records being
+    the round's own, the round not being logged already, and the replay check run on what the
     log and the policy in force would be after this round. Only then does it write: the gate's
     record, the promoted policy and its .meta.json, the round event, the memory copies. So a
     check that fails leaves nothing behind.
@@ -246,13 +278,20 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     is written and no replay check runs. With a gate outcome, the gate's `result.scores` and
     `result.safety` go into the event; without one both stay empty.
     """
-    # ---- read each file once ----
-    base_text = result.base_policy_path.read_text()
+    # ---- read each file once, as its bytes, and check what was measured against those bytes ----
+    base_text = read_policy_text(
+        result.base_policy_path, result.base_sha256 if gate is not None else None,
+        PolicyChanged(f"{result.base_policy_path} is not the text the before-scores were measured on; "
+                      "nothing was written"))
     candidate_text: Optional[str] = None
+    # Whatever the decision: a reverted event carries this hash beside the candidate's scores and safety.
+    tested = gate is not None and result.candidate_sha256 is not None
     if gate is not None:
         assert result.candidate_path is not None and result.edit is not None
-        candidate_text = result.candidate_path.read_text()
-    start_text = Path(start_policy).read_text() if start_policy is not None else None
+        candidate_text = read_policy_text(
+            result.candidate_path, result.candidate_sha256,
+            CandidateChanged(f"{result.candidate_path} is not the text the gate tested; nothing was written"))
+    start_text = read_policy_text(Path(start_policy)) if start_policy is not None else None
     records: dict[str, Record] = {}
     for kind, model in MODELS.items():
         if kind in result.refs:
@@ -261,15 +300,20 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
                 raise RecordChanged(f"the {kind} record {result.refs[kind].path} is missing or changed on disk")
             records[kind] = loaded
 
-    # ---- check what was measured against the bytes it was measured on ----
-    if gate is not None and result.base_sha256 is not None and sha256_text(base_text) != result.base_sha256:
-        raise PolicyChanged(f"{result.base_policy_path} is not the text the before-scores were measured on; "
-                            "nothing was written")
-    if gate is not None and gate.decision == "kept" and result.candidate_sha256 is not None \
-            and sha256_text(candidate_text or "") != result.candidate_sha256:
-        raise CandidateChanged(f"{result.candidate_path} changed after the gate tested it; nothing was promoted")
+    # The event copies the pattern and the edit from the result: they must be the records just read.
+    for kind in ("pattern", "edit"):
+        mine = getattr(result, kind)
+        if kind in records and (mine is None or records[kind].model_dump(mode="json") != mine.model_dump(mode="json")):
+            raise RecordChanged(f"the {kind} record {result.refs[kind].path} is not the round's {kind}; "
+                                "nothing was written")
+
     if any(r.round == result.round for r in log.rounds()):
         raise DecisionLogError(f"round {result.round} is already in {log.path}; nothing was written")
+    # Only when a measurement is filed: a candidate the static checks stopped is by its nature not
+    # the base with the edit, nothing was measured on it, and its revert must still be logged.
+    if tested and (result.scores is not None or result.safety is not None):
+        assert candidate_text is not None and result.edit is not None
+        _check_logged_edit(base_text, candidate_text, result.edit, log, result.candidate_path)
 
     # ---- build the round in memory ----
     base_version = parse_policy(base_text).version
@@ -317,9 +361,11 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         result.refs["outcome"] = refs["outcome"]
     if promoted:
         version, text = promoted
-        replay.policy_path(root, version).write_text(text)
+        # UTF-8 with no newline translation: exactly the bytes new_sha256 is the hash of.
+        replay.policy_path(root, version).write_text(text, encoding="utf-8", newline="")
         if meta is not None:
-            replay.meta_path(root, version).write_text(meta.model_dump_json(indent=2) + "\n")
+            replay.meta_path(root, version).write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8",
+                                                       newline="")
     log.append(event)
     for kind in MODELS:
         if kind in records:
@@ -327,6 +373,24 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     if start_policy is not None:
         replay.check(log, root, start_policy)  # the files as written; checked once already before writing
     return event
+
+
+def _check_logged_edit(base_text: str, candidate_text: str, edit: PolicyEdit, log: DecisionLog,
+                       candidate_path: Optional[Path]) -> None:
+    """The candidate the gate tested must be the base with the logged edit applied, by the
+    proposer's own function: the same Safety section, the same Conversation rules by ID and text.
+    Otherwise its scores would be filed under an edit the conversations did not run on."""
+    action = edit.action or "add"
+    try:
+        base, candidate = parse_policy(base_text), parse_policy(candidate_text)
+        expected, rule_id = apply_edit(base, action, None if action == "add" else edit.rule_id, edit.rule_text,
+                                       candidate.version, used_ids=log.used_rule_ids())
+    except PolicyEditError as exc:
+        raise PolicyChanged(f"{candidate_path} is not the base policy with {edit.id} applied ({exc}); "
+                            "nothing was written") from exc
+    if rule_id != edit.rule_id or safety_section(expected) != safety_section(candidate) \
+            or expected.conversation != candidate.conversation:
+        raise PolicyChanged(f"{candidate_path} is not the base policy with {edit.id} applied; nothing was written")
 
 
 def _replay_before_writing(log: DecisionLog, root: Path, start_path: Path, start_text: str, event: RoundEvent,
