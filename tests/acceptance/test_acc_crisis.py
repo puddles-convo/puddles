@@ -792,6 +792,31 @@ def test_chat_errors_return_two_and_one_stderr_line(tmp_path, policy_path, capsy
 
 def test_chat_real_mode_uses_helper_endpoint_and_no_setup_without_consent(
         tmp_path, policy_path, monkeypatch):
+    import urllib.request
+    import openai
+
+    from puddles.inference import note_store
+    from puddles import llm as notes_llm
+
+    class NoSDK:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("OpenAI SDK built without training consent")
+
+    note_requests = []
+
+    def local_opener(request, timeout=None):
+        note_requests.append(json.loads(request.data))
+        content = json.dumps({"forget_everything": False, "actions": []})
+        return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
+
+    # Training-off real mode uses plain HTTP; stub its transport and forbid SDK construction.
+    monkeypatch.setenv("PAST_API_KEY", "dummy")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy")
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "local-notes-model")
+    patch_dependency(monkeypatch, note_store, "PastUserMemory", note_store.FakeUserMemory)
+    patch_dependency(monkeypatch, notes_llm, "OpenAILLM", NoSDK)
+    monkeypatch.setattr(openai, "OpenAI", NoSDK)
+    monkeypatch.setattr(urllib.request, "urlopen", local_opener)
     # Route by the contractual checker request, permitting either creation order
     # and one shared endpoint client as well as two separate clients.
     def answer_for_request(system, messages):
@@ -812,6 +837,7 @@ def test_chat_real_mode_uses_helper_endpoint_and_no_setup_without_consent(
     assert prefixes and set(prefixes) == {"HELPER"}
     assert "robot: A CLI helper reply." in output.getvalue()
     assert not (tmp_path / "unused.db").exists()
+    assert len(note_requests) == 1 and note_requests[0]["model"] == "local-notes-model"
 
 
 def test_chat_training_setup_and_record_flags(tmp_path, policy_path, monkeypatch):
