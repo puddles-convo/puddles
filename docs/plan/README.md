@@ -92,6 +92,8 @@ Do not merge the two packages tonight. The graph in stage 0 imports from both.
 | `PAST_API_KEY`, `PAST_BASE_URL` (optional) | Memory |
 | `PUDDLES_CONFIG` (optional) | The run's config file: the prices table and each agent's output limit. Default `config/run.toml` |
 | `HELPER_EXTRA_BODY`, `SIMUSER_EXTRA_BODY` (optional) | A JSON object merged into every request to that endpoint |
+| `HELPER_MAX_TOKENS_PARAM`, `SIMUSER_MAX_TOKENS_PARAM` (optional) | The body field for the output limit on that endpoint: `max_tokens` (default) or `max_completion_tokens`. See [docs/specs/provider-settings.md](../specs/provider-settings.md) |
+| `PUDDLES_AGENT_TOOL_REASONING_EFFORT` (optional) | `reasoning_effort` on the researcher's requests that carry the search tool, and on no other request |
 
 Stages 0 to 2 add `MLFLOW_TRACKING_URI` and a variable for the judge model.
 
