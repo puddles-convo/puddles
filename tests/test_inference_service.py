@@ -682,6 +682,84 @@ def test_serve_startup_error_names_the_step_and_type_never_the_message(problem, 
     assert ("RuntimeError" if problem != "missing-policy" else "FileNotFoundError") in lines[0]
 
 
+# ---------- repair round 2 ----------
+
+@pytest.mark.parametrize("url", ["/sessions", "/sessions/s1/turns", "/sessions/s1/end"])
+def test_an_unauthorized_body_is_never_received(url, tmp_path, monkeypatch):
+    from starlette.requests import Request
+
+    reads: list[str] = []
+    original = Request.body
+
+    async def observed(self: Any) -> bytes:
+        reads.append(self.url.path)
+        return await original(self)
+
+    monkeypatch.setattr(Request, "body", observed)
+    sent: list[int] = []
+
+    def huge() -> Any:                           # a large body, sent slowly; none of it may be pulled
+        for _ in range(1000):
+            sent.append(1)
+            time.sleep(0.001)
+            yield b"x" * 65536
+
+    app = create_app(make_config(tmp_path))
+    with TestClient(app) as c:
+        start(c, session_id="s1")
+        reads.clear()
+        r = c.post(url, content=huge(), headers={"Content-Type": "application/json"})
+        assert r.status_code == 401 and r.json() == {"error": "unauthorized"}
+        r = c.post(url, json={"text": "hello"}, headers={"Authorization": "Bearer wrong"})
+        assert r.status_code == 401
+    assert reads == [] and sent == []
+    assert app.state.service.live() == ["s1"] and session_of(app, "s1").lines == []   # nothing changed
+
+
+def test_unknown_paths_and_wrong_methods_keep_their_bodies_without_a_token(tmp_path):
+    app = create_app(make_config(tmp_path))
+    with TestClient(app) as c:
+        r = c.post("/nowhere", json={})
+        assert r.status_code == 404 and r.json() == {"error": "not_found"}
+        r = c.get("/sessions")
+        assert r.status_code == 405 and r.json() == {"error": "method_not_allowed"}
+        r = c.get("/docs")
+        assert r.status_code == 404 and r.json() == {"error": "not_found"}
+        assert c.get("/health").json() == {"status": "ok"}
+
+
+def test_build_config_reads_only_the_token_from_its_mapping(tmp_path, monkeypatch):
+    import argparse
+
+    import scripts.serve as serve
+
+    built: list[str] = []
+    monkeypatch.setattr("loop.llm.client_from_env", lambda prefix: built.append(prefix) or fake_helper())
+    monkeypatch.setattr(serve, "OpenAILLM", lambda: built.append("openai") or FakeNoteTaker())
+    monkeypatch.setattr(serve.PlainLLM, "from_env", classmethod(lambda cls: FakeNoteTaker()))
+    monkeypatch.setattr(serve, "PastUserMemory", FakeUserMemory)
+    for key in ("PAST_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.setenv(key, "placeholder")
+    args = argparse.Namespace(policy=str(POLICY_SRC), root=str(tmp_path / "root"), notes_root=None, mlflow=None,
+                              fake=False)
+    config = serve.build_config(args, {"PUDDLES_SERVICE_TOKEN": TOKEN})
+    assert config.token == TOKEN and "HELPER" in built and "openai" in built
+
+    monkeypatch.delenv("PAST_API_KEY")           # the process environment decides, not the mapping
+    with pytest.raises(serve.ConfigError, match="PAST_API_KEY"):
+        serve.build_config(args, {"PUDDLES_SERVICE_TOKEN": TOKEN, "PAST_API_KEY": "in-the-mapping-only"})
+
+
+def test_unknown_keys_are_named_only_when_letters_digits_and_underscore_up_to_64(tmp_path):
+    app = create_app(make_config(tmp_path))
+    base = {"user_id": PERSON, "remember_me": False, "consent_for_training": False}
+    named = ["2nd_field", "a" * 64, "x"]
+    hidden = ["client-metadata", "a" * 65, "has space", "ünicode", ""]
+    with TestClient(app) as c:
+        r = c.post("/sessions", json={**base, **{k: 1 for k in named + hidden}}, headers=AUTH)
+    assert r.status_code == 422 and r.json() == {"error": "invalid_request", "fields": sorted(named)}
+
+
 # ---------- create_app refuses a bad config ----------
 
 @pytest.mark.parametrize("change", [{"token": ""}, {"token": None}, {"max_sessions": 0}, {"idle_timeout_s": 0},

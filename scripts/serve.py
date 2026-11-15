@@ -118,7 +118,8 @@ def build_config(args: argparse.Namespace, env: Mapping[str, str]) -> ServiceCon
     else:
         from loop.llm import client_from_env
 
-        missing = [name for name in NOTES_KEYS if not env.get(name)]
+        # Only the token comes from `env`; everything else is the process environment the constructors read.
+        missing = [name for name in NOTES_KEYS if not os.environ.get(name)]
         if missing:
             raise ConfigError(f"{' and '.join(missing)} not set; the notes need them")
         # One of each, once, so a missing variable is found now.

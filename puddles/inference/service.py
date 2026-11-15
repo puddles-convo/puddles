@@ -25,11 +25,14 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import fastapi
-from fastapi import Depends, Request
+from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import BaseRoute, Match
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from loop.errors import PolicyError
 from loop.llm import ChatClient
@@ -47,7 +50,8 @@ from schemas import ConversationRecord
 MAX_TEXT_CHARS = 2000
 MAX_SESSION_ID_CHARS = 64
 BEARER = "Bearer "
-_FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")  # an extra key is named in `fields` only if it looks like one
+HEALTH = "/health"
+_FIELD_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")  # an unknown key is named in `fields` only if it fits this
 
 log = logging.getLogger("puddles.inference.service")
 
@@ -332,6 +336,32 @@ def _authorized(request: Request, token: str) -> bool:
     return hmac.compare_digest(values[0][len(prefix):], expected)
 
 
+class _TokenGate:
+    """Pure ASGI: a request for any route but GET /health needs the token before anything reads its body.
+
+    The router's own routes decide what a route is, so a path that is no route still gets 404 and a wrong
+    method 405 from the app. A refused request is answered here, and its body is never received.
+    """
+
+    def __init__(self, app: ASGIApp, *, routes: list[BaseRoute], token: str) -> None:
+        self.app = app
+        self.routes = routes  # the router's own list, which the app's routes are added to afterwards
+        self.token = token
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and self._needs_token(scope) and not _authorized(Request(scope), self.token):
+            await _error(401, {"error": "unauthorized"})(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _needs_token(self, scope: Scope) -> bool:
+        for route in self.routes:
+            match, _ = route.matches(scope)
+            if match == Match.FULL:
+                return not (isinstance(route, APIRoute) and route.path == HEALTH)
+        return False
+
+
 def _error(status: int, body: dict[str, Any]) -> JSONResponse:
     return JSONResponse(status_code=status, content=body)
 
@@ -368,9 +398,7 @@ def create_app(config: ServiceConfig) -> fastapi.FastAPI:
     app = fastapi.FastAPI(title="puddles turn service", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service = service
 
-    def require_token(request: Request) -> None:
-        if not _authorized(request, config.token):
-            raise Refused(401, {"error": "unauthorized"})
+    app.add_middleware(_TokenGate, routes=app.router.routes, token=config.token)
 
     @app.exception_handler(Refused)
     async def _refused(request: Request, exc: Refused) -> JSONResponse:
@@ -378,9 +406,6 @@ def create_app(config: ServiceConfig) -> fastapi.FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _invalid(request: Request, exc: RequestValidationError) -> JSONResponse:
-        # A body that is not JSON is refused before any dependency runs, so the token is checked here too.
-        if not _authorized(request, config.token):
-            return _error(401, {"error": "unauthorized"})
         return _error(422, {"error": "invalid_request", "fields": _fields(exc)})
 
     @app.exception_handler(StarletteHTTPException)
@@ -398,21 +423,19 @@ def create_app(config: ServiceConfig) -> fastapi.FastAPI:
             log.error("%s -> 500 (%s)", route, type(exc).__name__)
             return _error(500, {"error": "internal"})
 
-    auth = [Depends(require_token)]
-
-    @app.get("/health")
+    @app.get(HEALTH)
     def health() -> JSONResponse:
         return _error(200, {"status": "ok"})
 
-    @app.post("/sessions", dependencies=auth)
+    @app.post("/sessions")
     def start(body: StartBody) -> JSONResponse:
         return guarded("start", lambda: service.start(body), 201)
 
-    @app.post("/sessions/{session_id}/turns", dependencies=auth)
+    @app.post("/sessions/{session_id}/turns")
     def turn(session_id: str, body: TurnBody) -> JSONResponse:
         return guarded("turn", lambda: service.turn(session_id, body), 200)
 
-    @app.post("/sessions/{session_id}/end", dependencies=auth)
+    @app.post("/sessions/{session_id}/end")
     def end(session_id: str) -> JSONResponse:
         return guarded("end", lambda: service.end(session_id), 200)
 
