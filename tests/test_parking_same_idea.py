@@ -83,6 +83,18 @@ def test_carried_over_only_from_its_round_on(tmp_path):
     assert set(parking.parked(log, "policy-v4").rules) == {"C9"}
 
 
+def test_a_fall_equal_to_the_noise_is_not_clearly_worse_despite_float_error(tmp_path):
+    assert 4.15 - 3.875 > 0.275  # the floating-point slip the rounding guards against
+    t = parking.FailedTry(round=5, edit_id="edit-r05", action="reword", rule_id="C9", pattern_id="pattern-r04",
+                          before=4.15, after=3.875, base="policy-v3", noise=0.275)
+    assert t.negative and not t.clearly_worse
+    assert not parking.FailedTry(round=1, edit_id="e", action="reword", rule_id="C1", pattern_id=None,
+                                 before=0.1 + 0.2, after=0.3).negative
+    log = write_log(tmp_path, [(5, "reverted", "pattern-r04", "reword", "C9", "policy-v3", "policy-v3", 4.15, 3.875),
+                               TONIGHT[7]])
+    assert parking.parked(log, "policy-v4").rules == {} and parking.parked(log, "policy-v4").patterns == {}
+
+
 def test_no_noise_logged_is_not_clearly_worse(tmp_path):
     t = parking.FailedTry(round=5, edit_id="edit-r05", action="reword", rule_id="C9", pattern_id="pattern-r04",
                           before=4.15, after=3.475, base="policy-v3", noise=None)

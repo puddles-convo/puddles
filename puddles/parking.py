@@ -33,13 +33,20 @@ class FailedTry:
     rule_text: Optional[str] = None  # a removal has none
 
     @property
+    def fall(self) -> Optional[float]:
+        """How far quality fell, rounded as puddles/gate.py rounds a change before comparing it with the noise."""
+        if self.before is None or self.after is None:
+            return None
+        return round(self.before - self.after, 9)
+
+    @property
     def negative(self) -> bool:
-        return self.before is not None and self.after is not None and self.after < self.before
+        return self.fall is not None and self.fall > 0
 
     @property
     def clearly_worse(self) -> bool:
-        """5.6: quality fell by more than the round's logged noise."""
-        return self.negative and self.noise is not None and self.before - self.after > self.noise  # type: ignore[operator]
+        """5.6: quality fell by more than the round's logged noise (equal is not more)."""
+        return self.negative and self.noise is not None and self.fall > self.noise  # type: ignore[operator]
 
     @property
     def measured(self) -> str:
