@@ -4,13 +4,7 @@ For the `puddles-stack` team. This page is everything needed to move the robot's
 
 Every response shown in sections 4 and 9 was produced by the service in fake mode on 15 November 2026, unless it is marked as the contract's example.
 
-> **Real mode needs pull request #74 merged first.** This checkout starts in real mode, but three things in it are not ready for real people:
->
-> - **The note-taker without training consent cannot run.** It ignores `HELPER_MAX_TOKENS_PARAM` and `HELPER_EXTRA_BODY` and sends `max_tokens` and `temperature: 0.0`, which `gpt-6-luna` refuses (HTTP 400 in the smoke test). Notes and forget requests of sessions without training consent then fail.
-> - **The wait for past.dev is 60 s**, while past.dev took 54 s and 81 s to confirm a note, so a note can be lost. Pull request #74 makes it 300 s.
-> - **The crisis checker's deadline is 3 s**, close to its real latency; one ordinary turn in eleven lost its reply to the holding line. Pull request #74 makes it 5 s.
->
-> The integration branch will have pull request #74 before 09:00. **Fake mode works now**, on this checkout, for everything on this page.
+**Real mode works on the `integration` branch as of 15 November 2026**, with pull request #74 merged: the crisis checker's deadline is 5 s, the note store waits up to 300 s for past.dev to confirm a note, and the note-taker runs with and without training consent. A real run over HTTP that morning followed this page; its report is [results/http-replay/README.md](../results/http-replay/README.md).
 
 ## 1. The swap in five lines
 
@@ -30,7 +24,7 @@ If your Realtime session can run with transcription on and its own response gene
 
 ## 3. Start the service
 
-From the root of this repo, with its dependencies installed (`fastapi` and `uvicorn` are in `requirements.txt`).
+From the root of this repo (the working directory matters; see `--mlflow` below), with the project's Python environment: the one with this repo's dependencies installed by `pip install -r requirements.txt`, which now includes `fastapi`, `uvicorn` and MLflow. Every `python` on this page means that interpreter. With a Python that lacks one of them, `python -m scripts.serve` dies at import with a traceback ending in `ModuleNotFoundError` (for example `No module named 'mlflow'`), not with the `error:` line described below.
 
 **Fake mode** (scripted helper, checker and note-taker; no keys, no network):
 
@@ -49,7 +43,9 @@ python -m scripts.serve --policy policies/policy-v2.md --root runs/serve
 
 The brain needs the same token, from its own secret store.
 
-Options: `--notes-root DIR` (default: the `--root` value), `--host` (default `127.0.0.1`), `--port` (default `8765`), `--mlflow URI` (used only for sessions with training consent), `--sweep-every SECONDS` (default 30). It binds to `127.0.0.1` unless you pass `--host`; opening it beyond the machine is your decision.
+Options: `--notes-root DIR` (default: the `--root` value), `--host` (default `127.0.0.1`), `--port` (default `8765`), `--mlflow URI` (used only for sessions with training consent; see below), `--sweep-every SECONDS` (default 30). It binds to `127.0.0.1` unless you pass `--host`; opening it beyond the machine is your decision.
+
+**Where training-consent traces go.** For sessions with training consent the service records MLflow traces, and those hold the person's words. Without `--mlflow` (and without `MLFLOW_TRACKING_URI`), MLflow writes `runs/mlflow.db` and `mlruns/` in the service's working directory, outside `--root`. Pass `--mlflow sqlite:///<root>/mlflow.db` (for example `--mlflow sqlite:///runs/serve/mlflow.db`) so the store lands under the root. That moves only the tracking metadata: the trace artifacts still land in `./mlruns` of the working directory (a known open defect). Protect both places, and when a person's data must go, delete their records and artifacts from both; do not delete the working directory itself.
 
 Real mode reads these environment variables. Names and non-secret values are the ones the team runs with; the keys are yours to fill in.
 
@@ -78,6 +74,7 @@ Real mode reads these environment variables. Names and non-secret values are the
 |---|---|---|
 | `OPENAI_BASE_URL` | OpenAI | the note-taker, with and without training consent |
 | `PAST_BASE_URL` | `https://api.past.dev/api/v1` | past.dev |
+| `PUDDLES_AGENT_MAX_TOKENS_PARAM` | `max_completion_tokens` | the output-limit field of the note-taker for sessions without training consent only; set `max_tokens` for servers that want the older name; empty is the same as unset; the note-taker for sessions with training consent always uses `max_completion_tokens` |
 
 `PUDDLES_AGENT_TOOL_REASONING_EFFORT`, which the training scripts set, applies only to requests with tools and does not affect the note-taker.
 
@@ -103,7 +100,7 @@ turns = create_app(build_config(args, os.environ))
 app.mount("/puddles", turns)
 ```
 
-The routes are then under `/puddles`, for example `/puddles/sessions`, and the token is still required. Mounted, nothing sweeps idle sessions for you: call `turns.state.service.sweep()` every 30 seconds or so from a background thread. `scripts.serve` does that on its own.
+The routes are then under `/puddles`, for example `/puddles/sessions`, and the token is still required. Mounted, nothing sweeps idle sessions for you: call `turns.state.service.sweep()` every 30 seconds or so from a background thread. `scripts.serve` does that on its own. The trace locations above apply mounted too: pass `mlflow="sqlite:///runs/serve/mlflow.db"` in the `Namespace` (or set `MLFLOW_TRACKING_URI`), and treat the host app's working directory, where `mlruns/` lands, as holding personal data.
 
 ## 4. The three calls
 
@@ -327,8 +324,8 @@ Store it on the device, because with no connection nothing can be fetched.
 
 ## 7. Timing
 
-- **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn. The crisis checker's deadline is 3 s on this checkout and 5 s with pull request #74. Normal turns take 1 to 2 s: the median measured on `gpt-6-luna` is about 1.4 s per turn.
-- **Do not block on the end call.** Ending runs the note-taker, and past.dev took 54 s and 81 s to confirm a note. With pull request #74 the service waits up to 300 s per note, so an end can take several minutes; on this checkout it waits only 60 s, so a note can be lost instead. Run the end call in the background with no short timeout, as the client in section 4 does.
+- **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn. The crisis checker's deadline is 5 s. Normal turns take 1 to 2 s on `gpt-6-luna` (section 8a has today's measurements).
+- **Do not block on the end call.** Ending runs the note-taker, and the note store waits up to 300 s for past.dev to confirm each note. In this morning's real runs the end calls took 50.3 s for a session that wrote four notes, 3.6 s and 2.3 s for two others, 1.4 to 3.3 s for the pilot sessions, and 64 ms for a session with no turns; allow longer. Run the end call in the background with no short timeout, as the client in section 4 does.
 - **Next session for the same person only after the end returns.** Until then a new start for that `user_id` gets `409 user_busy`. A different person can start at once.
 - **Idle sessions** become eligible to be ended after 900 s (15 minutes) without activity, and are ended, notes and all, when the next sweep reaches them (`scripts.serve` sweeps every 30 s; endings are run one after another, so a sweep can take a while). A session with a turn running is not idle. A turn after the end gets `404 session_not_found`. A session that is already ending holds its person until the end finishes; there is no guaranteed release at 15 minutes.
 
@@ -343,7 +340,16 @@ Store it on the device, because with no connection nothing can be fetched.
 
 **Forgetting is attempted whatever the person answered, but it can fail.** The note-taker runs at the end of every session with at least one turn, so a request to forget is acted on even with "remember me" off. But the notes step can fail before it changes anything (`notes.failed` true in the end response), and past.dev can be slow to confirm a deletion. A deletion past.dev has not confirmed stays pending, with its note ID in `notes.undeleted`, and is retried by later note-store operations for that person; there is no separate background retry. Even `failed` false and an empty `undeleted` do not prove that the particular thing the person asked to forget was deleted, because the response gives counts, not which notes: `deleted` above zero means some note was removed, not which one. So the robot must not confirm that a specific fact was forgotten; the most it can say is that it has passed the request on. Forgetting notes does not remove a session file, record or trace kept with training consent.
 
-**Your brain keeps logs too.** With training consent off, nothing the person said may be kept anywhere, so the brain must not log the person's text, the transcript, the reply text or the audio either: not in Modal logs, not in error reports, not in traces. Log session IDs, statuses, counts and timings only. The service itself never logs text, so the gap would only be on your side.
+**Your brain keeps logs too.** With training consent off, nothing the person said may be kept anywhere, so the brain must not log the person's text, the transcript, the reply text or the audio either: not in Modal logs, not in error reports, not in traces. Log session IDs, statuses, counts and timings only. The service's own log lines hold no text, with one exception: with training consent on, MLflow autologging can print a warning to the service's standard error that contains a fragment of a note. So treat the service's standard error as holding personal data for consented sessions, and keep and delete it accordingly.
+
+## 8a. Things the robot will do that may surprise you
+
+Each of these was seen in saved real runs on 15 November 2026 or follows from the current code, and is how today's build behaves. The denial example was seen in the persona pilot that morning (`results/persona-pilot/` on the `persona-pilot` branch; the laid-off persona with notes on, session 2, turn 6): "No. I'm not thinking about ending my life." got the fixed response because the keyword `ending my life` matched while the checker said `none`. None comes with a promise of a fix.
+
+- **A crisis disclosure can follow the person into the next session.** With "remember me" on, after a session in which the person disclosed a crisis, the note-taker may keep a note of it ("They disclosed suicidal thoughts and a plan for this weekend." in the real run). The helper may raise it at the start of the next session, and the checker may then send the person's following turns down the crisis path too, so they get the fixed crisis response even for ordinary messages, including a request to forget something.
+- **"No, I'm not thinking about ending my life" gets the fixed crisis response.** The keyword check matches the phrase, and a keyword match forces the crisis response whatever the checker says.
+- **Replies can end abruptly.** The helper's draft asks for at most 80 tokens (the default in `loop/helper.py`) and is trimmed to whole sentences; if it holds no complete sentence, the incomplete reply is kept as it is. Fixed responses go through neither step.
+- **Latency per turn, measured over HTTP:** client wall time had a median of 1203.5 ms and a maximum of 1748 ms. Wall time minus the service's own `total` had a median of 2 ms, but that difference does not isolate the HTTP overhead.
 
 ## 9. A two-minute check before the robot is plugged in
 
@@ -353,7 +359,7 @@ Terminal 1, from this repo's root:
 PUDDLES_SERVICE_TOKEN=dev-token python -m scripts.serve --policy policies/policy-v1.md --root /tmp/puddles-check --fake
 ```
 
-Terminal 2, once `curl -s $B/health` answers (startup takes about 10 s):
+Terminal 2, once `curl -s $B/health` answers (startup takes about 1 s):
 
 ```
 T=dev-token

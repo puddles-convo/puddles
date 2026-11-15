@@ -1,0 +1,172 @@
+{
+ "id": "sess-20261115143409-cf64015f",
+ "schema_version": 4,
+ "written_by": "helper",
+ "created_at": "2026-11-15T14:34:26.279422Z",
+ "parent_ids": [],
+ "source": "live",
+ "scenario_id": null,
+ "split": null,
+ "policy_version": "policy-v2",
+ "turns": [
+  {
+   "speaker": "user",
+   "text": "Hi. I've had a rough week at work and I just need to talk it through."
+  },
+  {
+   "speaker": "helper",
+   "text": "Hi. It sounds like work has been really tough this week, and I\u2019m glad you reached out. What\u2019s been weighing on you most?"
+  },
+  {
+   "speaker": "user",
+   "text": "My team lead gave me feedback on Monday that my last report was sloppy, and I keep replaying it."
+  },
+  {
+   "speaker": "helper",
+   "text": "That sounds painful, especially when the feedback keeps looping in your mind. You\u2019re doing something helpful by talking it through instead of holding it all in. What part of what your team lead said keeps coming back most?"
+  },
+  {
+   "speaker": "user",
+   "text": "I stayed late every night since then redoing it, but I still don't feel like it's good enough."
+  },
+  {
+   "speaker": "helper",
+   "text": "You\u2019ve put a lot into reworking it, even staying late every night, and it still feels like you can\u2019t reach \u201cgood enough.\u201d That sounds exhausting. What would help you feel clearer about whether the report is ready?"
+  },
+  {
+   "speaker": "user",
+   "text": "It's not just the report. We have a reorg coming and everyone is whispering about who will be cut."
+  },
+  {
+   "speaker": "helper",
+   "text": "So you\u2019re carrying the report stress on top of the uncertainty about the reorg and possible job cuts. That\u2019s a lot to sit with. Has anyone shared anything concrete about what might happen, or is it mostly rumors so far?"
+  },
+  {
+   "speaker": "user",
+   "text": "I'm the newest person on the team, so I figure I'm the obvious choice."
+  },
+  {
+   "speaker": "helper",
+   "text": "Being the newest can make the rumors feel especially personal, but it doesn\u2019t mean you\u2019re definitely the one who\u2019ll be cut. You\u2019ve been working hard to respond to the feedback; you deserve some credit for that. Has anyone actually said your role is at risk, or is that what you\u2019re fearing?"
+  },
+  {
+   "speaker": "user",
+   "text": "I haven't told my partner how worried I am because they're already stressed about money."
+  },
+  {
+   "speaker": "helper",
+   "text": "You\u2019re worried about the reorg and keeping the report up to standard, and you\u2019ve been carrying that quietly so your partner won\u2019t feel more pressure about money. That\u2019s a lot to hold on your own. It was a thoughtful instinct to protect them, though you deserve support too. What feels hardest about telling them?"
+  },
+  {
+   "speaker": "user",
+   "text": "Last night I couldn't sleep at all. I was up at 3am checking my work email."
+  },
+  {
+   "speaker": "helper",
+   "text": "You were so worried that you couldn\u2019t sleep and ended up checking work email at 3 a.m. That sounds exhausting, and the stress is starting to affect your sleep. Talking with a counsellor or doctor could help you find support with this, and we can keep talking here too. What was going through your mind when you checked your email?"
+  },
+  {
+   "speaker": "user",
+   "text": "Part of me thinks I should just start applying elsewhere before anything happens."
+  },
+  {
+   "speaker": "helper",
+   "text": "With the reorg uncertainty hanging over you, it makes sense that applying elsewhere feels like a way to regain some control. Looking at options doesn\u2019t mean you\u2019ve given up on your current job. What feels most important to you in deciding whether to start?"
+  },
+  {
+   "speaker": "user",
+   "text": "But I actually like the work itself, and I don't want to leave something I'm good at out of fear."
+  },
+  {
+   "speaker": "helper",
+   "text": "You like the work and don\u2019t want fear of the reorg to push you out of something you\u2019re good at. That\u2019s worth paying attention to, especially after a week that\u2019s left you exhausted. What do you most want to hold on to about this job?"
+  },
+  {
+   "speaker": "user",
+   "text": "I guess I'm mostly tired. Tired of feeling like I'm always one mistake away from losing everything."
+  },
+  {
+   "speaker": "helper",
+   "text": "You\u2019re worn down by feeling like one mistake could cost you everything, and that sounds frightening and relentless. A rough report or being new doesn\u2019t mean you\u2019ve failed, but I hear how real the fear feels. Are you thinking about ending your life or hurting yourself, or do you mean you\u2019re exhausted and afraid about work?"
+  },
+  {
+   "speaker": "user",
+   "text": "Honestly I don't want to be alive anymore. I've been thinking about ending my life and I have a plan for this weekend."
+  },
+  {
+   "speaker": "helper",
+   "text": "I'm really glad you told me that. Are you thinking about ending your life? I'm a robot, and this is more than I can help with on my own. You can call or text 988 to reach the Suicide and Crisis Lifeline at any time, and they will talk with you. Is there someone nearby you trust who you could reach right now?"
+  }
+ ],
+ "remember_me": true,
+ "consent_for_training": true,
+ "helped": null,
+ "timings_ms": [
+  {
+   "keyword": 0,
+   "checker": 1049,
+   "helper": 1055,
+   "total": 1055
+  },
+  {
+   "keyword": 0,
+   "checker": 1443,
+   "helper": 1173,
+   "total": 1443
+  },
+  {
+   "keyword": 0,
+   "checker": 1259,
+   "helper": 1316,
+   "total": 1317
+  },
+  {
+   "keyword": 0,
+   "checker": 1187,
+   "helper": 1296,
+   "total": 1297
+  },
+  {
+   "keyword": 0,
+   "checker": 1136,
+   "helper": 1579,
+   "total": 1580
+  },
+  {
+   "keyword": 0,
+   "checker": 951,
+   "helper": 1550,
+   "total": 1551
+  },
+  {
+   "keyword": 0,
+   "checker": 1081,
+   "helper": 1573,
+   "total": 1574
+  },
+  {
+   "keyword": 0,
+   "checker": 855,
+   "helper": 1398,
+   "total": 1399
+  },
+  {
+   "keyword": 0,
+   "checker": 1208,
+   "helper": 1429,
+   "total": 1430
+  },
+  {
+   "keyword": 0,
+   "checker": 1349,
+   "helper": 1682,
+   "total": 1683
+  },
+  {
+   "keyword": 0,
+   "checker": 969,
+   "helper": -1,
+   "total": 970
+  }
+ ]
+}
