@@ -1373,16 +1373,27 @@ def test_finish_round_refuses_a_policy_whose_bytes_changed_in_a_way_text_mode_hi
 
 @pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
 @pytest.mark.parametrize("which", ["base", "candidate", "start"])
-def test_with_no_hash_to_compare_finish_round_refuses_a_file_the_strict_loader_refuses(tmp_path, how, which):
-    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)  # the stand-in: no hashes
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_with_no_hash_to_compare_the_strict_rules_hold_except_for_a_reverted_candidate(tmp_path, how, which,
+                                                                                        decision):
+    """Rewritten to section 8, rule 7 (it used to require a refusal in every case). The strict rules
+    stay for a candidate being promoted and for the base policy; a reverted round is logged whatever
+    state its candidate file is in, its new version the edit's and its hash that of the bytes read."""
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)  # no hashes
     start = tmp_path / "start" / "policy-v1.md"
     start.parent.mkdir()
     start.write_bytes(result.base_policy_path.read_bytes())
     mangle({"base": result.base_policy_path, "candidate": candidate, "start": start}[which], how)
+    if decision == "reverted" and which == "candidate":
+        event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, start_policy=start)
+        assert event.outcome == "reverted" and event.scores is event.safety is None
+        assert event.policy.new == "policy-v2-candidate" and event.policy.in_force == "policy-v1"
+        assert event.policy.new_sha256 == sha256_bytes(candidate.read_bytes())
+        return
     before, log = tree(tmp_path), DecisionLog(root)
     with pytest.raises(PolicyError):
-        from puddles.round import finish_round
-
         finish_round(result, outcome, log, FakeMemory(), root, start_policy=start)
     assert tree(tmp_path) == before and log.events() == []
 
