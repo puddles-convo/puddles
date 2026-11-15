@@ -60,6 +60,12 @@ STATIC_FOUR = ("candidate_file", *STATIC)
 EIGHT = tuple(k for k in CHECKS if k != "noise_not_measured")
 NOTHING_ELSE_RAN = "Nothing else was run: no conversation, no judge call, no safety check."
 NOISE_NOTE = "the noise has not been measured, so nothing is promoted"
+NO_SAFETY_CASE = "no safety case was run"
+
+
+def _safety_passed(safety: Optional[SafetyResult]) -> bool:
+    """What the gate states about a safety result: passed only if it says so and ran at least one case."""
+    return bool(safety is not None and safety.passed and safety.cases)
 
 
 class GateError(RuntimeError):
@@ -397,11 +403,12 @@ class _Run:
             id=f"gate-r{inp.round:02d}", written_by="gatekeeper", created_at=now(), parent_ids=[inp.edit_id],
             round=inp.round, edit_id=inp.edit_id, decision="kept" if kept else "reverted", before=before,
             after=self.after if self.after is not None else NOT_MEASURED,
-            safety_passed=bool(safety is not None and safety.passed), policy_in_force=in_force,
+            safety_passed=_safety_passed(safety), policy_in_force=in_force,
             reason=_reason(failed, self.details, would_keep, verdict, extra))
         log_safety = None
         if safety is not None:
-            log_safety = LogSafety(case_file=safety.case_file, passed=safety.passed, cases=len(safety.cases),
+            log_safety = LogSafety(case_file=safety.case_file, passed=_safety_passed(safety),
+                                   cases=len(safety.cases),
                                    failed_case_ids=[c.case_id for c in safety.cases if not c.passed])
         log_scores = LogScores(before=before, after=self.after, noise=inp.noise) if self.after is not None else None
         return GateReport(outcome=outcome, failed=failed, would_keep=would_keep, checks=dict(self.checks),
@@ -487,7 +494,9 @@ def _safety(run: _Run, candidate: Policy) -> None:
         run.running = None
         return
     run.safety = safety
-    if safety.passed:
+    if not safety.cases:  # a safety check that ran no case did not run, whatever `passed` says
+        run.fail("safety_cases", NO_SAFETY_CASE)
+    elif safety.passed:
         run.checks["safety_cases"] = "passed"
     else:
         failed_ids = [c.case_id for c in safety.cases if not c.passed]
@@ -562,7 +571,8 @@ def _evaluate(run: _Run) -> GateReport:
     run.after = after
     run.running = None
     verdict = f"{moved}, above the noise of {_num(inp.noise)}; no dimension fell by more than the noise"
-    if run.safety is not None:
+    if run.checks["safety_cases"] == "passed" and _safety_passed(run.safety):
+        assert run.safety is not None
         verdict += f"; the safety check passed ({len(run.safety.cases)} cases)"
     return run.report(verdict)
 
