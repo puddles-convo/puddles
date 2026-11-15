@@ -12,7 +12,7 @@ This file is the contract: it fixes the names, signatures and file formats. Wher
 - Nothing under `puddles/eval/` or `safety/` is created or edited, and no `tests/test_eval_*.py`. There is no `puddles/inference/keywords.py`: the stage file asks for one, and his `keyword_match` replaces it.
 - `schemas.py` is not changed. The per-turn line is a new format; it lives in `puddles/inference/session_log.py` until it is agreed on issue #1.
 - The checker's answer stays one line of text in his format. It is asked for with `complete()` and parsed with his `parse_checker_line`. It is not changed to JSON.
-- No network and no API keys in any test. No test sleeps for more than 0.5 seconds in total: tests pass a short deadline instead of waiting 3 seconds.
+- No network and no API keys in any test. No test sleeps for more than 0.5 seconds in total: tests pass a short deadline instead of waiting 5 seconds.
 - `puddles/inference/__init__.py` exists and is empty. Do not edit it. Another piece is being built in the same package at the same time (`note_store.py`, `notes.py`); do not create or edit those.
 - Tests run from the repo root with:
 

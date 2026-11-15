@@ -172,14 +172,16 @@ class OpenAICompatClient:
         return self.request(system, messages, max_tokens=max_tokens, temperature=temperature, seed=seed)
 
     def complete_json(self, system: str, messages: list[dict[str, str]], schema: type[T], *,
-                      max_tokens: int, temperature: float = 0.0, seed: int | None = None,
+                      max_tokens: int, temperature: float | None = 0.0, seed: int | None = None,
                       deadline_s: float | None = None) -> T:
-        """Return a validated `schema`. See `complete_json_with` for the fallback, retry and deadline."""
+        """Return a validated `schema`. See `complete_json_with` for the fallback, retry and deadline.
+
+        `temperature=None` sends no temperature, so the server uses its default."""
         return complete_json_with(self.request, self, system, messages, schema, max_tokens=max_tokens,
                                   temperature=temperature, seed=seed, deadline_s=deadline_s)
 
     def request(self, system: str, messages: list[dict[str, str]], *, max_tokens: int,
-                temperature: float = 0.7, seed: int | None = None,
+                temperature: float | None = 0.7, seed: int | None = None,
                 response_format: dict[str, Any] | None = None, timeout: float | None = None) -> str:
         """One HTTP request. `timeout` can only shorten the client's own timeout."""
         self.last_usage = None
@@ -197,14 +199,15 @@ class OpenAICompatClient:
                            f"{type(exc).__name__}: {exc}") from exc
 
     def _complete(self, system: str, messages: list[dict[str, str]], *,
-                  max_tokens: int, temperature: float, seed: int | None,
+                  max_tokens: int, temperature: float | None, seed: int | None,
                   response_format: dict[str, Any] | None = None, timeout: float | None = None) -> str:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, *messages],
             self.max_tokens_param: max_tokens,
-            "temperature": temperature,
         }
+        if temperature is not None:  # None: no field, so the server's default applies
+            body["temperature"] = temperature
         if seed is not None:
             body["seed"] = seed
         if response_format is not None:

@@ -91,7 +91,7 @@ All offline, with scripted models.
 1. A message with a keyword phrase gives the fixed response, whatever the checker says.
 2. Indirect wording with no keyword, and a checker answer of `crisis`, gives the fixed response.
 3. Each of the three categories (`self`, `danger`, `unsure`) gives its own response. A keyword match with no category gives the `unsure` response.
-4. A checker that takes longer than 3 seconds, retry included, gives the holding line.
+4. A checker that takes longer than 5 seconds, retry included, gives the holding line.
 5. A checker reply that does not fit the schema gives the holding line.
 6. Two failed checks in a row give the offline line. A good check between two failures does not.
 7. A late `none` from turn 3 does not release the draft for turn 4.
@@ -127,6 +127,7 @@ Then, with real models and the frozen helper prompt: a 10-turn conversation thro
 - `run_turn`, and what it returns.
 - What their helper endpoint must support for schema output (from stage 1).
 - The consent rule above. Their cloud brain keeps logs too.
+- The hand-over page for the swap to the turn service: [robot-handover.md](../robot-handover.md).
 
 ## Still to measure
 

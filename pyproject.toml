@@ -9,6 +9,8 @@ dependencies = [
     "langgraph>=1.2",
     "mlflow>=3.18",
     "matplotlib>=3.9",
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]

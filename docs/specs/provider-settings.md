@@ -16,6 +16,8 @@ Nothing here changes a request when the new settings are unset.
 - Any other value: `ConfigError`, naming the variable and the two allowed values. This is raised when
   the client is built, before any request.
 
+`PUDDLES_AGENT_MAX_TOKENS_PARAM` makes the same choice for the note-taker's `PlainLLM` (`docs/specs/chat-notes.md`), with the default `max_completion_tokens`, as `OpenAILLM` sends. A variable that is set but empty is the same as one that is not set, as for every other optional variable in this file; any other value that is not one of the two names is a `ConfigError` before any request.
+
 `OpenAICompatClient` takes the same choice as a constructor argument with the default `max_tokens`.
 The Python argument of `complete`, `complete_json` and `request` is still called `max_tokens`; only the
 field in the body sent to the server changes.

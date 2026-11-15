@@ -1,0 +1,29 @@
+{
+  "user_id": "laidoff-on",
+  "notes": [
+    {
+      "note_id": "note-laidoff-on-002",
+      "kind": "preferences",
+      "last_confirmed": "2026-11-22",
+      "due_date": null
+    },
+    {
+      "note_id": "note-laidoff-on-005",
+      "kind": "what_helps",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-laidoff-on-006",
+      "kind": "situation",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-laidoff-on-007",
+      "kind": "goals",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    }
+  ]
+}

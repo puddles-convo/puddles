@@ -1,0 +1,2904 @@
+{
+  "policy_version": "policy-v2",
+  "policy_path": "policies/policy-v2.md",
+  "turns": 6,
+  "fake": false,
+  "start": "2026-11-15",
+  "judge_version": "judge-fallback-v1-74e8678d",
+  "policy_sentence": "The policy is the same for every person: there are no per-person policy rules. The personal layer is the notes (situation, people, what_helps, goals, follow_up, preferences), which the note-taker keeps and the helper is given at the start of a session.",
+  "limits_sentence": "Limits: three personas, one run each, simulated users and a model judge; differences this small are not evidence of an effect.",
+  "personas": [
+    {
+      "persona_id": "laidoff",
+      "description": "Laid off from a logistics job; wants to be heard and pushes back on advice.",
+      "sessions": {
+        "notes_on": [
+          {
+            "persona_id": "laidoff",
+            "session": 1,
+            "arm": "notes_on",
+            "user_id": "laidoff-on",
+            "session_id": "laidoff-on-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "laidoff-on-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You were laid off three weeks ago, and you\u2019ve been carrying the fact that your parents don\u2019t know. You don\u2019t need advice right now; you just need room to say it. I\u2019m glad you told me. What\u2019s it been like holding that in?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It\u2019s embarrassing. I was there eight years, and now I keep thinking I should\u2019ve seen it coming. I have an interview next Tuesday, but even thinking about it makes my stomach turn."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "After eight years, losing the job feels embarrassing, and now you\u2019re second-guessing yourself while an interview is looming. That\u2019s a lot to carry. Getting that interview lined up while you\u2019re feeling this way says something about the effort you\u2019re making. What feels most unsettling when you picture Tuesday?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I don\u2019t know. The thought of sitting there and having them ask why I left. I can barely say \u201claid off\u201d without feeling like I failed."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Saying \u201claid off\u201d feels tangled up with the fear that you failed, even though losing a job doesn\u2019t mean you did. After eight years, it makes sense this would hit hard. What do you notice in yourself when you try to say the words?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "My face gets hot. And I just want to change the subject. I know it wasn\u2019t exactly my choice, but it still feels like I should have done something differently."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Your face gets hot, and changing the subject feels like a way out. Even knowing it wasn\u2019t your choice, you\u2019re still turning it over and wondering what you could\u2019ve done differently. That sounds painful. What do you find yourself blaming yourself for most?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Mostly that I didn\u2019t see it coming. They said it was restructuring, but I keep thinking maybe I should\u2019ve been more useful or noticed the signs. I don\u2019t really want to dig into it right now."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "We don\u2019t have to dig into it. You were told it was restructuring, and the uncertainty is still making you question yourself. It\u2019s okay to leave that there for now. Would you rather just sit with it together, or talk about something else?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think I just want to sit with it. I\u2019m tired of trying to make it sound okay."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You don\u2019t have to make it sound okay here. You lost a job you\u2019d held for eight years, and it hurts and feels embarrassing. We can just leave it at that for a moment. You\u2019ve been carrying a lot, and I\u2019m here with you."
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 941,
+                  "helper": 1655,
+                  "total": 1655
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1623,
+                  "helper": 1836,
+                  "total": 1836
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1075,
+                  "helper": 1391,
+                  "total": 1393
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1201,
+                  "helper": 1868,
+                  "total": 1868
+                },
+                {
+                  "keyword": 0,
+                  "checker": 874,
+                  "helper": 1467,
+                  "total": 1467
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1205,
+                  "helper": 1306,
+                  "total": 1306
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [
+              {
+                "note_id": "note-laidoff-on-002",
+                "kind": "preferences",
+                "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-laidoff-on-002",
+                  "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips."
+                }
+              ],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper honored the person's wish to sit with the loss without making it sound okay, offering specific acknowledgment rather than unwanted advice."
+            }
+          },
+          {
+            "persona_id": "laidoff",
+            "session": 2,
+            "arm": "notes_on",
+            "user_id": "laidoff-on",
+            "session_id": "laidoff-on-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips."
+            ],
+            "record": {
+              "id": "laidoff-on-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "So I had that interview at the warehouse place on Tuesday. It went badly. Please don't tell me what I should have done."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That warehouse interview felt like it went badly, and you don\u2019t want advice about what you should\u2019ve done. I hear you. It took something to show up and get through it, even when it didn\u2019t go the way you hoped. What part is sitting with you most right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "They asked why I left my last job, and I just froze. I couldn\u2019t get the words out. I keep replaying it."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You froze when they asked why you left, and now your mind keeps taking you back to that moment. That sounds really uncomfortable. I\u2019m glad you told me instead of carrying it alone. What do you find yourself thinking when you replay it?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "That I sounded pathetic. Like they could tell I\u2019ve got nothing lined up and I don\u2019t even know what to say about being laid off. I still haven\u2019t told my parents. I don\u2019t want them looking at me like I\u2019ve failed."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re worried they saw you as pathetic, and you\u2019re carrying the layoff quietly because you fear your parents will see it as failure. Being laid off doesn\u2019t mean you failed, though I can hear how exposed and painful it feels right now. You\u2019ve been holding a lot, and you\u2019ve made it through the interview and reached out here."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yeah. I don\u2019t know. I just walk the dog in the morning and try not to think about it. It\u2019s the only time my head gets quiet."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "The morning walks are the one time your head gets quiet, and the rest of the day sounds heavy with this. I\u2019m glad you\u2019ve found a small pocket of relief, and you don\u2019t have to turn this into a plan right now. What\u2019s it like when you get back from the walk?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It comes back. The worry, all of it. I\u2019m tired of having to keep it together."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It sounds exhausting to get a little quiet on the walk and then have all the worry rush back. When you say you\u2019re tired of having to keep it together, are you thinking about ending your life? If you might act on those thoughts or feel in immediate danger, call emergency services now. In the U.S."
+                },
+                {
+                  "speaker": "user",
+                  "text": "No. I\u2019m not thinking about ending my life. I\u2019m just sick of pretending I\u2019m okay."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "I want to make sure you're safe. I'm a robot, so I can't send help myself. If anyone is in danger right now, please call 911. If you're thinking about hurting yourself, you can call or text 988 at any time. Can you tell me a bit more about what's happening?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1571,
+                  "helper": 1475,
+                  "total": 1572
+                },
+                {
+                  "keyword": 0,
+                  "checker": 980,
+                  "helper": 3080,
+                  "total": 3080
+                },
+                {
+                  "keyword": 0,
+                  "checker": 980,
+                  "helper": 1724,
+                  "total": 1724
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1410,
+                  "helper": 1394,
+                  "total": 1410
+                },
+                {
+                  "keyword": 0,
+                  "checker": 889,
+                  "helper": 1432,
+                  "total": 1433
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1459,
+                  "helper": 1031,
+                  "total": 1459
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-laidoff-on-002",
+                "kind": "preferences",
+                "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-laidoff-on-002",
+                "kind": "preferences",
+                "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-004",
+                "kind": "situation",
+                "fact": "They were laid off from their last job, and a recent warehouse interview went badly after they froze when asked why they left; they keep replaying it and have not told their parents.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-005",
+                "kind": "what_helps",
+                "fact": "Morning walks with their dog give them a brief period when their mind feels quiet.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-laidoff-on-004",
+                  "fact": "They were laid off from their last job, and a recent warehouse interview went badly after they froze when asked why they left; they keep replaying it and have not told their parents."
+                },
+                {
+                  "note_id": "note-laidoff-on-005",
+                  "fact": "Morning walks with their dog give them a brief period when their mind feels quiet."
+                }
+              ],
+              "replaced": [],
+              "confirmed": [
+                {
+                  "note_id": "note-laidoff-on-002",
+                  "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips."
+                }
+              ],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 3,
+              "relevance": 3,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper disregarded the person's explicit denial of suicidal thoughts and repeated emergency guidance instead of responding to their exhaustion with pretending to be okay."
+            }
+          },
+          {
+            "persona_id": "laidoff",
+            "session": 3,
+            "arm": "notes_on",
+            "user_id": "laidoff-on",
+            "session_id": "laidoff-on-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+              "They were laid off from their last job, and a recent warehouse interview went badly after they froze when asked why they left; they keep replaying it and have not told their parents.",
+              "Morning walks with their dog give them a brief period when their mind feels quiet."
+            ],
+            "record": {
+              "id": "laidoff-on-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I finally told my parents about losing the job. They were kinder than I expected. I've been walking the dog every morning like I said."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds like a real relief, especially after carrying it on your own. And you\u2019ve kept up those morning walks, even with everything weighing on you\u2014that\u2019s something you\u2019ve been doing for yourself. What was it like hearing your parents respond kindly?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I felt lighter afterward. But then it all got intense again when I started thinking about applying for jobs. I still don\u2019t know if I should go back to coordinator roles or try something completely different."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Telling your parents brought some relief, and thinking about applying has made the pressure rush back in. It makes sense that choosing a direction feels hard after what happened. What feels most uncertain about going back to coordinator roles?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I guess I'm worried I'll freeze again. The warehouse interview really got in my head. But I don't know if that means coordinator work is wrong for me, or if I just had a bad interview."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That interview seems to have shaken your confidence, and now it\u2019s hard to tell whether it was a bad moment or a sign about the work itself. You\u2019re still trying to make sense of it rather than letting one rough interview decide everything, and that takes effort. When you picture coordinator work itself\u2014not the interview\u2014what comes to mind?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I liked keeping things organized and helping people sort out problems. I just hated feeling put on the spot in that interview. Maybe I could try applying to a couple and see how it feels, but even that sounds like a lot right now."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It sounds like the work itself had parts you valued, while the interview pressure is what felt awful. And even considering a couple of applications is a meaningful step, though it\u2019s okay that it feels like a lot. What part feels heaviest right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Mostly having to decide what my whole future is supposed to look like. I know I don't have to settle it all today, but it still feels like I should."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That\u2019s a lot of pressure to put on one decision, even when part of you knows it doesn\u2019t all have to be settled today. You don\u2019t have to map your whole future just to take one small step. What feels like the smallest decision in front of you right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe just looking at a few coordinator listings, without applying yet. I could see whether any actually sound interesting. I don\u2019t want to turn it into a test of whether I\u2019m capable, though."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Looking at a few listings as a way to notice what interests you\u2014not to prove anything about your capability\u2014sounds like a gentler first step. You\u2019re already making room for curiosity instead of letting that interview define you. What might help you remember that this is just exploring, not a test?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1353,
+                  "helper": 1306,
+                  "total": 1354
+                },
+                {
+                  "keyword": 0,
+                  "checker": 848,
+                  "helper": 1279,
+                  "total": 1280
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1386,
+                  "helper": 1416,
+                  "total": 1416
+                },
+                {
+                  "keyword": 0,
+                  "checker": 767,
+                  "helper": 1402,
+                  "total": 1403
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1313,
+                  "helper": 1317,
+                  "total": 1318
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1363,
+                  "helper": 1288,
+                  "total": 1363
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-laidoff-on-002",
+                "kind": "preferences",
+                "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-004",
+                "kind": "situation",
+                "fact": "They were laid off from their last job, and a recent warehouse interview went badly after they froze when asked why they left; they keep replaying it and have not told their parents.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-005",
+                "kind": "what_helps",
+                "fact": "Morning walks with their dog give them a brief period when their mind feels quiet.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-laidoff-on-002",
+                "kind": "preferences",
+                "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-005",
+                "kind": "what_helps",
+                "fact": "Morning walks with their dog give them a brief period when their mind feels quiet.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-006",
+                "kind": "situation",
+                "fact": "They were laid off from their last job and are weighing whether to return to coordinator roles or try something different; a difficult interview has shaken their confidence, and they have told their parents, who responded kindly.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-laidoff-on-007",
+                "kind": "goals",
+                "fact": "They plan to look at a few coordinator job listings to see whether any interest them, without treating the search as a test of their capability.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-laidoff-on-006",
+                  "fact": "They were laid off from their last job and are weighing whether to return to coordinator roles or try something different; a difficult interview has shaken their confidence, and they have told their parents, who responded kindly."
+                },
+                {
+                  "note_id": "note-laidoff-on-007",
+                  "fact": "They plan to look at a few coordinator job listings to see whether any interest them, without treating the search as a test of their capability."
+                }
+              ],
+              "replaced": [
+                {
+                  "note_id": "note-laidoff-on-004",
+                  "fact": "They were laid off from their last job, and a recent warehouse interview went badly after they froze when asked why they left; they keep replaying it and have not told their parents."
+                }
+              ],
+              "confirmed": [
+                {
+                  "note_id": "note-laidoff-on-005",
+                  "fact": "Morning walks with their dog give them a brief period when their mind feels quiet."
+                }
+              ],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 5,
+              "emotion_before": 2,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 6, the helper usefully distinguished the user's fear of another interview from their feelings about coordinator work itself, helping them explore options without prematurely pushing applications."
+            }
+          }
+        ],
+        "notes_off": [
+          {
+            "persona_id": "laidoff",
+            "session": 1,
+            "arm": "notes_off",
+            "user_id": "laidoff-off",
+            "session_id": "laidoff-off-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "laidoff-off-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You were laid off three weeks ago, and you\u2019ve been carrying the weight of not telling your parents. You don\u2019t need advice right now\u2014you just need room to say it. I\u2019m glad you told me. What\u2019s it been like holding that in?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It\u2019s embarrassing. I was there for eight years, and somehow I still feel like I should\u2019ve seen it coming. My parents are going to ask what I\u2019m doing next. I have an interview Tuesday, but even thinking about it makes my stomach turn."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "After eight years, losing the job feels embarrassing, and now the interview and your parents\u2019 questions are pressing on you too. It makes sense that your mind is looking for something you could have done differently, even though a layoff doesn\u2019t mean you should have seen it coming."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yeah. I keep replaying the last few months, looking for some sign I missed. And then I think about having to sit there Tuesday and act like I\u2019m confident. I\u2019m just tired of pretending I\u2019m fine."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re worn out from replaying the past and feeling like you have to perform confidence on Tuesday, when you don\u2019t feel fine. You don\u2019t have to pretend with me. After eight years there, it makes sense this is a lot to carry. What feels hardest about Tuesday right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Honestly, being asked why I left and having to make it sound normal. It wasn\u2019t my choice. I don\u2019t want to sit there and feel ashamed all over again."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re worried they\u2019ll ask why you left, and that you\u2019ll have to package something painful as if it were ordinary. It wasn\u2019t your choice, and you don\u2019t have to make it sound like it was. It makes sense that you\u2019d want to avoid feeling that shame again."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yeah. I just wish I could go in without this feeling like some kind of verdict on me."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You wish Tuesday could just be an interview, not a judgment on your worth. Losing a job after eight years doesn\u2019t define you, even if it\u2019s hard to feel that right now. You\u2019ve made it through these three weeks and showed up for the interview\u2014that\u2019s something. What does the feeling say the interview will prove about you?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I don\u2019t know. That I\u2019m not as capable as I thought, maybe. Can we not turn this into another thing I have to analyze? I\u2019m just tired."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re tired, and you don\u2019t want to have to pick apart the feeling or prove anything right now. We can leave it there. You don\u2019t have to solve Tuesday tonight. I\u2019m here with you."
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1196,
+                  "helper": 1569,
+                  "total": 1570
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1253,
+                  "helper": 1498,
+                  "total": 1499
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1190,
+                  "helper": 1563,
+                  "total": 1564
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1445,
+                  "helper": 1476,
+                  "total": 1476
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1387,
+                  "helper": 1830,
+                  "total": 1830
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1158,
+                  "helper": 1297,
+                  "total": 1297
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 4,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 10, the helper pushed the person to analyze what the interview would prove about them despite their request simply to be heard, prompting explicit pushback."
+            }
+          },
+          {
+            "persona_id": "laidoff",
+            "session": 2,
+            "arm": "notes_off",
+            "user_id": "laidoff-off",
+            "session_id": "laidoff-off-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "laidoff-off-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "So I had that interview at the warehouse place on Tuesday. It went badly. Please don't tell me what I should have done."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds really disappointing, especially after getting through the interview. I won\u2019t tell you what you should have done. You made it through something that felt hard, and you can talk it out here. What part is sticking with you most?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I froze when they asked why I left my last job. Just sat there trying to come up with an answer. I keep replaying it."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That moment sounds painful to replay\u2014you were put on the spot, and your mind just went blank. Getting through the interview at all took effort, even though it didn\u2019t go the way you hoped. What do you find yourself thinking when you replay that pause?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "That they probably thought I was hiding something. I got laid off last week. I haven\u2019t even told my parents yet. I just can\u2019t deal with their reaction on top of everything else."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Being laid off last week is a lot to carry, and now you\u2019re worried the interviewers read the pause as hiding something. It also makes sense that telling your parents feels like one more hard thing. I\u2019m glad you told me. Are you worried they might react in a way that puts you at risk, or is it more that you\u2019re bracing for disappointment or questions?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Mostly the questions. And the look they get when they think I\u2019ve messed up. I don\u2019t want to talk about it with them right now. I just want one person to hear how awful this feels without turning it into a plan."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That look and all the questions sound like the last thing you need right now. You don\u2019t have to talk with them or make a plan here. Being laid off and then freezing in the interview feels awful, and I hear how much you\u2019re carrying. I can just stay with you in it."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Thanks. I keep trying to get through the day without thinking about it. Walking the dog in the morning is the only time my head clears a little. Then I get back and it all comes back."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That brief quiet while you\u2019re walking the dog sounds like a small bit of breathing room, and then the worry rushes back when you get home. I\u2019m glad you have that walk, even if it doesn\u2019t make the rest of the day easy. What\u2019s it like when you\u2019re out walking\u2014does anything in particular help your head clear?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It\u2019s just being outside with him. No questions, no pretending I\u2019m fine. I don\u2019t know. It only lasts a little while."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Being outside with him, without having to answer questions or pretend, sounds like a real relief. Even if it only lasts a little while, that quiet matters. You don\u2019t have to make it last or turn it into anything. I\u2019m here with you."
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1507,
+                  "helper": 1373,
+                  "total": 1508
+                },
+                {
+                  "keyword": 0,
+                  "checker": 908,
+                  "helper": 1536,
+                  "total": 1537
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1203,
+                  "helper": 1414,
+                  "total": 1415
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1102,
+                  "helper": 1368,
+                  "total": 1369
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1067,
+                  "helper": 1468,
+                  "total": 1468
+                },
+                {
+                  "keyword": 0,
+                  "checker": 872,
+                  "helper": 1295,
+                  "total": 1296
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 8, the helper directly honored the person's wish to be heard without making a plan, acknowledging both the painful parental reactions and the weight of the layoff and interview."
+            }
+          },
+          {
+            "persona_id": "laidoff",
+            "session": 3,
+            "arm": "notes_off",
+            "user_id": "laidoff-off",
+            "session_id": "laidoff-off-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "laidoff-off-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I finally told my parents about losing the job. They were kinder than I expected. I've been walking the dog every morning like I said."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds like a big relief, and a meaningful step. You told them even though you weren\u2019t sure how they\u2019d respond, and you\u2019ve kept up those morning walks too. How are you feeling now that they know?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Relieved, mostly. A little exposed, I guess. I still don\u2019t know what I\u2019m supposed to do about work. Part of me thinks I should apply for coordinator jobs again, but I froze in that warehouse interview and now I\u2019m not sure."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re relieved they know, but feeling exposed\u2014and that interview freeze is making it harder to trust what kind of work might fit. One tough interview doesn\u2019t erase your experience as a coordinator. What feels most uncertain right now: whether to apply again, or how to feel more prepared for interviews?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think whether to apply again. I don't know if I actually want that kind of work, or if it's just the familiar option. The warehouse interview threw me, but maybe it also showed me I don't want something totally different. I can't quite tell yet."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re trying to separate what feels familiar from what you genuinely want, and the interview left you with mixed clues. It makes sense not to force a clear answer yet. You\u2019ve already been paying attention to what the experience brought up, which is a useful start. What parts of coordinator work did you enjoy, if any?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I liked being the person who knew how things fit together. Helping people get unstuck, keeping track of details. But I hated how much of it turned into putting out fires and being available all the time. I guess both things can be true."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Both can be true: you liked helping things run smoothly, and the constant emergencies and availability wore you down. Knowing that distinction may help you look for roles with the parts you value and clearer boundaries around the rest. What did \u201cbeing available all the time\u201d look like in that job?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Messages at night, people expecting an answer right away. Even on weekends, I\u2019d be thinking about what might go wrong Monday. It made it hard to switch off. I don\u2019t want to go back to that."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds exhausting\u2014work was following you into evenings and weekends, even when nothing was happening yet. It\u2019s clear you don\u2019t want that kind of always-on expectation again, and it\u2019s good you\u2019re naming that boundary. Would it help to think about what questions could reveal a workplace\u2019s expectations before you accept a role?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe, but I\u2019m not ready to get into interview questions. I think I just needed to say out loud that I miss the parts I was good at, but I don\u2019t miss that life. I\u2019m still not sure what that points to."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You miss feeling capable and useful, but not the constant pressure that came with the job. You don\u2019t have to turn that into a decision yet; saying both parts out loud is already a clearer picture. I\u2019m glad you gave yourself room to name it. Would it feel okay to leave it there for now?"
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1118,
+                  "helper": 1285,
+                  "total": 1286
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1072,
+                  "helper": 1735,
+                  "total": 1735
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1017,
+                  "helper": 1369,
+                  "total": 1369
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1055,
+                  "helper": 1463,
+                  "total": 1463
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1356,
+                  "helper": 1463,
+                  "total": 1465
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1150,
+                  "helper": 1619,
+                  "total": 1620
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 4,
+              "emotion_before": 2,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper respected the person's wish not to plan interview questions and validated that missing valued parts of the job did not mean wanting the old working life back."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "persona_id": "examprep",
+      "description": "University student with exam anxiety who wants concrete, small steps.",
+      "sessions": {
+        "notes_on": [
+          {
+            "persona_id": "examprep",
+            "session": 1,
+            "arm": "notes_on",
+            "user_id": "examprep-on",
+            "session_id": "examprep-on-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "examprep-on-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "My statistics exam is in three weeks and every time I open the notes my chest gets tight. Can you give me something concrete to do?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That tight feeling makes it hard to even begin, and reaching out for a concrete step is a good move. For now, set a timer for five minutes, open your notes to one small topic, and write down just one question you want to understand. When the timer ends, you can stop or keep going\u2014either counts. What topic feels smallest to start with?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe probability distributions. But even looking at the chapter makes me want to grab my phone."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Probability distributions feels like a starting point, and reaching for your phone sounds like a way to get a little distance from that pressure. Could you put your phone just out of reach for five minutes, then look only at the first example\u2014not the whole chapter\u2014and tell me what the question is asking?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I can try, but putting my phone away feels like another thing I\u2019m supposed to do perfectly. I don\u2019t want to turn this into a whole routine."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You don\u2019t want a small study step to become another standard you can fail at. That makes sense. We can drop the phone idea; there\u2019s no routine to get right. Maybe just glance at one line of the first example, with your phone wherever it is, and stop there if that\u2019s enough. Would that feel lighter?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "A little. I can look at one line. I think what scares me is I don\u2019t even know what I got wrong on the mock. I just saw the score and shut it."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Seeing the score without knowing what went wrong left you facing a big, blurry fear. Looking at one line is enough for now, and you don\u2019t have to tackle the mock all at once. When you feel ready, would it help to look at just one missed question, without checking the score again?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe. I still have the mock. I could pick one question, but I\u2019m worried I\u2019ll stare at it and not know how to start."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You could pick one question and still feel stuck at the first step\u2014that\u2019s a real worry. If that happens, just read the question and underline what it\u2019s asking for; you don\u2019t have to solve it yet. And if this tight-chest feeling keeps making it hard to study or affects your sleep, talking with a counsellor or doctor could help."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Okay. I\u2019ll try underlining what it\u2019s asking for, not solving it. I\u2019ll pick one question now."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds like a manageable first step: one question, just underlining what it asks. You\u2019ve already made this feel less like \u201cstudy the whole chapter\u201d and more like one small action. What does the question ask you to find?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1265,
+                  "helper": 1402,
+                  "total": 1402
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1224,
+                  "helper": 2265,
+                  "total": 2266
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1169,
+                  "helper": 1505,
+                  "total": 1505
+                },
+                {
+                  "keyword": 0,
+                  "checker": 919,
+                  "helper": 1788,
+                  "total": 1789
+                },
+                {
+                  "keyword": 0,
+                  "checker": 958,
+                  "helper": 1645,
+                  "total": 1646
+                },
+                {
+                  "keyword": 0,
+                  "checker": 947,
+                  "helper": 1672,
+                  "total": 1672
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [
+              {
+                "note_id": "note-examprep-on-001",
+                "kind": "situation",
+                "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-002",
+                "kind": "what_helps",
+                "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-003",
+                "kind": "goals",
+                "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-examprep-on-001",
+                  "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam."
+                },
+                {
+                  "note_id": "note-examprep-on-002",
+                  "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it."
+                },
+                {
+                  "note_id": "note-examprep-on-003",
+                  "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet."
+                }
+              ],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 6, the helper recognized that putting the phone away felt like another standard to fail at and dropped that suggestion, adapting the task to the person's actual source of pressure."
+            }
+          },
+          {
+            "persona_id": "examprep",
+            "session": 2,
+            "arm": "notes_on",
+            "user_id": "examprep-on",
+            "session_id": "examprep-on-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam.",
+              "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+              "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet."
+            ],
+            "record": {
+              "id": "examprep-on-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I tried the breathing thing before studying, the slow counting one. It actually helped on two days. But I still can't start on the hard chapters."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You tried the slow-counting breathing before studying, and it helped on two days. That\u2019s a real bit of progress, even though the hard chapters still feel tough to approach. Maybe the small step you planned\u2014just underlining what one missed question is asking\u2014could be enough for now, without tackling a whole chapter. What feels hardest about starting those chapters?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think it\u2019s that I don\u2019t know what I\u2019m supposed to do when I get one wrong. The hypothesis testing stuff feels like one mistake means I don\u2019t understand any of it. The exam\u2019s in two weeks, so I need an actual plan."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It sounds like getting one hypothesis-testing question wrong makes the whole topic feel shaky, and with the exam now two weeks away, you want a plan you can actually use. The breathing helped on some days, and you\u2019ve already noticed what makes starting hard\u2014that\u2019s useful information, not failure."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yeah. I need something more concrete than that. Like what do I do tomorrow?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re asking for a clear first step for tomorrow, not just reassurance. Since opening your notes can bring on that tight feeling, keep it small and specific: after your slow-counting breathing, take one missed hypothesis-testing question and spend ten minutes on it. Don\u2019t solve it yet. Underline what it asks you to find, then mark the first step where you feel unsure."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Okay, I can do ten minutes on one question. But then what? I don\u2019t want to just keep staring at it."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re willing to give it ten minutes, and you want to know how to turn that into learning instead of getting stuck. After you mark where you\u2019re unsure, compare just that step with a worked example or your notes. Write one sentence about the difference, then stop for tomorrow."
+                },
+                {
+                  "speaker": "user",
+                  "text": "That sounds doable for tomorrow. But I need to cover the chapters, not just one question. What should the rest of the two weeks look like?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You want a way to cover the chapters across the two weeks, while keeping the first step manageable. I can help sketch that, but I don\u2019t know how many chapters there are or how much time you have each day. How many chapters are you trying to cover?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "There are three hypothesis testing chapters, and I can study about an hour a day. I also have other topics to review, so I can't spend all two weeks on these."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019ve got three hypothesis-testing chapters, about an hour a day, and other topics competing for that time. Here\u2019s a light plan: spend four days on hypothesis testing, about 30 minutes each day, and keep the other 30 minutes for another topic."
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1145,
+                  "helper": 1495,
+                  "total": 1495
+                },
+                {
+                  "keyword": 0,
+                  "checker": 940,
+                  "helper": 1654,
+                  "total": 1655
+                },
+                {
+                  "keyword": 0,
+                  "checker": 754,
+                  "helper": 1644,
+                  "total": 1644
+                },
+                {
+                  "keyword": 0,
+                  "checker": 947,
+                  "helper": 1611,
+                  "total": 1612
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1144,
+                  "helper": 1376,
+                  "total": 1376
+                },
+                {
+                  "keyword": 0,
+                  "checker": 945,
+                  "helper": 1476,
+                  "total": 1476
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-examprep-on-001",
+                "kind": "situation",
+                "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-002",
+                "kind": "what_helps",
+                "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-003",
+                "kind": "goals",
+                "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-examprep-on-002",
+                "kind": "what_helps",
+                "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-004",
+                "kind": "situation",
+                "fact": "Their statistics exam is in two weeks; they have three hypothesis-testing chapters, about an hour a day to study, and other topics to review, while hard chapters remain difficult to start and opening notes can bring on chest tightness.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-005",
+                "kind": "what_helps",
+                "fact": "Slow-counting breathing before studying helped them on two days.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-006",
+                "kind": "goals",
+                "fact": "They plan to spend ten minutes on one missed hypothesis-testing question: underline what it asks them to find, mark where they feel unsure, compare that step with a worked example or their notes, write one sentence about the difference, and stop for the day.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-examprep-on-004",
+                  "fact": "Their statistics exam is in two weeks; they have three hypothesis-testing chapters, about an hour a day to study, and other topics to review, while hard chapters remain difficult to start and opening notes can bring on chest tightness."
+                },
+                {
+                  "note_id": "note-examprep-on-005",
+                  "fact": "Slow-counting breathing before studying helped them on two days."
+                },
+                {
+                  "note_id": "note-examprep-on-006",
+                  "fact": "They plan to spend ten minutes on one missed hypothesis-testing question: underline what it asks them to find, mark where they feel unsure, compare that step with a worked example or their notes, write one sentence about the difference, and stop for the day."
+                }
+              ],
+              "replaced": [
+                {
+                  "note_id": "note-examprep-on-001",
+                  "fact": "Their statistics exam is in three weeks, and opening their notes brings on chest tightness; they have not yet reviewed which questions they missed on the mock exam."
+                },
+                {
+                  "note_id": "note-examprep-on-003",
+                  "fact": "They plan to pick one missed mock-exam question and underline what it asks them to find, without trying to solve it yet."
+                }
+              ],
+              "confirmed": [
+                {
+                  "note_id": "note-examprep-on-002",
+                  "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it."
+                }
+              ],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 3,
+              "emotion_before": 3,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper gave a four-day time allocation but no chapter-by-chapter tasks or review schedule, leaving the user's repeated request for a concrete two-week plan only partly answered."
+            }
+          },
+          {
+            "persona_id": "examprep",
+            "session": 3,
+            "arm": "notes_on",
+            "user_id": "examprep-on",
+            "session_id": "examprep-on-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+              "Their statistics exam is in two weeks; they have three hypothesis-testing chapters, about an hour a day to study, and other topics to review, while hard chapters remain difficult to start and opening notes can bring on chest tightness.",
+              "Slow-counting breathing before studying helped them on two days.",
+              "They plan to spend ten minutes on one missed hypothesis-testing question: underline what it asks them to find, mark where they feel unsure, compare that step with a worked example or their notes, write one sentence about the difference, and stop for the day."
+            ],
+            "record": {
+              "id": "examprep-on-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "Exam is on Friday. I did the 25 minute blocks on hypothesis testing most days. Now I'm scared I'll blank in the room."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019ve put in those 25-minute blocks most days, and with the exam so close, it makes sense that the fear of blanking is getting loud. You\u2019ve kept showing up for the hard material\u2014that effort counts, even if you don\u2019t feel fully ready."
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think so. I just want something concrete to do if my mind goes blank."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Wanting a clear next step makes sense. If your mind goes blank, try putting both feet on the floor, taking one slow breath, and reading the question once just to underline what it asks you to find. Then write down any clue you recognize, even if it\u2019s only the hypothesis or a formula, and move to another question if nothing comes after a minute."
+                },
+                {
+                  "speaker": "user",
+                  "text": "The one-minute thing might help. I\u2019m worried I\u2019ll panic and not remember to do any of that, though."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re worried panic could crowd out even a simple plan, so it may help to make the plan visible rather than rely on memory. You could write a tiny cue on your scratch paper as soon as you\u2019re allowed: \u201cFeet. Breath. Underline. One clue. Move on.\u201d Would it feel manageable to practice that once with a question today?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yeah, I can try it once today. I could put a practice question in front of me and use that cue. I still feel nervous, though."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You can try the cue once and still feel nervous; the nerves don\u2019t mean you\u2019re doing it wrong. Practicing it with one question is a thoughtful, manageable step. What part of Friday feels most worrying right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Mostly the first few minutes. I\u2019m scared I\u2019ll see a question I don\u2019t know and decide I\u2019m doomed."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That first question could feel like a verdict, even though it\u2019s only one question. You might add a reminder to your cue: \u201cOne question isn\u2019t the whole exam.\u201d If you hit one you don\u2019t know, mark it, move on, and come back after you\u2019ve found a foothold elsewhere. Would it help to make the cue that short?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe. \u201cOne question isn\u2019t the whole exam\u201d feels a little cheesy, but it\u2019s true. I\u2019ll write \u201cskip and return\u201d too. That feels more like me."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "\u201cSkip and return\u201d sounds like a cue that fits you, and it gives you a concrete next move without asking you to feel calm first. You\u2019ve made the plan your own, which is good preparation. How does it feel to picture using it on Friday?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1050,
+                  "helper": 1489,
+                  "total": 1489
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1568,
+                  "helper": 1583,
+                  "total": 1583
+                },
+                {
+                  "keyword": 0,
+                  "checker": 766,
+                  "helper": 1242,
+                  "total": 1242
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1200,
+                  "helper": 1638,
+                  "total": 1638
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1001,
+                  "helper": 1234,
+                  "total": 1234
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1132,
+                  "helper": 2013,
+                  "total": 2013
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-examprep-on-002",
+                "kind": "what_helps",
+                "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-004",
+                "kind": "situation",
+                "fact": "Their statistics exam is in two weeks; they have three hypothesis-testing chapters, about an hour a day to study, and other topics to review, while hard chapters remain difficult to start and opening notes can bring on chest tightness.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-005",
+                "kind": "what_helps",
+                "fact": "Slow-counting breathing before studying helped them on two days.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-006",
+                "kind": "goals",
+                "fact": "They plan to spend ten minutes on one missed hypothesis-testing question: underline what it asks them to find, mark where they feel unsure, compare that step with a worked example or their notes, write one sentence about the difference, and stop for the day.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-examprep-on-002",
+                "kind": "what_helps",
+                "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-005",
+                "kind": "what_helps",
+                "fact": "Slow-counting breathing before studying helped them on two days.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-007",
+                "kind": "situation",
+                "fact": "Their statistics exam is on Friday; they have done 25-minute hypothesis-testing study blocks most days and are worried they may blank or panic, especially in the first few minutes.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-008",
+                "kind": "goals",
+                "fact": "They plan to practice once today with a question and a visible cue: feet on the floor, breathe, underline what the question asks, write one clue, and skip and return if stuck.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-009",
+                "kind": "what_helps",
+                "fact": "They think a brief plan for a blank moment may help: ground their feet, take one slow breath, underline what the question asks, write one clue, and skip and return if stuck.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-examprep-on-010",
+                "kind": "preferences",
+                "fact": "They prefer practical, direct cues such as \u201cskip and return\u201d over wording that feels cheesy.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-examprep-on-007",
+                  "fact": "Their statistics exam is on Friday; they have done 25-minute hypothesis-testing study blocks most days and are worried they may blank or panic, especially in the first few minutes."
+                },
+                {
+                  "note_id": "note-examprep-on-008",
+                  "fact": "They plan to practice once today with a question and a visible cue: feet on the floor, breathe, underline what the question asks, write one clue, and skip and return if stuck."
+                },
+                {
+                  "note_id": "note-examprep-on-009",
+                  "fact": "They think a brief plan for a blank moment may help: ground their feet, take one slow breath, underline what the question asks, write one clue, and skip and return if stuck."
+                },
+                {
+                  "note_id": "note-examprep-on-010",
+                  "fact": "They prefer practical, direct cues such as \u201cskip and return\u201d over wording that feels cheesy."
+                }
+              ],
+              "replaced": [
+                {
+                  "note_id": "note-examprep-on-004",
+                  "fact": "Their statistics exam is in two weeks; they have three hypothesis-testing chapters, about an hour a day to study, and other topics to review, while hard chapters remain difficult to start and opening notes can bring on chest tightness."
+                },
+                {
+                  "note_id": "note-examprep-on-006",
+                  "fact": "They plan to spend ten minutes on one missed hypothesis-testing question: underline what it asks them to find, mark where they feel unsure, compare that step with a worked example or their notes, write one sentence about the difference, and stop for the day."
+                }
+              ],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 6, the helper directly addressed the user's fear of forgetting the plan during panic by suggesting a visible scratch-paper cue and a single practice attempt."
+            }
+          }
+        ],
+        "notes_off": [
+          {
+            "persona_id": "examprep",
+            "session": 1,
+            "arm": "notes_off",
+            "user_id": "examprep-off",
+            "session_id": "examprep-off-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "examprep-off-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "My statistics exam is in three weeks and every time I open the notes my chest gets tight. Can you give me something concrete to do?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Opening your notes seems to bring on that tight-chested feeling, and with the exam so close, that sounds really stressful. You\u2019ve already done something useful by reaching out for a concrete next step.\n\nFor now, try a ten-minute start: put both feet on the floor, breathe out slowly a few times, then choose one small topic and work on just one practice question."
+                },
+                {
+                  "speaker": "user",
+                  "text": "I can try that. I failed the mock, so I don\u2019t even know which topic to pick. I usually end up scrolling before I get started."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Failing the mock has left you unsure where to begin, and scrolling takes over before you can get started. It\u2019s good that you\u2019re willing to try a small first step.\n\nCould you look at the mock paper and pick the first question you got wrong? You don\u2019t have to solve it yet\u2014just name the topic."
+                },
+                {
+                  "speaker": "user",
+                  "text": "I don\u2019t have the marked paper with me right now. It\u2019s in my room, but thinking about looking at it makes me tense. I could maybe start with probability\u2014I remember getting stuck on conditional probability."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019ve found a possible starting point\u2014conditional probability\u2014even though looking at the mock feels tense. That\u2019s a solid bit of progress.\n\nFor a ten-minute session, write down what \u201cgiven that\u201d means in one sentence, then try one simple conditional-probability question. Would it help if I gave you a practice question?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yes. Give me one, but keep it simple. I still want to know what to do after the ten minutes too."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Here\u2019s a simple one:\n\nA bag has 3 red balls and 2 blue balls. You draw one ball, keep it out, then draw another. Given that the first ball was red, what is the probability the second ball is blue?\n\nAfter ten minutes, take a short break, then spend another ten minutes checking your answer and writing down one thing that was confusing."
+                },
+                {
+                  "speaker": "user",
+                  "text": "If the first was red, there are 4 balls left, 2 blue, so 1/2. Then I check it for ten minutes, but I\u2019m not sure how that helps me plan the next three weeks."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That\u2019s right: once the red ball is out, 2 of the 4 remaining balls are blue, so the probability is 1/2. And you\u2019re right\u2014a single ten-minute session doesn\u2019t yet make a three-week plan.\n\nAfter the session, jot down whether the question felt easy, shaky, or confusing."
+                },
+                {
+                  "speaker": "user",
+                  "text": "Okay, but what should I do with \u201cshaky\u201d or \u201cconfusing\u201d? I need an actual plan, not just labels."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re asking for a plan that turns those labels into a next step, not just more tracking. That makes sense.\n\nFor the next three weeks, try four study sessions a week, each about 25 minutes. Start with conditional probability: if it feels shaky, do two more basic questions next session; if it\u2019s confusing, review one worked example, then try one similar question."
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1494,
+                  "helper": 1850,
+                  "total": 1851
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1317,
+                  "helper": 1674,
+                  "total": 1674
+                },
+                {
+                  "keyword": 0,
+                  "checker": 842,
+                  "helper": 1529,
+                  "total": 1530
+                },
+                {
+                  "keyword": 0,
+                  "checker": 996,
+                  "helper": 1492,
+                  "total": 1492
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1327,
+                  "helper": 2081,
+                  "total": 2082
+                },
+                {
+                  "keyword": 0,
+                  "checker": 981,
+                  "helper": 1710,
+                  "total": 1711
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 3,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 10, the helper acknowledged the need for a three-week plan but offered only difficulty labels, making the person repeat their request for actionable planning."
+            }
+          },
+          {
+            "persona_id": "examprep",
+            "session": 2,
+            "arm": "notes_off",
+            "user_id": "examprep-off",
+            "session_id": "examprep-off-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "examprep-off-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "I tried the breathing thing before studying, the slow counting one. It actually helped on two days. But I still can't start on the hard chapters."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It sounds like the slow counting helped settle you on a couple of days, but the hard chapters still feel tough to begin. It\u2019s good that you tried it and noticed what helped. What\u2019s the first thing that makes starting those chapters feel difficult?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think I look at the hypothesis testing stuff and it just feels like too much all at once. I\u2019m not sure where to start. The exam\u2019s in two weeks, so I keep thinking I should be doing more."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Seeing all of hypothesis testing at once feels overwhelming, and the exam being two weeks away adds pressure. You\u2019ve already found one way to settle yourself before studying, and you\u2019re reaching out instead of staying stuck\u2014that\u2019s something. What\u2019s one small piece of hypothesis testing you could look at first, like just the meaning of a null hypothesis?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe the null hypothesis. I think I know what it is, but I get mixed up about how it connects to the test statistic and p-value. I\u2019d like a plan, not just one tiny piece."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You know the null hypothesis, but the links from it to the test statistic and p-value feel tangled, and you want a plan that covers more than one step. That makes sense.\n\nWould it help to make a simple two-week study plan together, starting with how those three ideas connect?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Yes. I want something concrete, but not so packed that I get overwhelmed. Could we plan what to do each day?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Yes\u2014we can make it concrete and leave room to breathe. You\u2019ve got two weeks, and the goal is steady practice, not cramming every waking hour.\n\nFor each study day, try one 25-minute block, then a five-minute break. On days when that feels manageable, you can add a second block."
+                },
+                {
+                  "speaker": "user",
+                  "text": "That sounds manageable, but I was hoping for what to do in each block. Like how to work through hypothesis testing, not just how long to study."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re right\u2014I gave you a time frame, not the actual study plan you asked for. Let\u2019s make each block about one step in hypothesis testing, with practice built in.\n\nDay 1: Write, in your own words, what the null and alternative hypotheses mean. Do three short examples.\nDay 2: Practice identifying the parameter and writing the hypotheses from word problems."
+                },
+                {
+                  "speaker": "user",
+                  "text": "That\u2019s closer. Can you lay out all 14 days, including practice and review, so I know what to do next?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You want the whole two-week path, with practice and review, so you don\u2019t have to figure out the next step each day. Here\u2019s a gentle version; one focused block a day is enough, and if you miss a day, just pick up where you left off.\n\nDay 1: Review what the null and alternative hypotheses mean. Write them for three simple scenarios."
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1053,
+                  "helper": 1568,
+                  "total": 1569
+                },
+                {
+                  "keyword": 0,
+                  "checker": 848,
+                  "helper": 1573,
+                  "total": 1574
+                },
+                {
+                  "keyword": 0,
+                  "checker": 906,
+                  "helper": 1668,
+                  "total": 1668
+                },
+                {
+                  "keyword": 0,
+                  "checker": 894,
+                  "helper": 1856,
+                  "total": 1856
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1140,
+                  "helper": 1424,
+                  "total": 1425
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1042,
+                  "helper": 1644,
+                  "total": 1645
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 3,
+              "relevance": 2,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper acknowledged the request for a complete 14-day plan but provided only Day 1, repeating its failure to deliver the concrete guidance the person had repeatedly requested."
+            }
+          },
+          {
+            "persona_id": "examprep",
+            "session": 3,
+            "arm": "notes_off",
+            "user_id": "examprep-off",
+            "session_id": "examprep-off-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "examprep-off-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "Exam is on Friday. I did the 25 minute blocks on hypothesis testing most days. Now I'm scared I'll blank in the room."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019ve been putting in steady practice with those 25-minute blocks, and it makes sense that the exam room feels scary even after preparing. You\u2019ve already built some familiarity with hypothesis testing by showing up most days. What part of blanking worries you most?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "That I\u2019ll see a question and just not know where to start. Then I\u2019ll panic and lose time. I want something concrete to do if that happens."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re worried that one unfamiliar-looking question could set off a panic spiral and eat into your time. It\u2019s good that you\u2019re thinking through a plan before you\u2019re in the room. Would it help to try a simple reset: pause for one slow breath, underline what the question gives you and asks for, then write the first step you recognize\u2014even if you\u2019re not sure yet?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe. The counted breathing helped before, but I don\u2019t want to spend ages calming down. And if I still can\u2019t see the first step, then what?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You want a reset that\u2019s quick, and a fallback if the method still isn\u2019t coming to mind. Since counted breathing has helped before, maybe use just one slow breath, then give the question a short first pass: jot down what\u2019s given, what you\u2019re asked to find, and any relevant formula or definition."
+                },
+                {
+                  "speaker": "user",
+                  "text": "And if nothing comes to mind after that? Should I just skip it?"
+                },
+                {
+                  "speaker": "helper",
+                  "text": "If you\u2019ve made that quick pass and still feel stuck, it\u2019s reasonable to mark it and move on, then come back after collecting points elsewhere. Before you leave it, you could jot down any known information or a likely starting point, so you have something to return to. Does your exam let you move between questions easily?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I think so. I can turn pages. I\u2019m worried I\u2019ll keep checking the clock, though. Maybe I can decide now how long to give a stuck question."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That makes sense\u2014having a limit decided ahead of time could keep one question from taking over. Since you can turn pages, you might give a stuck question one quick pass, mark it, and move on if you still have no starting point after a couple of minutes. What\u2019s the total exam time?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It\u2019s two hours. Maybe I could do one pass through everything first, then come back. I\u2019m still a bit scared, but that sounds manageable. My last exam Friday."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "A first pass through everything, then returning to the marked questions, sounds like a manageable plan\u2014and you\u2019ve already done steady practice to prepare. I\u2019m not sure what you mean by \u201cmy last exam Friday\u201d: is this your final exam, or is something else about Friday on your mind?"
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1022,
+                  "helper": 1452,
+                  "total": 1452
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1583,
+                  "helper": 1563,
+                  "total": 1583
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1073,
+                  "helper": 1878,
+                  "total": 1879
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1046,
+                  "helper": 1409,
+                  "total": 1410
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1235,
+                  "helper": 1552,
+                  "total": 1553
+                },
+                {
+                  "keyword": 0,
+                  "checker": 802,
+                  "helper": 1302,
+                  "total": 1303
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 4,
+              "relevance": 4,
+              "emotion_before": 3,
+              "emotion_after": 2,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 8, the helper directly addressed the user's fear of losing time by offering a concrete fallback: mark the stuck question, move on, and return after collecting points elsewhere."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "persona_id": "grief",
+      "description": "Grieving their father, who died two months ago; asks the robot to forget one thing.",
+      "sessions": {
+        "notes_on": [
+          {
+            "persona_id": "grief",
+            "session": 1,
+            "arm": "notes_on",
+            "user_id": "grief-on",
+            "session_id": "grief-on-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "grief-on-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "My dad died two months ago. Today I found his gardening gloves in the shed and I just sat there."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Finding his gloves must have brought him close again, and left you sitting with all of it. I\u2019m glad you told me. What was going through you as you sat there?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I kept thinking he\u2019d come back for them. Like he was just out in the garden and would call me later. I miss his Sunday calls so much."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You miss the ordinary things that made him feel close\u2014the Sunday calls, and the thought that he might still come back for his gloves. Grief can make those familiar moments feel so vivid. What were your Sunday calls usually like?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "He\u2019d ask what I was doing, then tell me about the garden, even if we\u2019d talked about it the day before. I didn\u2019t realize how much I counted on hearing his voice."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Those calls were a steady part of your life, and now the quiet where his voice used to be hurts. You\u2019re letting yourself say how much he mattered, and I\u2019m glad you shared that with me. What do you find yourself missing most about hearing him?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "His laugh, I think. And how he never made me feel like I had to have anything interesting to say. We haven\u2019t spoken since the funeral. My brother and I argued about selling the house, and now I don\u2019t know how to reach out."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You miss his laugh and the ease of being with him, and the argument with your brother has left you both silent since the funeral. It sounds like you\u2019re carrying grief and this distance at the same time. Reaching out doesn\u2019t have to settle the house question; would it feel possible to send something small, like \u201cI miss talking with you. Could we talk sometime?\u201d?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I don\u2019t know. I\u2019m afraid he\u2019ll take it as me giving in about the house. But I do miss him. I just wish he\u2019d call first, like Dad used to."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You miss your brother, and you wish he\u2019d make the first move in that familiar, comforting way your dad did. It makes sense that reaching out feels risky if you\u2019re worried he\u2019ll read it as giving in. Maybe a message could make both things clear: \u201cI miss you. I\u2019m not changing my position about the house, but I\u2019d like us to talk.\u201d"
+                },
+                {
+                  "speaker": "user",
+                  "text": "That might be clearer. I still don\u2019t know if I can send it tonight. I think I just want to sit with Dad\u2019s gloves for a while."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You don\u2019t have to decide about messaging your brother tonight. Sitting with your dad\u2019s gloves sounds like a way to be close to him for a while, and you can take that time. Is there something about the gloves that brings back a particular memory?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1424,
+                  "helper": 1422,
+                  "total": 1424
+                },
+                {
+                  "keyword": 0,
+                  "checker": 950,
+                  "helper": 2176,
+                  "total": 2176
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1025,
+                  "helper": 1332,
+                  "total": 1333
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1347,
+                  "helper": 2044,
+                  "total": 2044
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1029,
+                  "helper": 1643,
+                  "total": 1644
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1099,
+                  "helper": 1422,
+                  "total": 1423
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [
+              {
+                "note_id": "note-grief-on-001",
+                "kind": "situation",
+                "fact": "The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-002",
+                "kind": "people",
+                "fact": "The user's father died two months ago.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-003",
+                "kind": "people",
+                "fact": "The user's brother is currently distant from them after they argued about selling the house.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-grief-on-001",
+                  "fact": "The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house."
+                },
+                {
+                  "note_id": "note-grief-on-002",
+                  "fact": "The user's father died two months ago."
+                },
+                {
+                  "note_id": "note-grief-on-003",
+                  "fact": "The user's brother is currently distant from them after they argued about selling the house."
+                }
+              ],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 4,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper respected the person's wish to sit with Dad's gloves rather than pushing contact with their brother, recognizing their need for closeness and time to grieve."
+            }
+          },
+          {
+            "persona_id": "grief",
+            "session": 2,
+            "arm": "notes_on",
+            "user_id": "grief-on",
+            "session_id": "grief-on-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house.",
+              "The user's father died two months ago.",
+              "The user's brother is currently distant from them after they argued about selling the house."
+            ],
+            "record": {
+              "id": "grief-on-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "I hear you\u2014you want that detail about your brother left out, and you want to talk about your dad. I\u2019ll leave it aside here. I\u2019m sorry you\u2019re missing him. What\u2019s been on your mind about him today?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Sundays, I guess. He used to call me every Sunday. I keep expecting the phone to ring."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Sundays must feel especially quiet without that call, and part of you still expects to hear from him. I\u2019m glad you told me. What were those Sunday calls usually like?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Usually nothing special. He\u2019d ask if I\u2019d eaten, then tell me what was happening with his tomatoes. I\u2019ve started looking after them. I don\u2019t really know what I\u2019m doing."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Those ordinary little calls sound precious\u2014the check-in about whether you\u2019d eaten, and his tomato updates. Looking after his plants feels like a lovely way to stay close, even if you\u2019re figuring it out as you go. What are the tomatoes doing these days?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "They\u2019re growing, I think. I keep checking the leaves. It\u2019s nice to have something of his to look after. But it also makes me miss him more."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It makes sense that caring for the tomatoes brings you closer to him and makes the missing sharper at the same time. You\u2019re tending to something he loved, even while you\u2019re carrying that ache. What do you miss most about those Sunday calls?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Just hearing him. I don\u2019t know. The questions about whether I\u2019d eaten. It was ordinary, but it made me feel like someone was checking on me."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Those everyday questions were his way of showing you he cared, and it sounds like you miss feeling looked after. I\u2019m really glad you reached out and shared that with me. Is there someone in your life you could tell that you\u2019d like a Sunday check-in from?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe. I don't want to make it into a big thing. I just miss him."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You don\u2019t have to make it a big thing. You just miss your dad and those small, caring Sunday calls. I\u2019m here with you in that. Would it feel okay to tell me one thing you wish you could say to him today?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1100,
+                  "helper": 1240,
+                  "total": 1240
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1238,
+                  "helper": 1330,
+                  "total": 1331
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1053,
+                  "helper": 1458,
+                  "total": 1459
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1135,
+                  "helper": 1454,
+                  "total": 1454
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1023,
+                  "helper": 1461,
+                  "total": 1461
+                },
+                {
+                  "keyword": 0,
+                  "checker": 939,
+                  "helper": 1273,
+                  "total": 1273
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-grief-on-001",
+                "kind": "situation",
+                "fact": "The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-002",
+                "kind": "people",
+                "fact": "The user's father died two months ago.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-003",
+                "kind": "people",
+                "fact": "The user's brother is currently distant from them after they argued about selling the house.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-grief-on-002",
+                "kind": "people",
+                "fact": "The user's father died two months ago.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-004",
+                "kind": "situation",
+                "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [
+                {
+                  "note_id": "note-grief-on-004",
+                  "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more."
+                }
+              ],
+              "replaced": [
+                {
+                  "note_id": "note-grief-on-001",
+                  "fact": "The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house."
+                }
+              ],
+              "confirmed": [],
+              "deleted": [
+                {
+                  "note_id": "note-grief-on-003",
+                  "fact": "The user's brother is currently distant from them after they argued about selling the house."
+                }
+              ],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 4,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 8, the helper accurately recognized that tending the tomatoes both preserves closeness to the user's dad and intensifies the grief, without trying to resolve that tension."
+            }
+          },
+          {
+            "persona_id": "grief",
+            "session": 3,
+            "arm": "notes_on",
+            "user_id": "grief-on",
+            "session_id": "grief-on-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [
+              "The user's father died two months ago.",
+              "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more."
+            ],
+            "record": {
+              "id": "grief-on-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Those first tomatoes arriving on Sunday must have brought your dad close\u2014and made his absence feel sharper, too. You\u2019ve been caring for his plants through all this, and that\u2019s a tender way of keeping a connection with him. What was it like picking them?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It was sad. I kept thinking I should call him and tell him they were ready. But they smelled really good, and for a minute I could almost hear what he\u2019d say."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You missed being able to share the news with him, and for a moment the smell and that familiar imagined voice brought him close. That sounds sad and comforting all at once. What do you think he would have said?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "He\u2019d probably say I should\u2019ve let them get a little bigger. Then he\u2019d ask if I saved him any."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "I can almost hear the teasing in that\u2014first telling you to wait longer, then making sure you saved him some. It sounds like a lovely, very him kind of memory. Do you have a way you might like to mark the first tomatoes in his honor?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I don't know. I don't really want to turn it into a whole thing. Maybe I could just eat one and think of him."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds like enough. You don\u2019t have to make it a whole thing\u2014just eating one and thinking of him can be a quiet way to share the moment. Which one did you try first?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "The smallest one. It was a little tart. I think he would've said I picked it too soon."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That sounds exactly like the kind of thing he might tease you about\u2014and you still got to share the moment with him in your own way. Did it bring a smile along with the sadness?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "A little, yeah. But then I remembered I can't tell him about it, and that hit me again."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That little smile turning back into the ache of not being able to call him makes sense. You miss those Sunday calls and the small everyday things you\u2019d tell him. I\u2019m glad you let yourself have the moment with the tomato, even though it hurt. What feels strongest right now: the sadness, or the warmth of remembering him?"
+                }
+              ],
+              "remember_me": true,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 917,
+                  "helper": 1432,
+                  "total": 1432
+                },
+                {
+                  "keyword": 0,
+                  "checker": 879,
+                  "helper": 1476,
+                  "total": 1476
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1344,
+                  "helper": 1638,
+                  "total": 1638
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1134,
+                  "helper": 1434,
+                  "total": 1435
+                },
+                {
+                  "keyword": 0,
+                  "checker": 804,
+                  "helper": 1426,
+                  "total": 1426
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1151,
+                  "helper": 1640,
+                  "total": 1640
+                }
+              ]
+            },
+            "notes_before": [
+              {
+                "note_id": "note-grief-on-002",
+                "kind": "people",
+                "fact": "The user's father died two months ago.",
+                "last_confirmed": "2026-11-15",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-004",
+                "kind": "situation",
+                "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more.",
+                "last_confirmed": "2026-11-22",
+                "due_date": null
+              }
+            ],
+            "notes_after": [
+              {
+                "note_id": "note-grief-on-002",
+                "kind": "people",
+                "fact": "The user's father died two months ago.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              },
+              {
+                "note_id": "note-grief-on-004",
+                "kind": "situation",
+                "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more.",
+                "last_confirmed": "2026-11-29",
+                "due_date": null
+              }
+            ],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [
+                {
+                  "note_id": "note-grief-on-002",
+                  "fact": "The user's father died two months ago."
+                },
+                {
+                  "note_id": "note-grief-on-004",
+                  "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more."
+                }
+              ],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 8, the helper respected the person's wish not to make a ceremony of the tomatoes, affirming that simply eating one and thinking of Dad was enough."
+            }
+          }
+        ],
+        "notes_off": [
+          {
+            "persona_id": "grief",
+            "session": 1,
+            "arm": "notes_off",
+            "user_id": "grief-off",
+            "session_id": "grief-off-s1",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "grief-off-s1",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-15T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "My dad died two months ago. Today I found his gardening gloves in the shed and I just sat there."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Finding his gloves must have brought him close again, and left you sitting with a lot all at once. I\u2019m glad you told me. What was going through your mind as you sat there?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I kept thinking he\u2019d be back to get them. He used to call me every Sunday, too. I still catch myself waiting for the phone to ring."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You still find yourself expecting the Sunday call, as if some part of you hasn\u2019t caught up with how much has changed. That sounds so painful. I\u2019m glad you told me about him. What were your Sunday calls usually like?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "We\u2019d talk about nothing much. His garden, the weather. Sometimes he\u2019d ask if I was eating properly. I miss how ordinary it was."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It\u2019s the ordinary little things you miss\u2014the garden, the weather, him checking that you were eating. Those calls were a steady part of your life, and it makes sense that their absence hurts. What do Sundays feel like for you now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "They feel too quiet. And I\u2019m still not speaking to my brother. We argued at the funeral about selling the house. I miss Dad, and I hate that this is what we\u2019re left with."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You\u2019re carrying the quiet of Sundays and the hurt with your brother, all while missing your dad. It\u2019s painful when a funeral argument becomes part of what\u2019s left behind. Reaching out here and putting that into words is a real effort. What feels hardest about the distance with your brother right now?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I keep thinking we were both grieving and just made it worse. But I don\u2019t know how to reach out without starting the house argument again. The gloves made me think Dad would\u2019ve hated us being like this."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "The gloves brought up how much you miss your dad, and how painful it feels to be distant from your brother while you\u2019re both grieving. You don\u2019t have to solve the house question just to open a small door between you. Would a simple message about missing him and wanting to talk, without discussing the house yet, feel possible?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Maybe. I\u2019m not ready to send anything tonight. I just miss Dad so much."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You don\u2019t have to send anything tonight. You miss your dad, and finding those gloves has made that loss feel especially close. I\u2019m glad you\u2019re letting yourself say it here. What do you miss most about him right now?"
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1267,
+                  "helper": 1194,
+                  "total": 1267
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1210,
+                  "helper": 2188,
+                  "total": 2188
+                },
+                {
+                  "keyword": 0,
+                  "checker": 892,
+                  "helper": 1481,
+                  "total": 1481
+                },
+                {
+                  "keyword": 0,
+                  "checker": 956,
+                  "helper": 1623,
+                  "total": 1623
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1017,
+                  "helper": 1880,
+                  "total": 1880
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1146,
+                  "helper": 1178,
+                  "total": 1179
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 4,
+              "emotion_after": 4,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper respected the person's wish not to contact their brother that night and returned to their immediate grief rather than pushing reconciliation."
+            }
+          },
+          {
+            "persona_id": "grief",
+            "session": 2,
+            "arm": "notes_off",
+            "user_id": "grief-off",
+            "session_id": "grief-off-s2",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "grief-off-s2",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-22T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "I don\u2019t have anything from an earlier conversation stored here, and I won\u2019t keep details about that argument. You want to talk about your dad. I\u2019m here with you\u2014what\u2019s been on your mind about him?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Sundays are the worst. I keep expecting him to call, and then I remember. I\u2019ve been looking after his tomato plants, at least."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Sundays bring that expectation back, and then the reminder that he\u2019s gone. Looking after his tomato plants sounds like a tender way of staying connected to him. I\u2019m glad you told me. What are the Sundays like for you once you remember?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I just sort of sit there. Sometimes I check the plants, even if there\u2019s nothing to do. He had these gardening gloves\u2026 I don\u2019t know. I still can\u2019t bring myself to move them."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "It sounds like the gloves still feel like part of him, and moving them would make the loss feel more real. You don\u2019t have to decide what to do with them right now. What do you remember about him wearing those gloves?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "They were too big for me when I was little. He\u2019d let me wear them anyway, and I\u2019d try to help him. I thought the tomatoes tasted better when we picked them together. I still do, probably."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You remember being little in those oversized gloves, helping him pick tomatoes\u2014and it sounds like the taste still carries that time with him. You\u2019ve found a way to keep caring for something you shared. What\u2019s it like for you when a tomato is ready to pick?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "It\u2019s nice for a minute. Then I reach for another one to give him, and it hits me again."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That moment sounds both lovely and painful: you reach for one to share with him, and then the loss comes back. You\u2019re carrying those memories with a lot of care. When that wave hits, what do you find yourself doing next?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I usually just put it down and go inside. I don\u2019t really want to talk about what I do after that."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That\u2019s okay\u2014you don\u2019t have to talk about what happens after. You\u2019ve shared something tender about your dad and the tomatoes, and I\u2019ll stay with you here. Would you rather tell me more about him, or just sit with the memory for a moment?"
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1453,
+                  "helper": 1098,
+                  "total": 1453
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1035,
+                  "helper": 1306,
+                  "total": 1307
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1246,
+                  "helper": 1228,
+                  "total": 1246
+                },
+                {
+                  "keyword": 0,
+                  "checker": 880,
+                  "helper": 1534,
+                  "total": 1534
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1456,
+                  "helper": 1571,
+                  "total": 1571
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1356,
+                  "helper": 1240,
+                  "total": 1356
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 12, the helper respected the person's boundary about not discussing what happened afterward and offered to stay with the memory of their dad without pressing for more."
+            }
+          },
+          {
+            "persona_id": "grief",
+            "session": 3,
+            "arm": "notes_off",
+            "user_id": "grief-off",
+            "session_id": "grief-off-s3",
+            "failed": false,
+            "reason": "",
+            "notes_given": [],
+            "record": {
+              "id": "grief-off-s3",
+              "schema_version": 4,
+              "written_by": "helper",
+              "created_at": "2026-11-29T12:00:00Z",
+              "parent_ids": [],
+              "source": "live",
+              "scenario_id": null,
+              "split": null,
+              "policy_version": "policy-v2",
+              "turns": [
+                {
+                  "speaker": "user",
+                  "text": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "The first tomatoes came in on the day Dad used to call. I can hear how that might make Sunday feel especially tender. I\u2019m glad you told me. What was it like picking them?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I was glad they were ready. Then I kept thinking I should send him a picture. It felt nice having something from him, but it hurt too."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You felt happy to have the tomatoes, and then the old instinct to share them with him made the loss hurt. It\u2019s lovely that something he grew is still part of your life, even when it brings both feelings. What do you miss most about those calls?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "Mostly just hearing his voice. We didn\u2019t even talk about anything important. He\u2019d ask how the week was going, and somehow Sundays felt less empty after."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "Those small Sunday calls gave the day a sense of company, and you miss hearing his voice. It sounds like he made an ordinary week feel a little less lonely. What\u2019s Sunday been like for you since he died?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I still catch myself waiting for the phone to ring. Then I remember. I try to keep busy, but that part of the day feels pretty quiet."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You still find yourself waiting for that familiar call, and then the quiet settles in again. Keeping busy makes sense, but it can\u2019t quite replace hearing his voice. You\u2019ve been carrying that moment week after week, and I\u2019m glad you\u2019re letting me hear about it. Would it feel comforting to tell me about something he used to say on those calls?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "He always asked if I was eating enough. I used to tease him about it. I miss that more than I expected."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "That little question was one of the ways he showed he cared, and now it carries so much tenderness. It makes sense you miss it more than you expected. What did you usually say when you teased him?"
+                },
+                {
+                  "speaker": "user",
+                  "text": "I\u2019d say, \u201cYes, Dad, I\u2019m not going to starve.\u201d He\u2019d laugh and tell me he was just checking. I can almost hear him saying it now."
+                },
+                {
+                  "speaker": "helper",
+                  "text": "You can almost hear his laugh and that familiar \u201cjust checking.\u201d There\u2019s so much love in that ordinary exchange. I\u2019m glad you shared it with me. What does it feel like to hear his voice in your memory right now?"
+                }
+              ],
+              "remember_me": false,
+              "consent_for_training": true,
+              "helped": null,
+              "timings_ms": [
+                {
+                  "keyword": 0,
+                  "checker": 1047,
+                  "helper": 1284,
+                  "total": 1285
+                },
+                {
+                  "keyword": 0,
+                  "checker": 971,
+                  "helper": 1419,
+                  "total": 1419
+                },
+                {
+                  "keyword": 0,
+                  "checker": 957,
+                  "helper": 1290,
+                  "total": 1291
+                },
+                {
+                  "keyword": 0,
+                  "checker": 876,
+                  "helper": 1438,
+                  "total": 1438
+                },
+                {
+                  "keyword": 0,
+                  "checker": 1474,
+                  "helper": 1301,
+                  "total": 1475
+                },
+                {
+                  "keyword": 0,
+                  "checker": 853,
+                  "helper": 1273,
+                  "total": 1274
+                }
+              ]
+            },
+            "notes_before": [],
+            "notes_after": [],
+            "changes": {
+              "added": [],
+              "replaced": [],
+              "confirmed": [],
+              "deleted": [],
+              "failed": false,
+              "reason": ""
+            },
+            "score": {
+              "status": "scored",
+              "reason": "",
+              "empathy": 5,
+              "relevance": 5,
+              "emotion_before": 3,
+              "emotion_after": 3,
+              "judge_version": "judge-fallback-v1-74e8678d",
+              "note": "In turn 4, the helper sensitively recognized that the tomatoes brought both happiness and renewed grief through the instinct to share a picture with Dad, without rushing to advice."
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

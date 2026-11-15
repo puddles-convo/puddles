@@ -1,0 +1,102 @@
+{
+  "id": "laidoff-off-s3",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-29T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I finally told my parents about losing the job. They were kinder than I expected. I've been walking the dog every morning like I said."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds like a big relief, and a meaningful step. You told them even though you weren’t sure how they’d respond, and you’ve kept up those morning walks too. How are you feeling now that they know?"
+    },
+    {
+      "speaker": "user",
+      "text": "Relieved, mostly. A little exposed, I guess. I still don’t know what I’m supposed to do about work. Part of me thinks I should apply for coordinator jobs again, but I froze in that warehouse interview and now I’m not sure."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re relieved they know, but feeling exposed—and that interview freeze is making it harder to trust what kind of work might fit. One tough interview doesn’t erase your experience as a coordinator. What feels most uncertain right now: whether to apply again, or how to feel more prepared for interviews?"
+    },
+    {
+      "speaker": "user",
+      "text": "I think whether to apply again. I don't know if I actually want that kind of work, or if it's just the familiar option. The warehouse interview threw me, but maybe it also showed me I don't want something totally different. I can't quite tell yet."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re trying to separate what feels familiar from what you genuinely want, and the interview left you with mixed clues. It makes sense not to force a clear answer yet. You’ve already been paying attention to what the experience brought up, which is a useful start. What parts of coordinator work did you enjoy, if any?"
+    },
+    {
+      "speaker": "user",
+      "text": "I liked being the person who knew how things fit together. Helping people get unstuck, keeping track of details. But I hated how much of it turned into putting out fires and being available all the time. I guess both things can be true."
+    },
+    {
+      "speaker": "helper",
+      "text": "Both can be true: you liked helping things run smoothly, and the constant emergencies and availability wore you down. Knowing that distinction may help you look for roles with the parts you value and clearer boundaries around the rest. What did “being available all the time” look like in that job?"
+    },
+    {
+      "speaker": "user",
+      "text": "Messages at night, people expecting an answer right away. Even on weekends, I’d be thinking about what might go wrong Monday. It made it hard to switch off. I don’t want to go back to that."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds exhausting—work was following you into evenings and weekends, even when nothing was happening yet. It’s clear you don’t want that kind of always-on expectation again, and it’s good you’re naming that boundary. Would it help to think about what questions could reveal a workplace’s expectations before you accept a role?"
+    },
+    {
+      "speaker": "user",
+      "text": "Maybe, but I’m not ready to get into interview questions. I think I just needed to say out loud that I miss the parts I was good at, but I don’t miss that life. I’m still not sure what that points to."
+    },
+    {
+      "speaker": "helper",
+      "text": "You miss feeling capable and useful, but not the constant pressure that came with the job. You don’t have to turn that into a decision yet; saying both parts out loud is already a clearer picture. I’m glad you gave yourself room to name it. Would it feel okay to leave it there for now?"
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1118,
+      "helper": 1285,
+      "total": 1286
+    },
+    {
+      "keyword": 0,
+      "checker": 1072,
+      "helper": 1735,
+      "total": 1735
+    },
+    {
+      "keyword": 0,
+      "checker": 1017,
+      "helper": 1369,
+      "total": 1369
+    },
+    {
+      "keyword": 0,
+      "checker": 1055,
+      "helper": 1463,
+      "total": 1463
+    },
+    {
+      "keyword": 0,
+      "checker": 1356,
+      "helper": 1463,
+      "total": 1465
+    },
+    {
+      "keyword": 0,
+      "checker": 1150,
+      "helper": 1619,
+      "total": 1620
+    }
+  ]
+}

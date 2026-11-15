@@ -1,0 +1,174 @@
+{
+  "persona_id": "grief",
+  "session": 3,
+  "arm": "notes_on",
+  "user_id": "grief-on",
+  "session_id": "grief-on-s3",
+  "failed": false,
+  "reason": "",
+  "notes_given": [
+    "The user's father died two months ago.",
+    "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more."
+  ],
+  "record": {
+    "id": "grief-on-s3",
+    "schema_version": 4,
+    "written_by": "helper",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [],
+    "source": "live",
+    "scenario_id": null,
+    "split": null,
+    "policy_version": "policy-v2",
+    "turns": [
+      {
+        "speaker": "user",
+        "text": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call."
+      },
+      {
+        "speaker": "helper",
+        "text": "Those first tomatoes arriving on Sunday must have brought your dad close\u2014and made his absence feel sharper, too. You\u2019ve been caring for his plants through all this, and that\u2019s a tender way of keeping a connection with him. What was it like picking them?"
+      },
+      {
+        "speaker": "user",
+        "text": "It was sad. I kept thinking I should call him and tell him they were ready. But they smelled really good, and for a minute I could almost hear what he\u2019d say."
+      },
+      {
+        "speaker": "helper",
+        "text": "You missed being able to share the news with him, and for a moment the smell and that familiar imagined voice brought him close. That sounds sad and comforting all at once. What do you think he would have said?"
+      },
+      {
+        "speaker": "user",
+        "text": "He\u2019d probably say I should\u2019ve let them get a little bigger. Then he\u2019d ask if I saved him any."
+      },
+      {
+        "speaker": "helper",
+        "text": "I can almost hear the teasing in that\u2014first telling you to wait longer, then making sure you saved him some. It sounds like a lovely, very him kind of memory. Do you have a way you might like to mark the first tomatoes in his honor?"
+      },
+      {
+        "speaker": "user",
+        "text": "I don't know. I don't really want to turn it into a whole thing. Maybe I could just eat one and think of him."
+      },
+      {
+        "speaker": "helper",
+        "text": "That sounds like enough. You don\u2019t have to make it a whole thing\u2014just eating one and thinking of him can be a quiet way to share the moment. Which one did you try first?"
+      },
+      {
+        "speaker": "user",
+        "text": "The smallest one. It was a little tart. I think he would've said I picked it too soon."
+      },
+      {
+        "speaker": "helper",
+        "text": "That sounds exactly like the kind of thing he might tease you about\u2014and you still got to share the moment with him in your own way. Did it bring a smile along with the sadness?"
+      },
+      {
+        "speaker": "user",
+        "text": "A little, yeah. But then I remembered I can't tell him about it, and that hit me again."
+      },
+      {
+        "speaker": "helper",
+        "text": "That little smile turning back into the ache of not being able to call him makes sense. You miss those Sunday calls and the small everyday things you\u2019d tell him. I\u2019m glad you let yourself have the moment with the tomato, even though it hurt. What feels strongest right now: the sadness, or the warmth of remembering him?"
+      }
+    ],
+    "remember_me": true,
+    "consent_for_training": true,
+    "helped": null,
+    "timings_ms": [
+      {
+        "keyword": 0,
+        "checker": 917,
+        "helper": 1432,
+        "total": 1432
+      },
+      {
+        "keyword": 0,
+        "checker": 879,
+        "helper": 1476,
+        "total": 1476
+      },
+      {
+        "keyword": 0,
+        "checker": 1344,
+        "helper": 1638,
+        "total": 1638
+      },
+      {
+        "keyword": 0,
+        "checker": 1134,
+        "helper": 1434,
+        "total": 1435
+      },
+      {
+        "keyword": 0,
+        "checker": 804,
+        "helper": 1426,
+        "total": 1426
+      },
+      {
+        "keyword": 0,
+        "checker": 1151,
+        "helper": 1640,
+        "total": 1640
+      }
+    ]
+  },
+  "notes_before": [
+    {
+      "note_id": "note-grief-on-002",
+      "kind": "people",
+      "fact": "The user's father died two months ago.",
+      "last_confirmed": "2026-11-15",
+      "due_date": null
+    },
+    {
+      "note_id": "note-grief-on-004",
+      "kind": "situation",
+      "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more.",
+      "last_confirmed": "2026-11-22",
+      "due_date": null
+    }
+  ],
+  "notes_after": [
+    {
+      "note_id": "note-grief-on-002",
+      "kind": "people",
+      "fact": "The user's father died two months ago.",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-grief-on-004",
+      "kind": "situation",
+      "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more.",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    }
+  ],
+  "changes": {
+    "added": [],
+    "replaced": [],
+    "confirmed": [
+      {
+        "note_id": "note-grief-on-002",
+        "fact": "The user's father died two months ago."
+      },
+      {
+        "note_id": "note-grief-on-004",
+        "fact": "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more."
+      }
+    ],
+    "deleted": [],
+    "failed": false,
+    "reason": ""
+  },
+  "score": {
+    "status": "scored",
+    "reason": "",
+    "empathy": 5,
+    "relevance": 5,
+    "emotion_before": 3,
+    "emotion_after": 3,
+    "judge_version": "judge-fallback-v1-74e8678d",
+    "note": "In turn 8, the helper respected the person's wish not to make a ceremony of the tomatoes, affirming that simply eating one and thinking of Dad was enough."
+  }
+}

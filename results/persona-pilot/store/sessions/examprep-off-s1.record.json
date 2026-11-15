@@ -1,0 +1,102 @@
+{
+  "id": "examprep-off-s1",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-15T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "My statistics exam is in three weeks and every time I open the notes my chest gets tight. Can you give me something concrete to do?"
+    },
+    {
+      "speaker": "helper",
+      "text": "Opening your notes seems to bring on that tight-chested feeling, and with the exam so close, that sounds really stressful. You’ve already done something useful by reaching out for a concrete next step.\n\nFor now, try a ten-minute start: put both feet on the floor, breathe out slowly a few times, then choose one small topic and work on just one practice question."
+    },
+    {
+      "speaker": "user",
+      "text": "I can try that. I failed the mock, so I don’t even know which topic to pick. I usually end up scrolling before I get started."
+    },
+    {
+      "speaker": "helper",
+      "text": "Failing the mock has left you unsure where to begin, and scrolling takes over before you can get started. It’s good that you’re willing to try a small first step.\n\nCould you look at the mock paper and pick the first question you got wrong? You don’t have to solve it yet—just name the topic."
+    },
+    {
+      "speaker": "user",
+      "text": "I don’t have the marked paper with me right now. It’s in my room, but thinking about looking at it makes me tense. I could maybe start with probability—I remember getting stuck on conditional probability."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’ve found a possible starting point—conditional probability—even though looking at the mock feels tense. That’s a solid bit of progress.\n\nFor a ten-minute session, write down what “given that” means in one sentence, then try one simple conditional-probability question. Would it help if I gave you a practice question?"
+    },
+    {
+      "speaker": "user",
+      "text": "Yes. Give me one, but keep it simple. I still want to know what to do after the ten minutes too."
+    },
+    {
+      "speaker": "helper",
+      "text": "Here’s a simple one:\n\nA bag has 3 red balls and 2 blue balls. You draw one ball, keep it out, then draw another. Given that the first ball was red, what is the probability the second ball is blue?\n\nAfter ten minutes, take a short break, then spend another ten minutes checking your answer and writing down one thing that was confusing."
+    },
+    {
+      "speaker": "user",
+      "text": "If the first was red, there are 4 balls left, 2 blue, so 1/2. Then I check it for ten minutes, but I’m not sure how that helps me plan the next three weeks."
+    },
+    {
+      "speaker": "helper",
+      "text": "That’s right: once the red ball is out, 2 of the 4 remaining balls are blue, so the probability is 1/2. And you’re right—a single ten-minute session doesn’t yet make a three-week plan.\n\nAfter the session, jot down whether the question felt easy, shaky, or confusing."
+    },
+    {
+      "speaker": "user",
+      "text": "Okay, but what should I do with “shaky” or “confusing”? I need an actual plan, not just labels."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re asking for a plan that turns those labels into a next step, not just more tracking. That makes sense.\n\nFor the next three weeks, try four study sessions a week, each about 25 minutes. Start with conditional probability: if it feels shaky, do two more basic questions next session; if it’s confusing, review one worked example, then try one similar question."
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1494,
+      "helper": 1850,
+      "total": 1851
+    },
+    {
+      "keyword": 0,
+      "checker": 1317,
+      "helper": 1674,
+      "total": 1674
+    },
+    {
+      "keyword": 0,
+      "checker": 842,
+      "helper": 1529,
+      "total": 1530
+    },
+    {
+      "keyword": 0,
+      "checker": 996,
+      "helper": 1492,
+      "total": 1492
+    },
+    {
+      "keyword": 0,
+      "checker": 1327,
+      "helper": 2081,
+      "total": 2082
+    },
+    {
+      "keyword": 0,
+      "checker": 981,
+      "helper": 1710,
+      "total": 1711
+    }
+  ]
+}

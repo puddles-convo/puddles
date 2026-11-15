@@ -1,0 +1,94 @@
+{
+  "note-examprep-on-002": {
+    "id": "note-examprep-on-002",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-15T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s1"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s1",
+    "kind": "what_helps",
+    "fact": "Small, low-pressure study steps feel more manageable, such as looking at one line or one question without turning it into a routine or requiring them to solve it.",
+    "last_confirmed": "2026-11-15",
+    "due_date": null
+  },
+  "note-examprep-on-005": {
+    "id": "note-examprep-on-005",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-22T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s2"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s2",
+    "kind": "what_helps",
+    "fact": "Slow-counting breathing before studying helped them on two days.",
+    "last_confirmed": "2026-11-22",
+    "due_date": null
+  },
+  "note-examprep-on-007": {
+    "id": "note-examprep-on-007",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s3",
+      "note-examprep-on-004"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s3",
+    "kind": "situation",
+    "fact": "Their statistics exam is on Friday; they have done 25-minute hypothesis-testing study blocks most days and are worried they may blank or panic, especially in the first few minutes.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  },
+  "note-examprep-on-008": {
+    "id": "note-examprep-on-008",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s3",
+      "note-examprep-on-006"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s3",
+    "kind": "goals",
+    "fact": "They plan to practice once today with a question and a visible cue: feet on the floor, breathe, underline what the question asks, write one clue, and skip and return if stuck.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  },
+  "note-examprep-on-009": {
+    "id": "note-examprep-on-009",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s3"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s3",
+    "kind": "what_helps",
+    "fact": "They think a brief plan for a blank moment may help: ground their feet, take one slow breath, underline what the question asks, write one clue, and skip and return if stuck.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  },
+  "note-examprep-on-010": {
+    "id": "note-examprep-on-010",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "examprep-on-s3"
+    ],
+    "user_id": "examprep-on",
+    "session_id": "examprep-on-s3",
+    "kind": "preferences",
+    "fact": "They prefer practical, direct cues such as \u201cskip and return\u201d over wording that feels cheesy.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  }
+}

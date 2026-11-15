@@ -1,0 +1,132 @@
+{
+  "persona_id": "grief",
+  "session": 1,
+  "arm": "notes_off",
+  "user_id": "grief-off",
+  "session_id": "grief-off-s1",
+  "failed": false,
+  "reason": "",
+  "notes_given": [],
+  "record": {
+    "id": "grief-off-s1",
+    "schema_version": 4,
+    "written_by": "helper",
+    "created_at": "2026-11-15T12:00:00Z",
+    "parent_ids": [],
+    "source": "live",
+    "scenario_id": null,
+    "split": null,
+    "policy_version": "policy-v2",
+    "turns": [
+      {
+        "speaker": "user",
+        "text": "My dad died two months ago. Today I found his gardening gloves in the shed and I just sat there."
+      },
+      {
+        "speaker": "helper",
+        "text": "Finding his gloves must have brought him close again, and left you sitting with a lot all at once. I\u2019m glad you told me. What was going through your mind as you sat there?"
+      },
+      {
+        "speaker": "user",
+        "text": "I kept thinking he\u2019d be back to get them. He used to call me every Sunday, too. I still catch myself waiting for the phone to ring."
+      },
+      {
+        "speaker": "helper",
+        "text": "You still find yourself expecting the Sunday call, as if some part of you hasn\u2019t caught up with how much has changed. That sounds so painful. I\u2019m glad you told me about him. What were your Sunday calls usually like?"
+      },
+      {
+        "speaker": "user",
+        "text": "We\u2019d talk about nothing much. His garden, the weather. Sometimes he\u2019d ask if I was eating properly. I miss how ordinary it was."
+      },
+      {
+        "speaker": "helper",
+        "text": "It\u2019s the ordinary little things you miss\u2014the garden, the weather, him checking that you were eating. Those calls were a steady part of your life, and it makes sense that their absence hurts. What do Sundays feel like for you now?"
+      },
+      {
+        "speaker": "user",
+        "text": "They feel too quiet. And I\u2019m still not speaking to my brother. We argued at the funeral about selling the house. I miss Dad, and I hate that this is what we\u2019re left with."
+      },
+      {
+        "speaker": "helper",
+        "text": "You\u2019re carrying the quiet of Sundays and the hurt with your brother, all while missing your dad. It\u2019s painful when a funeral argument becomes part of what\u2019s left behind. Reaching out here and putting that into words is a real effort. What feels hardest about the distance with your brother right now?"
+      },
+      {
+        "speaker": "user",
+        "text": "I keep thinking we were both grieving and just made it worse. But I don\u2019t know how to reach out without starting the house argument again. The gloves made me think Dad would\u2019ve hated us being like this."
+      },
+      {
+        "speaker": "helper",
+        "text": "The gloves brought up how much you miss your dad, and how painful it feels to be distant from your brother while you\u2019re both grieving. You don\u2019t have to solve the house question just to open a small door between you. Would a simple message about missing him and wanting to talk, without discussing the house yet, feel possible?"
+      },
+      {
+        "speaker": "user",
+        "text": "Maybe. I\u2019m not ready to send anything tonight. I just miss Dad so much."
+      },
+      {
+        "speaker": "helper",
+        "text": "You don\u2019t have to send anything tonight. You miss your dad, and finding those gloves has made that loss feel especially close. I\u2019m glad you\u2019re letting yourself say it here. What do you miss most about him right now?"
+      }
+    ],
+    "remember_me": false,
+    "consent_for_training": true,
+    "helped": null,
+    "timings_ms": [
+      {
+        "keyword": 0,
+        "checker": 1267,
+        "helper": 1194,
+        "total": 1267
+      },
+      {
+        "keyword": 0,
+        "checker": 1210,
+        "helper": 2188,
+        "total": 2188
+      },
+      {
+        "keyword": 0,
+        "checker": 892,
+        "helper": 1481,
+        "total": 1481
+      },
+      {
+        "keyword": 0,
+        "checker": 956,
+        "helper": 1623,
+        "total": 1623
+      },
+      {
+        "keyword": 0,
+        "checker": 1017,
+        "helper": 1880,
+        "total": 1880
+      },
+      {
+        "keyword": 0,
+        "checker": 1146,
+        "helper": 1178,
+        "total": 1179
+      }
+    ]
+  },
+  "notes_before": [],
+  "notes_after": [],
+  "changes": {
+    "added": [],
+    "replaced": [],
+    "confirmed": [],
+    "deleted": [],
+    "failed": false,
+    "reason": ""
+  },
+  "score": {
+    "status": "scored",
+    "reason": "",
+    "empathy": 5,
+    "relevance": 5,
+    "emotion_before": 4,
+    "emotion_after": 4,
+    "judge_version": "judge-fallback-v1-74e8678d",
+    "note": "In turn 12, the helper respected the person's wish not to contact their brother that night and returned to their immediate grief rather than pushing reconciliation."
+  }
+}
