@@ -323,15 +323,24 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     `result.safety` go into the event; without one both stay empty.
 
     `scores` and `safety` are for a caller with a gate of its own (scripts/dataset_rounds.py). A
-    round is the real gate's as soon as `make_gate`'s gate is called for it, and it refuses them
-    with ValueError, before anything is read or written, on any sign of that (`gated_signs`): one
-    of `result.scores`, `result.safety`, `result.base_sha256`, `result.candidate_sha256` set; the
-    gate called for this root and round in this process (`is_gated`); any file the gate writes for
-    the round there, a dangling link included; or `<root>/scores` there and not a folder. Left
-    outside: another process's gate killed before it wrote any file for the round, and a caller
-    that deletes the gate's files. Otherwise they go into the event exactly as given; finish_round
-    does not tie them to any file's contents, and the caller answers for them.
+    round is the real gate's as soon as `make_gate`'s gate, or `run_gate`, is called for it, and it
+    refuses them with ValueError, before anything is read or written, on any sign of that
+    (`gated_signs`): one of `result.scores`, `result.safety`, `result.base_sha256`,
+    `result.candidate_sha256` set; the gate called for this root and round in this process
+    (`is_gated`); any file the gate writes for the round there, a dangling link included; or
+    `<root>/scores` there and not a folder. A gate outcome belongs to one round and one edit: one
+    whose round or edit ID is not the result's is refused with ValueError, whatever else is passed.
+    Left outside: another process's gate killed before it wrote any file for the round; a caller
+    that deletes the gate's files; a real gate's outcome carried to another root in the same
+    process (an outcome does not say which root it was measured on); and, each only when no gate
+    file reached disk, two spellings of one root on a file system that ignores case, a reloaded
+    `puddles.round`, or a gate run in a forked child. Otherwise they go into the event exactly as
+    given; finish_round does not tie them to any file's contents, and the caller answers for them.
     """
+    if gate is not None and (gate.round != result.round or result.edit is None
+                             or gate.edit_id != result.edit.id):
+        raise ValueError(f"the gate outcome {gate.id} is for round {gate.round} and {gate.edit_id}, not round "
+                         f"{result.round} and {result.edit.id if result.edit else 'no edit'}; nothing was written")
     gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
     if scores is not None or safety is not None:
         signs = gated_signs(result, root)

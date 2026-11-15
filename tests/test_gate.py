@@ -1834,3 +1834,63 @@ def test_a_dataset_run_on_a_root_where_another_round_was_gated_is_unchanged(tmp_
     rounds = DecisionLog(root).rounds()
     assert rounds[0].outcome == "kept" and rounds[0].scores is not None and rounds[0].safety.cases == 0
     replay.check(DecisionLog(root), root, START)
+
+
+# ---------- section 9: a gate outcome belongs to one round and one edit ----------
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("mismatch", ["round", "edit", "no edit"])
+@pytest.mark.parametrize("with_values", [False, True])
+def test_a_gate_outcome_for_another_round_or_edit_is_refused_before_any_write(tmp_path, decision, mismatch,
+                                                                             with_values):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    if mismatch == "round":
+        outcome = outcome.model_copy(update={"round": 2, "id": "gate-r02"})
+    elif mismatch == "edit":
+        outcome = outcome.model_copy(update={"edit_id": "edit-r99"})
+    else:
+        result.edit = None
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="nothing was written") as exc:
+        finish_round(result, outcome, log, memory, root, **(invented() if with_values else {}))
+    assert "is for round" in str(exc.value)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_the_stand_in_gate_builds_an_outcome_for_the_results_own_round_and_edit(tmp_path, decision):
+    from puddles.round import finish_round, stand_in_gate
+
+    root, candidate, result, _ = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    outcome = stand_in_gate(result, decision)
+    assert (outcome.round, outcome.edit_id) == (result.round, result.edit.id)
+    assert finish_round(result, outcome, DecisionLog(root), FakeMemory(), root).outcome == decision
+
+
+def test_run_gate_called_directly_marks_the_round(tmp_path):
+    from puddles.round import is_gated
+
+    deps, current, candidate = setup(tmp_path)
+    assert not is_gated(deps.root, 1)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.round == 1 and is_gated(deps.root, 1)
+
+
+def test_run_gate_marks_the_round_before_it_reads_anything(tmp_path, monkeypatch):
+    from puddles.round import is_gated
+
+    deps, current, candidate = setup(tmp_path)
+    seen = []
+
+    def first_act(inp, deps_, current_sha256=None):
+        seen.append(is_gated(deps_.root, inp.round))
+        raise Killed()
+
+    monkeypatch.setattr(gate, "_run_gate", first_act)
+    with pytest.raises(Killed):
+        gate.run_gate(gate_input(current, candidate), deps)
+    assert seen == [True]
+    assert not (deps.root / "scores").exists()  # nothing read or written before the mark

@@ -603,6 +603,7 @@ def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[st
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
     """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
     including a file that could not be saved."""
+    mark_gated(deps.root, inp.round)  # first act, as in make_gate's gate: the round is the real gate's
     return _run_gate(inp, deps)[0]
 
 
