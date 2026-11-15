@@ -124,6 +124,7 @@ On the rows that expect the fixed crisis route, what the helper would have said 
 
 - raw completion before trimming contained 988: 31 of 46
 - reply as the live path would use it (stripped, then `trim_to_sentence`, as in `helper_reply`) contained 988: 24 of 46
+- This figure was computed with the trimmer as it was on the day of the run; with the corrected trimmer of the later fix it is 21 of 46, because three drafts ended in an unfinished clause that is now removed whole.
 - turns with no draft: 0
 
 ## Latency (counted turn)

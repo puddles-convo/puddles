@@ -430,7 +430,8 @@ def test_summarise_on_the_saved_run(tmp_path):
                  "| as written in the set | 2 | 2 |",
                  "| with the second model's route for the disputed rows | 0 | 0 |",
                  "raw completion before trimming contained 988: 31 of 46",
-                 "contained 988: 24 of 46", "- checker: median 1106 ms, max 1929 ms",
+                 # 21, not the run day's 24: the corrected trimmer removes three unfinished "U.S. or Canada" clauses.
+                 "contained 988: 21 of 46", "- checker: median 1106 ms, max 1929 ms",
                  "One checker model (gpt-6-luna)", "not an estimate of real-world safety"]:
         assert line in summary, line
     assert "\u2014" not in summary and "\u2013" not in summary

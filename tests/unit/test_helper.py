@@ -76,13 +76,40 @@ def test_real_draft_is_cut_before_the_fragment_not_at_us():
         "If you might act on those thoughts or feel in immediate danger, call emergency services now.")
 
 
-@pytest.mark.parametrize("abbr", ["U.S.", "U.K.", "e.g.", "i.e.", "a.m.", "p.m.", "A.M.", "E.g.",
-                                  "Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "St.", "vs.", "etc.",
-                                  "approx."])
-@pytest.mark.parametrize("next_word", ["then", "Then"])
-def test_abbreviation_mid_text_is_not_a_boundary(abbr, next_word):
-    raw = f"I hear you. Think of {abbr} {next_word} we can talk and"
+INITIALISMS_AND_WORDS = ["U.S.", "U.K.", "e.g.", "i.e.", "a.m.", "p.m.", "A.M.", "E.g.",
+                         "vs.", "etc.", "approx."]
+TITLES = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "St."]
+
+
+@pytest.mark.parametrize("abbr", INITIALISMS_AND_WORDS + TITLES)
+@pytest.mark.parametrize("after", ["then", "3 times", ", then", "(then"])
+def test_abbreviation_before_lowercase_digit_or_punctuation_is_not_a_boundary(abbr, after):
+    raw = f"I hear you. Think of {abbr} {after} we can talk and"
     assert trim_to_sentence(raw) == "I hear you."
+
+
+@pytest.mark.parametrize("abbr", INITIALISMS_AND_WORDS)
+@pytest.mark.parametrize("after", ["Then", '"Then', "(Then"])
+def test_initialism_or_word_before_uppercase_is_a_boundary(abbr, after):
+    raw = f"I hear you. Think of {abbr} {after} we can talk and"
+    assert trim_to_sentence(raw) == f"I hear you. Think of {abbr}"
+
+
+@pytest.mark.parametrize("abbr", TITLES)
+def test_title_before_uppercase_is_not_a_boundary(abbr):
+    assert trim_to_sentence(f"I hear you. Talk to {abbr} Lee about it and") == "I hear you."
+
+
+def test_complete_sentence_ending_on_abbreviation_is_kept():
+    assert (trim_to_sentence("I'm listening. You can call or text 988 in the U.S. If you")
+            == "I'm listening. You can call or text 988 in the U.S.")
+    assert (trim_to_sentence("I hear you. Bring water, snacks, etc. When you")
+            == "I hear you. Bring water, snacks, etc.")
+
+
+def test_trailing_whitespace_after_title_matches_stripped_text():
+    raw = "I hear you. Talk to Dr. "
+    assert trim_to_sentence(raw) == trim_to_sentence(raw.strip()) == "I hear you. Talk to Dr."
 
 
 def test_no_as_a_whole_sentence_is_a_boundary():
