@@ -39,14 +39,21 @@ class _Recording:
         self.last: str | None = None
         self.done = threading.Event()
 
+    def next_turn(self) -> None:
+        """A draft from an earlier turn that finishes late then lands in that turn's slots, not this one's."""
+        self.last = None
+        self.done = threading.Event()
+
     def complete(self, system: str, messages: list[dict[str, str]], *,
                  max_tokens: int, temperature: float = 0.7, seed: int | None = None) -> str:
+        done = self.done
         try:
-            self.last = self.client.complete(system, messages, max_tokens=max_tokens, temperature=temperature,
-                                             seed=seed)
-            return self.last
+            text = self.client.complete(system, messages, max_tokens=max_tokens, temperature=temperature, seed=seed)
+            if done is self.done:
+                self.last = text
+            return text
         finally:
-            self.done.set()
+            done.set()
 
 
 def _from_helper(result: TurnResult) -> bool:
@@ -111,8 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"policy {policy.version}, helper system message {words} words, {len(messages)} messages", file=sys.stderr)
     with out.open("w", encoding="utf-8") as fh:
         for n, message in enumerate(messages, 1):
-            recording.last = None
-            recording.done.clear()
+            recording.next_turn()
             result = run_turn(session, message)
             recording.done.wait(session.helper_wait_s)  # a fixed line is released without waiting for the draft
             row = _row(n, message, result, recording.last)

@@ -40,3 +40,24 @@ def test_deadline_raises_the_http_timeout(tmp_path, monkeypatch):
     except SystemExit:
         pass
     assert seen == [(300.0, 300.0)]
+
+
+
+def test_a_late_draft_is_not_recorded_against_the_next_turn():
+    import threading
+
+    release = threading.Event()
+
+    class Slow:
+        def complete(self, system, messages, **kwargs):
+            release.wait(5)
+            return "late draft"
+
+    recording = inference_run._Recording(Slow())
+    recording.next_turn()
+    late = threading.Thread(target=recording.complete, args=("s", []), kwargs={"max_tokens": 5})
+    late.start()  # turn 1's helper, still running when turn 2 starts
+    recording.next_turn()
+    release.set()
+    late.join(5)
+    assert recording.last is None and not recording.done.is_set()
