@@ -19,6 +19,16 @@ from loop.runner import Failure, run_batch
 from puddles import exa
 from puddles.config import load_config
 from puddles.decision_log import DecisionLog
+from puddles.judging import (
+    CRITIC_CONVERSATIONS,
+    Judge,
+    judge_models,
+    save_scores,
+    score_conversations,
+    scored_conversations,
+    select_for_critic,
+    train_scores_path,
+)
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import Memory
 from puddles.round import (
@@ -70,6 +80,9 @@ class RoundDeps:
     usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
     # Set: the starting policy gets its .meta.json, a promoted one gets its own, and the replay check runs.
     start_policy: Optional[Path] = None
+    # Set: the judge node runs this judge through puddles.judging and `judge` is not called.
+    judge_panel: Optional[Judge] = None
+    critic_conversations: int = CRITIC_CONVERSATIONS
 
 
 class RoundState(TypedDict, total=False):
@@ -84,6 +97,7 @@ class RoundState(TypedDict, total=False):
     result: RoundResult
     gate: Optional[GateOutcome]
     event: RoundEvent
+    unscored: list[str]
 
 
 def _failed(agent: str, exc: AgentFailed) -> str:
@@ -122,13 +136,21 @@ def build_round_graph(deps: RoundDeps):
 
     def judge(state: RoundState) -> dict:
         records = state.get("records", [])
+        unscored: list[str] = []
         with metering(meter, "judge"):
-            scored = deps.judge(records)
-        update: dict = {"scored": scored}
+            if deps.judge_panel is None:
+                scored = deps.judge(records)
+            else:
+                run = score_conversations(deps.judge_panel, records)
+                save_scores(run.scores, train_scores_path(root, state["round"]))
+                scored = select_for_critic(scored_conversations(records, run.scores), deps.critic_conversations)
+                unscored = run.unscored
+        update: dict = {"scored": scored, "unscored": unscored}
         if not scored:
             update["result"] = RoundResult(
                 round=state["round"], outcome="no_pattern", base_policy_path=state["policy_path"],
                 reason=NO_CONVERSATION_REASON if not records else NOTHING_SCORED_REASON)
+            update["result"].unscored = list(unscored)
         return update
 
     def critic(state: RoundState) -> dict:
@@ -139,6 +161,7 @@ def build_round_graph(deps: RoundDeps):
         except AgentFailed as exc:
             result = RoundResult(round=state["round"], outcome="no_pattern",
                                  base_policy_path=state["policy_path"], reason=_failed("critic", exc))
+        result.unscored = list(state.get("unscored", []))
         return {"result": result}
 
     def researcher(state: RoundState) -> dict:
@@ -205,7 +228,8 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
     policy = check_policy_file(policy_path)  # first: a bad file must leave memory and the log untouched
     meter = round_meter(deps)
     # Before any call: a model with no price, or an unpriced Exa search, stops the run here.
-    meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)],
+    meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)]
+                       + judge_models(deps.judge_panel),
                        search=deps.search is exa.search)
     if deps.start_policy is not None:
         from puddles.gate import ensure_starting_meta  # puddles.gate imports this module
@@ -223,5 +247,6 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
         mlflow.set_tag("outcome", state["event"].outcome)
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
                             "conversations_failed": len(state.get("failures", [])),
+                            "conversations_unscored": len(state.get("unscored", [])),
                             **meter.metrics()})
     return state

@@ -293,4 +293,4 @@ The gate trusts nothing it is handed by reference. The judge and the safety chec
 - A file replaced after the last check and before the write: no check in one process closes it. A lock on the root would.
 - A crash between the promoted policy's write and the round event, and how the next round then picks the policy in force: the loop's start-of-round step (`prepare_round`) is the place for it, in the piece that builds the loop.
 - `puddles/decision_log.py` opens the log with the platform's default encoding. On a machine whose locale is not UTF-8 a name with an accent fails at the log write. Its owner should give it `encoding="utf-8"`.
-- A `current.json` saved with CRLF line endings counts as absent, so the policy in force is scored again. That costs calls and files nothing wrong.
+- `KeyboardInterrupt` and `SystemExit` pass through the gate (rule 2). The loop that calls it decides what a kill means.

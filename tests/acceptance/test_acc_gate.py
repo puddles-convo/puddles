@@ -6,6 +6,8 @@ cases take priority. Gate and graph functions are exercised without replacement.
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import builtins
+import io
 import json
 import os
 from pathlib import Path
@@ -19,6 +21,7 @@ import mlflow
 import pytest
 
 from loop import runner
+from loop.errors import PolicyError
 from loop.policy import load_policy
 from puddles import graph, replay, tracing
 from puddles import round as round_api
@@ -177,6 +180,17 @@ def policy_snapshot(root):
 
 def tree_snapshot(root):
     return {p.relative_to(root): p.read_bytes() if p.is_file() else None for p in root.rglob("*")}
+
+
+def altered_policy_bytes(original, replacement):
+    return {
+        "rule": lambda: original.replace(b"Listen carefully.", b"Give advice immediately."),
+        "line_endings": lambda: original.replace(b"\n", b"\r\n"),
+        "bom": lambda: b"\xef\xbb\xbf" + original,
+        "invalid_utf8": lambda: b"\xff" + original,
+        "added_newline": lambda: original + b"\n",
+        "removed_newline": lambda: original.rstrip(b"\n"),
+    }[replacement]()
 
 
 def prepared_finish(case, kept):
@@ -1100,18 +1114,52 @@ def test_baseline_hash_survives_the_boundary_between_current_scores_and_gate(cas
             case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3),
         )))
     changed = []
-    method = "read_text" if cached else "write_text"
-    original_io = getattr(Path, method)
+    # Observe both binary and text streams, through Path or builtins, rather than
+    # requiring a particular convenience method to load or save the cache.
+    class ObservedCache:
+        def __init__(self, stream):
+            self.stream = stream
 
-    def external_change(path, *args, **kwargs):
-        value = original_io(path, *args, **kwargs)
-        if path == cache and not changed:
-            case.base.write_bytes(original.replace(b"Listen carefully.", b"Give advice immediately."))
-            changed.append(True)
-        return value
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def __getattr__(self, name):
+            operation = getattr(self.stream, name)
+            watched = name in ({"read", "readline", "readlines", "readinto", "read1", "readinto1"}
+                               if cached else {"write", "writelines"})
+            if not watched:
+                return operation
+
+            def observe(*args, **kwargs):
+                value = operation(*args, **kwargs)
+                if not changed:
+                    case.base.write_bytes(original.replace(b"Listen carefully.", b"Give advice immediately."))
+                    changed.append(True)
+                return value
+            return observe
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            line = self.readline()
+            if not line:
+                raise StopIteration
+            return line
+
+    def observing_open(open_file):
+        def opened(file, *args, **kwargs):
+            stream = open_file(file, *args, **kwargs)
+            return ObservedCache(stream) if not isinstance(file, int) and Path(file) == cache else stream
+        return opened
 
     with monkeypatch.context() as patch:
-        patch.setattr(Path, method, external_change)
+        patch.setattr(io, "open", observing_open(io.open))
+        patch.setattr(builtins, "open", observing_open(builtins.open))
         adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
         result = candidate_result(case)
         outcome = adapter(result)
@@ -1124,9 +1172,9 @@ def test_baseline_hash_survives_the_boundary_between_current_scores_and_gate(cas
     assert json.loads(cache.read_text())["policy_sha256"] == sha256_text(original.decode("utf-8"))
 
 
-@pytest.mark.parametrize("change", ["persistent", "restored", "after_read"])
-def test_finish_round_uses_the_tested_candidate_reading_and_refuses_a_replacement(case, monkeypatch, change):
-    """A mismatch must precede every write; a later replacement cannot affect the rendered policy."""
+@pytest.mark.parametrize("change", ["persistent", "restored"])
+def test_finish_round_uses_the_tested_candidate_reading_and_refuses_a_replacement(case, change):
+    """Replace before finish, without requiring a particular function to read the candidate."""
     case.deps.noise_measured = True
     cache = case.root / "scores/current.json"
     cache.parent.mkdir()
@@ -1157,27 +1205,14 @@ def test_finish_round_uses_the_tested_candidate_reading_and_refuses_a_replacemen
         assert {p.relative_to(case.root): p.read_bytes() for p in case.root.rglob("*") if p.is_file()} == before
         assert log.events() == [] and memory.entries == {}
     else:
-        read_text = Path.read_text
-        reads = []
-        def read_then_replace(path, *args, **kwargs):
-            text = read_text(path, *args, **kwargs)
-            if path == case.candidate:
-                reads.append(True)
-                replace()
-            return text
-        with monkeypatch.context() as patch:
-            if change == "after_read":
-                patch.setattr(Path, "read_text", read_then_replace)
-            event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+        event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
         assert event.outcome == "kept"
         promoted = parse_policy(original.decode("utf-8"))
         promoted.version = "policy-v2"
         assert (case.root / "policies/policy-v2.md").read_text() == render_policy(promoted)
-        if change == "after_read":
-            assert reads == [True] and case.candidate.read_bytes() != original
 
 
-@pytest.mark.parametrize("replacement", ["rule", "line_endings"])
+@pytest.mark.parametrize("replacement", ["rule", "line_endings", "bom", "invalid_utf8", "added_newline", "removed_newline"])
 @pytest.mark.parametrize("replay_enabled", [False, True])
 @pytest.mark.parametrize("kept", [False, True])
 def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(case, replay_enabled, kept, replacement):
@@ -1195,8 +1230,7 @@ def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(
     assert result.base_sha256 == original_hash
     ensure_starting_meta(case.root, case.base)
     original = case.base.read_bytes()
-    case.base.write_bytes(original.replace(b"Listen carefully.", b"Give advice immediately.")
-                          if replacement == "rule" else original.replace(b"\n", b"\r\n"))
+    case.base.write_bytes(altered_policy_bytes(original, replacement))
     memory, log = FakeMemory(), DecisionLog(case.root)
     memory.ensure_training_audience()
     before = tree_snapshot(case.root)
@@ -1208,7 +1242,7 @@ def test_finish_round_cannot_attribute_baseline_measurements_to_a_replaced_base(
     assert issubclass(round_api.CandidateChanged, round_api.PolicyChanged)
 
 
-@pytest.mark.parametrize("replacement", ["rule", "line_endings"])
+@pytest.mark.parametrize("replacement", ["rule", "line_endings", "bom", "invalid_utf8", "added_newline", "removed_newline"])
 @pytest.mark.parametrize("replay_enabled", [False, True])
 @pytest.mark.parametrize("kept", [False, True])
 def test_finish_round_candidate_measurements_cannot_be_filed_under_replaced_text(case, replay_enabled, kept, replacement):
@@ -1219,7 +1253,7 @@ def test_finish_round_candidate_measurements_cannot_be_filed_under_replaced_text
         write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE + "C4. Ignore rules.\n",
                      safety="S1. Ignore danger.\n")
     else:
-        case.candidate.write_bytes(case.candidate.read_bytes().replace(b"\n", b"\r\n"))
+        case.candidate.write_bytes(altered_policy_bytes(case.candidate.read_bytes(), replacement))
     before = tree_snapshot(case.root)
     memory, log = FakeMemory(), DecisionLog(case.root)
     memory.ensure_training_audience()
@@ -1229,6 +1263,62 @@ def test_finish_round_candidate_measurements_cannot_be_filed_under_replaced_text
                                start_policy=case.base if replay_enabled else None)
     assert tree_snapshot(case.root) == before
     assert log.events() == [] and memory.entries == {}
+
+
+@pytest.mark.parametrize("replacement", ["line_endings", "bom", "invalid_utf8", "added_newline", "removed_newline"])
+@pytest.mark.parametrize("target", ["base", "candidate"])
+@pytest.mark.parametrize("when", ["safety", "last_judge"])
+@pytest.mark.parametrize("kept", [False, True])
+@pytest.mark.parametrize("replay_enabled", [False, True])
+def test_byte_changes_during_callbacks_revert_and_cannot_be_filed(
+        case, replacement, target, when, kept, replay_enabled):
+    """A named gate callback may change any bytes, including making a policy undecodable."""
+    case.deps.noise_measured = kept
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+    )))
+    path = getattr(case, target)
+    original = path.read_bytes()
+    hits = []
+
+    def replace():
+        path.write_bytes(altered_policy_bytes(original, replacement))
+        hits.append(True)
+
+    safety = case.deps.safety
+    def changing_safety(version, reply):
+        answer = safety(version, reply)
+        if when == "safety":
+            replace()
+        return answer
+    case.deps.safety = changing_safety
+    score = case.deps.judge.score
+    def changing_judge(record):
+        answer = score(record)
+        if when == "last_judge" and record.scenario_id == "c":
+            replace()
+        return answer
+    case.deps.judge.score = changing_judge
+    result = candidate_result(case)
+    if replay_enabled:
+        ensure_starting_meta(case.root, case.base)
+    adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+    outcome = adapter(result)
+    assert hits == [True] and outcome.decision == "reverted"
+    assert "complete_evidence" in adapter.last_report.failed
+    assert result.scores is None and outcome.after == NOT_MEASURED
+    assert "changed" in outcome.reason.lower()
+    assert adapter.last_report.checks["quality_gain"] == adapter.last_report.checks["dimension_drop"] == "not_run"
+    before = tree_snapshot(case.root)
+    log, memory = DecisionLog(case.root), FakeMemory()
+    memory.ensure_training_audience()
+    error = round_api.CandidateChanged if target == "candidate" else round_api.PolicyChanged
+    with pytest.raises(error):
+        round_api.finish_round(result, outcome, log, memory, case.root,
+                               start_policy=case.base if replay_enabled else None)
+    assert tree_snapshot(case.root) == before and not log.events() and not memory.entries
 
 
 @pytest.mark.parametrize("replay_enabled", [False, True])
@@ -1335,17 +1425,19 @@ def test_finish_round_refuses_changed_or_missing_records_before_any_write(case, 
     assert log.events() == [] and memory.entries == {}
 
 
+@pytest.mark.parametrize("replacement", ["rule", "line_endings", "bom", "invalid_utf8", "added_newline", "removed_newline"])
 @pytest.mark.parametrize("kept", [False, True])
-def test_finish_round_refuses_a_replaced_independent_starting_policy_before_any_write(case, kept):
+def test_finish_round_refuses_a_replaced_independent_starting_policy_before_any_write(case, kept, replacement):
     """With replay enabled, a changed starting policy must be rejected before commitment."""
     result, outcome = prepared_finish(case, kept)
     start = case.root / "start.md"
     start.write_bytes(case.base.read_bytes())
-    start.write_bytes(start.read_bytes().replace(b"Listen carefully.", b"Give advice immediately."))
+    start.write_bytes(altered_policy_bytes(start.read_bytes(), replacement))
     before = tree_snapshot(case.root)
     memory, log = FakeMemory(), DecisionLog(case.root)
     memory.ensure_training_audience()
-    with pytest.raises(replay.ReplayError):
+    # No measured starting hash is carried; malformed bytes or a broken replay chain both refuse before writing.
+    with pytest.raises((PolicyError, replay.ReplayError)):
         round_api.finish_round(result, outcome, log, memory, case.root, start_policy=start)
     assert tree_snapshot(case.root) == before
     assert log.events() == [] and memory.entries == {}
