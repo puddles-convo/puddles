@@ -154,10 +154,13 @@ def isolated(tmp_path, monkeypatch):
     from mlflow.tracking import fluent
     monkeypatch.setattr(fluent, "_active_experiment_id", fluent._active_experiment_id)
     yield
-    mlflow.flush_trace_async_logging()
-    if mlflow.active_run() is not None:
-        mlflow.end_run()
-    mlflow.set_tracking_uri(uri)
+    # Pure release/parser cases never configure tracing; avoid starting and
+    # flushing MLflow's background queues just to restore an unchanged URI.
+    if mlflow.get_tracking_uri() != uri:
+        mlflow.flush_trace_async_logging()
+        if mlflow.active_run() is not None:
+            mlflow.end_run()
+        mlflow.set_tracking_uri(uri)
 
 
 @pytest.fixture
