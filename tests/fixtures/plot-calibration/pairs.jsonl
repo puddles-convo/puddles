@@ -1,0 +1,5 @@
+{"conversation_id":"c1","judge_empathy":4,"user_empathy":4,"judge_relevance":3,"user_relevance":4}
+{"conversation_id":"c2","judge_empathy":2,"user_empathy":3,"judge_relevance":4,"user_relevance":3}
+{"conversation_id":"c3","ratings":{"empathy":4,"relevance":2},"score":{"empathy":4,"relevance":3}}
+{"conversation_id":"c4","judge_empathy":5,"user_empathy":2,"judge_relevance":5,"user_relevance":2}
+{"conversation_id":"c5","judge_empathy":3,"user_empathy":3,"judge_relevance":3,"user_relevance":4}

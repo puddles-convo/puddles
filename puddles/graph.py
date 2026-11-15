@@ -17,6 +17,7 @@ from loop.llm import ChatClient
 from loop.policy import Policy, load_policy
 from loop.runner import Failure, run_batch
 from puddles import exa
+from puddles.agents.critic import select_for_critic
 from puddles.config import load_config
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, AgentFailed
@@ -39,7 +40,7 @@ NOTHING_SCORED_REASON = "The judge scored no conversation."
 STUB_NOTE = "Stub judge: fixed scores, the conversation was not read."
 
 
-def stub_judge(records: list[ConversationRecord]) -> list[ScoredConversation]:
+def stub_judge(records: list[ConversationRecord], round_: int = 0) -> list[ScoredConversation]:
     """Fixed scores for every record, in order. Stage 2 replaces it."""
     return [ScoredConversation(conversation_id=r.id, empathy=3, relevance=3, note=STUB_NOTE,
                                turns=list(r.turns)) for r in records]
@@ -65,9 +66,11 @@ class RoundDeps:
     memory: Memory
     log: DecisionLog
     root: Path
-    judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
+    judge: Callable[[list[ConversationRecord], int], list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
     usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
+    start_policy: Optional[Path] = None  # set by the loop: enables .meta.json and the end-of-round check
+    critic_conversations: Optional[int] = None  # None: the critic reads every scored conversation
 
 
 class RoundState(TypedDict, total=False):
@@ -121,7 +124,7 @@ def build_round_graph(deps: RoundDeps):
     def judge(state: RoundState) -> dict:
         records = state.get("records", [])
         with metering(meter, "judge"):
-            scored = deps.judge(records)
+            scored = deps.judge(records, state["round"])
         update: dict = {"scored": scored}
         if not scored:
             update["result"] = RoundResult(
@@ -130,9 +133,12 @@ def build_round_graph(deps: RoundDeps):
         return update
 
     def critic(state: RoundState) -> dict:
+        conversations = state["scored"]
+        if deps.critic_conversations is not None:
+            conversations = select_for_critic(conversations, deps.critic_conversations)
         try:
             with metering(meter, "critic"):
-                result = run_critic(state["round"], state["scored"], state["policy_path"], deps.log,
+                result = run_critic(state["round"], conversations, state["policy_path"], deps.log,
                                     deps.memory, llm, root)
         except AgentFailed as exc:
             result = RoundResult(round=state["round"], outcome="no_pattern",
@@ -166,7 +172,8 @@ def build_round_graph(deps: RoundDeps):
             return {"gate": deps.gate(state["result"])}
 
     def finish(state: RoundState) -> dict:
-        event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root)
+        event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root,
+                             deps.start_policy)
         return {"event": event}
 
     def after_judge(state: RoundState) -> str:

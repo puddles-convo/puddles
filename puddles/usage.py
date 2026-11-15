@@ -144,6 +144,26 @@ class Meter:
         tally.cost_usd += cost
         return cost
 
+    def note_done(self, agent: str, model: str, tokens_in: int, tokens_out: int,
+                  estimated: bool = False) -> float:
+        """Log a finished call reported after the fact, like the judge panel's usage list.
+
+        There is no `sent` line to match, so the call_id is fresh; `spend` counts `done` lines
+        either way. Returns the cost in dollars.
+        """
+        cost = self.prices.cost(model, tokens_in, tokens_out)
+        self._write({"event": "done", "call_id": uuid.uuid4().hex, "kind": MODEL_KIND,
+                     "round": self.round, "agent": agent, "model": model,
+                     "tokens_in": tokens_in, "tokens_out": tokens_out,
+                     "estimated": estimated, "cost_usd": cost})
+        tally = self._agent(agent)
+        tally.tokens_in += tokens_in
+        tally.tokens_out += tokens_out
+        tally.calls += 1
+        tally.estimated_calls += int(estimated)
+        tally.cost_usd += cost
+        return cost
+
     def search_sent(self, agent: str) -> Call:
         """Log one Exa request before it goes out. Raises MissingPrice if a search has no price."""
         price = self.prices.search()
@@ -206,14 +226,27 @@ def read_usage(path: Path | str) -> list[dict]:
     return lines
 
 
+def spend_by_round(lines: Iterable[dict]) -> dict[int, float]:
+    """Dollars per round from usage lines: every `done` line, plus each `sent` line with no
+    `done` line, at its estimate. Lines with no round count as round 0."""
+    lines = list(lines)
+    finished = {line.get("call_id") for line in lines if line.get("event") == "done"}
+    per: dict[int, float] = {}
+    for line in lines:
+        if line.get("event") == "done":
+            amount = line.get("cost_usd", 0.0)
+        elif line.get("event") == "sent" and line.get("call_id") not in finished:
+            amount = line.get("max_cost_usd", 0.0)
+        else:
+            continue
+        round_ = line.get("round") or 0
+        per[round_] = per.get(round_, 0.0) + amount
+    return per
+
+
 def spend(path: Path | str) -> float:
     """Dollars spent: every `done` line, plus the `sent` estimate of each call with no `done` line."""
-    lines = read_usage(path)
-    finished = {line.get("call_id") for line in lines if line.get("event") == "done"}
-    total = sum(line.get("cost_usd", 0.0) for line in lines if line.get("event") == "done")
-    total += sum(line.get("max_cost_usd", 0.0) for line in lines
-                 if line.get("event") == "sent" and line.get("call_id") not in finished)
-    return total
+    return sum(spend_by_round(read_usage(path)).values())
 
 
 _CURRENT: ContextVar[tuple[Optional[Meter], Optional[str]]] = ContextVar("puddles_usage", default=(None, None))

@@ -12,6 +12,15 @@ SYSTEM = system_prompt("t4-critic.md")
 IDENTITY = "critic"
 
 
+def select_for_critic(scored: list[ScoredConversation], n: int) -> list[ScoredConversation]:
+    """The `n` lowest-scoring conversations by (empathy + relevance) / 2, ties by conversation ID.
+    All of them when there are fewer than `n`."""
+    if n < 1:
+        raise ValueError(f"conversations_for_critic must be at least 1, got {n}")
+    ranked = sorted(scored, key=lambda c: ((c.empathy + c.relevance) / 2, c.conversation_id))
+    return ranked[:n]
+
+
 def memory_query(conversations: list[ScoredConversation]) -> str:
     notes = " ".join(c.note for c in conversations[:5])
     return f"Earlier failure patterns and what happened to them, related to: {notes}"

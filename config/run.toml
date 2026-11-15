@@ -54,3 +54,11 @@ train_ids = "fixtures/train_ids.txt"
 # The mean of the three policy-v1 baseline runs (pending: team decision, stage 5 doc).
 # current_scores = { empathy = , relevance = , quality = , emotion_change = }
 # judge_version =   # written from calibration/frozen.json once the judge is frozen
+
+# The overnight run's caps and sizes. Values marked "stage 3" come from the small real
+# run's measurements; leave them commented until then.
+# max_rounds =          # total round events allowed; unset means no round cap
+conversations_per_round = 5
+# conversations_for_critic =   # the n lowest-scoring conversations the critic reads; unset = all
+# spend_limit_usd =            # stage 3: what the team can afford to lose
+# round_cost_estimate_usd =    # stage 3: one round's measured cost at these settings
