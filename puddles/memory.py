@@ -14,7 +14,16 @@ from typing import Any, Optional, Protocol
 
 import httpx
 
-from schemas import FailurePattern, GateOutcome, MemoryEntry, PolicyEdit, Record, RecordRef, ResearchNote
+from schemas import (
+    FROM_MEMORY_LIMIT,
+    FailurePattern,
+    GateOutcome,
+    MemoryEntry,
+    PolicyEdit,
+    Record,
+    RecordRef,
+    ResearchNote,
+)
 
 BASE_URL = os.environ.get("PAST_BASE_URL", "https://api.past.dev/api/v1")
 TRAINING_AUDIENCE = "training-agents"
@@ -128,8 +137,9 @@ class FakeMemory:
 def entry_content(record: Record, **extra: Any) -> str:
     """The searchable sentence, from the templates in docs/agents/t4-t7."""
     if isinstance(record, FailurePattern):
+        same = f" Same pattern as {record.same_as_pattern_id}." if record.same_as_pattern_id else ""
         return (f"Failure pattern {record.id}, {record.name}, round {record.round}: {record.description} "
-                f"Seen in {record.seen_in} of the {record.out_of} lowest-scoring conversations reviewed.")
+                f"Seen in {record.seen_in} of the {record.out_of} lowest-scoring conversations reviewed.{same}")
     if isinstance(record, ResearchNote):
         found = "; ".join(f"{s.technique} Source: {s.url}." for s in record.sources)
         name = extra.get("pattern_name", "")
@@ -152,10 +162,8 @@ def entry_content(record: Record, **extra: Any) -> str:
 def entry_for(record: Record, ref: RecordRef, round_: int, audience: str = TRAINING_AUDIENCE,
               **extra: Any) -> MemoryEntry:
     kind = ENTRY_TYPES[type(record)]
-    # A recurring pattern keeps its earlier ID; give its entry a new ID so memory only adds.
-    entry_id = record.id if record.id.endswith(f"-r{round_:02d}") else f"{record.id}-seen-r{round_:02d}"
     return MemoryEntry(
-        id=entry_id,
+        id=record.id,
         content=entry_content(record, **extra),
         label=f"{record.written_by}: {kind.replace('_', ' ')}, round {round_}",
         timestamp=record.created_at,
@@ -184,7 +192,7 @@ READS_PATH = "log/memory_reads.jsonl"
 
 
 def recall_records(memory: Memory, log: "DecisionLog", query: str, identity: str, root: Path,
-                   max_records: int = 8) -> list[Record]:
+                   max_records: int = FROM_MEMORY_LIMIT) -> list[Record]:
     """Recall, then load each named record from its file. IDs missing from the log are dropped.
 
     Each read is noted in log/memory_reads.jsonl so a run can show which agent read which record.
@@ -209,8 +217,9 @@ def recall_records(memory: Memory, log: "DecisionLog", query: str, identity: str
 def describe(record: Record) -> str:
     """One line per record, for an agent's <from_memory> block."""
     if isinstance(record, FailurePattern):
+        same = f" Same pattern as {record.same_as_pattern_id}." if record.same_as_pattern_id else ""
         return (f"{record.id} (round {record.round}) {record.name}: {record.description} "
-                f"Seen in {record.seen_in} of {record.out_of}.")
+                f"Seen in {record.seen_in} of {record.out_of}.{same}")
     if isinstance(record, ResearchNote):
         return f"{record.id} for {record.pattern_id}: " + "; ".join(
             f"{s.technique} ({s.url})" for s in record.sources)
