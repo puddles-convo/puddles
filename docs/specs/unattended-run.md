@@ -199,6 +199,15 @@ must reword that same rule again, and nothing counts how often that has failed.
     a round.
   - The call is made inside the proposer's step, so its tokens are counted with the proposer's.
   - The system prompt for this call is a new file beside the other agents' prompts.
+- **5.8 How many failed tries park is a setting.** Added at 06:40, after round 11. With 5.7 on, a rule
+  that has one failed try on the policy in force is not parked, so the critic names its pattern
+  again; the proposer is then required to reword that same rule (the pattern has an active rule),
+  and any rewording is the same idea as the one just rejected. Round 11 ended that way with no
+  candidate. `PUDDLES_PARK_AFTER` is the number of failed tries on the policy in force that parks a
+  rule or a pattern: a whole number from 1 up, default 2 (the behaviour of 5.2). With `1`, any
+  rejected edit sets its rule and its pattern aside until a keep. A negative result still parks at
+  once, and 5.6 is unchanged. `scripts/run_loop.py` refuses any other value before any model call
+  (exit 2, like 5.1); unset means 2.
 
 ## Knowingly left out tonight
 
