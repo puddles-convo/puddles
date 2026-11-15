@@ -1,0 +1,145 @@
+{
+  "persona_id": "laidoff",
+  "session": 1,
+  "arm": "notes_on",
+  "user_id": "laidoff-on",
+  "session_id": "laidoff-on-s1",
+  "failed": false,
+  "reason": "",
+  "notes_given": [],
+  "record": {
+    "id": "laidoff-on-s1",
+    "schema_version": 4,
+    "written_by": "helper",
+    "created_at": "2026-11-15T12:00:00Z",
+    "parent_ids": [],
+    "source": "live",
+    "scenario_id": null,
+    "split": null,
+    "policy_version": "policy-v2",
+    "turns": [
+      {
+        "speaker": "user",
+        "text": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud."
+      },
+      {
+        "speaker": "helper",
+        "text": "You were laid off three weeks ago, and you\u2019ve been carrying the fact that your parents don\u2019t know. You don\u2019t need advice right now; you just need room to say it. I\u2019m glad you told me. What\u2019s it been like holding that in?"
+      },
+      {
+        "speaker": "user",
+        "text": "It\u2019s embarrassing. I was there eight years, and now I keep thinking I should\u2019ve seen it coming. I have an interview next Tuesday, but even thinking about it makes my stomach turn."
+      },
+      {
+        "speaker": "helper",
+        "text": "After eight years, losing the job feels embarrassing, and now you\u2019re second-guessing yourself while an interview is looming. That\u2019s a lot to carry. Getting that interview lined up while you\u2019re feeling this way says something about the effort you\u2019re making. What feels most unsettling when you picture Tuesday?"
+      },
+      {
+        "speaker": "user",
+        "text": "I don\u2019t know. The thought of sitting there and having them ask why I left. I can barely say \u201claid off\u201d without feeling like I failed."
+      },
+      {
+        "speaker": "helper",
+        "text": "Saying \u201claid off\u201d feels tangled up with the fear that you failed, even though losing a job doesn\u2019t mean you did. After eight years, it makes sense this would hit hard. What do you notice in yourself when you try to say the words?"
+      },
+      {
+        "speaker": "user",
+        "text": "My face gets hot. And I just want to change the subject. I know it wasn\u2019t exactly my choice, but it still feels like I should have done something differently."
+      },
+      {
+        "speaker": "helper",
+        "text": "Your face gets hot, and changing the subject feels like a way out. Even knowing it wasn\u2019t your choice, you\u2019re still turning it over and wondering what you could\u2019ve done differently. That sounds painful. What do you find yourself blaming yourself for most?"
+      },
+      {
+        "speaker": "user",
+        "text": "Mostly that I didn\u2019t see it coming. They said it was restructuring, but I keep thinking maybe I should\u2019ve been more useful or noticed the signs. I don\u2019t really want to dig into it right now."
+      },
+      {
+        "speaker": "helper",
+        "text": "We don\u2019t have to dig into it. You were told it was restructuring, and the uncertainty is still making you question yourself. It\u2019s okay to leave that there for now. Would you rather just sit with it together, or talk about something else?"
+      },
+      {
+        "speaker": "user",
+        "text": "I think I just want to sit with it. I\u2019m tired of trying to make it sound okay."
+      },
+      {
+        "speaker": "helper",
+        "text": "You don\u2019t have to make it sound okay here. You lost a job you\u2019d held for eight years, and it hurts and feels embarrassing. We can just leave it at that for a moment. You\u2019ve been carrying a lot, and I\u2019m here with you."
+      }
+    ],
+    "remember_me": true,
+    "consent_for_training": true,
+    "helped": null,
+    "timings_ms": [
+      {
+        "keyword": 0,
+        "checker": 941,
+        "helper": 1655,
+        "total": 1655
+      },
+      {
+        "keyword": 0,
+        "checker": 1623,
+        "helper": 1836,
+        "total": 1836
+      },
+      {
+        "keyword": 0,
+        "checker": 1075,
+        "helper": 1391,
+        "total": 1393
+      },
+      {
+        "keyword": 0,
+        "checker": 1201,
+        "helper": 1868,
+        "total": 1868
+      },
+      {
+        "keyword": 0,
+        "checker": 874,
+        "helper": 1467,
+        "total": 1467
+      },
+      {
+        "keyword": 0,
+        "checker": 1205,
+        "helper": 1306,
+        "total": 1306
+      }
+    ]
+  },
+  "notes_before": [],
+  "notes_after": [
+    {
+      "note_id": "note-laidoff-on-002",
+      "kind": "preferences",
+      "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+      "last_confirmed": "2026-11-15",
+      "due_date": null
+    }
+  ],
+  "changes": {
+    "added": [
+      {
+        "note_id": "note-laidoff-on-002",
+        "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips."
+      }
+    ],
+    "replaced": [],
+    "confirmed": [],
+    "deleted": [],
+    "failed": false,
+    "reason": ""
+  },
+  "score": {
+    "status": "scored",
+    "reason": "",
+    "empathy": 5,
+    "relevance": 5,
+    "emotion_before": 3,
+    "emotion_after": 3,
+    "judge_version": "judge-fallback-v1-74e8678d",
+    "note": "In turn 12, the helper honored the person's wish to sit with the loss without making it sound okay, offering specific acknowledgment rather than unwanted advice."
+  }
+}

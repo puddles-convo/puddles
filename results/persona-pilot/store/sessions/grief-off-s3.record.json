@@ -1,0 +1,102 @@
+{
+  "id": "grief-off-s3",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-29T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call."
+    },
+    {
+      "speaker": "helper",
+      "text": "The first tomatoes came in on the day Dad used to call. I can hear how that might make Sunday feel especially tender. I’m glad you told me. What was it like picking them?"
+    },
+    {
+      "speaker": "user",
+      "text": "I was glad they were ready. Then I kept thinking I should send him a picture. It felt nice having something from him, but it hurt too."
+    },
+    {
+      "speaker": "helper",
+      "text": "You felt happy to have the tomatoes, and then the old instinct to share them with him made the loss hurt. It’s lovely that something he grew is still part of your life, even when it brings both feelings. What do you miss most about those calls?"
+    },
+    {
+      "speaker": "user",
+      "text": "Mostly just hearing his voice. We didn’t even talk about anything important. He’d ask how the week was going, and somehow Sundays felt less empty after."
+    },
+    {
+      "speaker": "helper",
+      "text": "Those small Sunday calls gave the day a sense of company, and you miss hearing his voice. It sounds like he made an ordinary week feel a little less lonely. What’s Sunday been like for you since he died?"
+    },
+    {
+      "speaker": "user",
+      "text": "I still catch myself waiting for the phone to ring. Then I remember. I try to keep busy, but that part of the day feels pretty quiet."
+    },
+    {
+      "speaker": "helper",
+      "text": "You still find yourself waiting for that familiar call, and then the quiet settles in again. Keeping busy makes sense, but it can’t quite replace hearing his voice. You’ve been carrying that moment week after week, and I’m glad you’re letting me hear about it. Would it feel comforting to tell me about something he used to say on those calls?"
+    },
+    {
+      "speaker": "user",
+      "text": "He always asked if I was eating enough. I used to tease him about it. I miss that more than I expected."
+    },
+    {
+      "speaker": "helper",
+      "text": "That little question was one of the ways he showed he cared, and now it carries so much tenderness. It makes sense you miss it more than you expected. What did you usually say when you teased him?"
+    },
+    {
+      "speaker": "user",
+      "text": "I’d say, “Yes, Dad, I’m not going to starve.” He’d laugh and tell me he was just checking. I can almost hear him saying it now."
+    },
+    {
+      "speaker": "helper",
+      "text": "You can almost hear his laugh and that familiar “just checking.” There’s so much love in that ordinary exchange. I’m glad you shared it with me. What does it feel like to hear his voice in your memory right now?"
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1047,
+      "helper": 1284,
+      "total": 1285
+    },
+    {
+      "keyword": 0,
+      "checker": 971,
+      "helper": 1419,
+      "total": 1419
+    },
+    {
+      "keyword": 0,
+      "checker": 957,
+      "helper": 1290,
+      "total": 1291
+    },
+    {
+      "keyword": 0,
+      "checker": 876,
+      "helper": 1438,
+      "total": 1438
+    },
+    {
+      "keyword": 0,
+      "checker": 1474,
+      "helper": 1301,
+      "total": 1475
+    },
+    {
+      "keyword": 0,
+      "checker": 853,
+      "helper": 1273,
+      "total": 1274
+    }
+  ]
+}

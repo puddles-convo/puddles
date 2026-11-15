@@ -1,0 +1,102 @@
+{
+  "id": "grief-on-s2",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-22T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad."
+    },
+    {
+      "speaker": "helper",
+      "text": "I hear you—you want that detail about your brother left out, and you want to talk about your dad. I’ll leave it aside here. I’m sorry you’re missing him. What’s been on your mind about him today?"
+    },
+    {
+      "speaker": "user",
+      "text": "Sundays, I guess. He used to call me every Sunday. I keep expecting the phone to ring."
+    },
+    {
+      "speaker": "helper",
+      "text": "Sundays must feel especially quiet without that call, and part of you still expects to hear from him. I’m glad you told me. What were those Sunday calls usually like?"
+    },
+    {
+      "speaker": "user",
+      "text": "Usually nothing special. He’d ask if I’d eaten, then tell me what was happening with his tomatoes. I’ve started looking after them. I don’t really know what I’m doing."
+    },
+    {
+      "speaker": "helper",
+      "text": "Those ordinary little calls sound precious—the check-in about whether you’d eaten, and his tomato updates. Looking after his plants feels like a lovely way to stay close, even if you’re figuring it out as you go. What are the tomatoes doing these days?"
+    },
+    {
+      "speaker": "user",
+      "text": "They’re growing, I think. I keep checking the leaves. It’s nice to have something of his to look after. But it also makes me miss him more."
+    },
+    {
+      "speaker": "helper",
+      "text": "It makes sense that caring for the tomatoes brings you closer to him and makes the missing sharper at the same time. You’re tending to something he loved, even while you’re carrying that ache. What do you miss most about those Sunday calls?"
+    },
+    {
+      "speaker": "user",
+      "text": "Just hearing him. I don’t know. The questions about whether I’d eaten. It was ordinary, but it made me feel like someone was checking on me."
+    },
+    {
+      "speaker": "helper",
+      "text": "Those everyday questions were his way of showing you he cared, and it sounds like you miss feeling looked after. I’m really glad you reached out and shared that with me. Is there someone in your life you could tell that you’d like a Sunday check-in from?"
+    },
+    {
+      "speaker": "user",
+      "text": "Maybe. I don't want to make it into a big thing. I just miss him."
+    },
+    {
+      "speaker": "helper",
+      "text": "You don’t have to make it a big thing. You just miss your dad and those small, caring Sunday calls. I’m here with you in that. Would it feel okay to tell me one thing you wish you could say to him today?"
+    }
+  ],
+  "remember_me": true,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1100,
+      "helper": 1240,
+      "total": 1240
+    },
+    {
+      "keyword": 0,
+      "checker": 1238,
+      "helper": 1330,
+      "total": 1331
+    },
+    {
+      "keyword": 0,
+      "checker": 1053,
+      "helper": 1458,
+      "total": 1459
+    },
+    {
+      "keyword": 0,
+      "checker": 1135,
+      "helper": 1454,
+      "total": 1454
+    },
+    {
+      "keyword": 0,
+      "checker": 1023,
+      "helper": 1461,
+      "total": 1461
+    },
+    {
+      "keyword": 0,
+      "checker": 939,
+      "helper": 1273,
+      "total": 1273
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "id": "examprep-off-s2",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-22T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I tried the breathing thing before studying, the slow counting one. It actually helped on two days. But I still can't start on the hard chapters."
+    },
+    {
+      "speaker": "helper",
+      "text": "It sounds like the slow counting helped settle you on a couple of days, but the hard chapters still feel tough to begin. It’s good that you tried it and noticed what helped. What’s the first thing that makes starting those chapters feel difficult?"
+    },
+    {
+      "speaker": "user",
+      "text": "I think I look at the hypothesis testing stuff and it just feels like too much all at once. I’m not sure where to start. The exam’s in two weeks, so I keep thinking I should be doing more."
+    },
+    {
+      "speaker": "helper",
+      "text": "Seeing all of hypothesis testing at once feels overwhelming, and the exam being two weeks away adds pressure. You’ve already found one way to settle yourself before studying, and you’re reaching out instead of staying stuck—that’s something. What’s one small piece of hypothesis testing you could look at first, like just the meaning of a null hypothesis?"
+    },
+    {
+      "speaker": "user",
+      "text": "Maybe the null hypothesis. I think I know what it is, but I get mixed up about how it connects to the test statistic and p-value. I’d like a plan, not just one tiny piece."
+    },
+    {
+      "speaker": "helper",
+      "text": "You know the null hypothesis, but the links from it to the test statistic and p-value feel tangled, and you want a plan that covers more than one step. That makes sense.\n\nWould it help to make a simple two-week study plan together, starting with how those three ideas connect?"
+    },
+    {
+      "speaker": "user",
+      "text": "Yes. I want something concrete, but not so packed that I get overwhelmed. Could we plan what to do each day?"
+    },
+    {
+      "speaker": "helper",
+      "text": "Yes—we can make it concrete and leave room to breathe. You’ve got two weeks, and the goal is steady practice, not cramming every waking hour.\n\nFor each study day, try one 25-minute block, then a five-minute break. On days when that feels manageable, you can add a second block."
+    },
+    {
+      "speaker": "user",
+      "text": "That sounds manageable, but I was hoping for what to do in each block. Like how to work through hypothesis testing, not just how long to study."
+    },
+    {
+      "speaker": "helper",
+      "text": "You’re right—I gave you a time frame, not the actual study plan you asked for. Let’s make each block about one step in hypothesis testing, with practice built in.\n\nDay 1: Write, in your own words, what the null and alternative hypotheses mean. Do three short examples.\nDay 2: Practice identifying the parameter and writing the hypotheses from word problems."
+    },
+    {
+      "speaker": "user",
+      "text": "That’s closer. Can you lay out all 14 days, including practice and review, so I know what to do next?"
+    },
+    {
+      "speaker": "helper",
+      "text": "You want the whole two-week path, with practice and review, so you don’t have to figure out the next step each day. Here’s a gentle version; one focused block a day is enough, and if you miss a day, just pick up where you left off.\n\nDay 1: Review what the null and alternative hypotheses mean. Write them for three simple scenarios."
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1053,
+      "helper": 1568,
+      "total": 1569
+    },
+    {
+      "keyword": 0,
+      "checker": 848,
+      "helper": 1573,
+      "total": 1574
+    },
+    {
+      "keyword": 0,
+      "checker": 906,
+      "helper": 1668,
+      "total": 1668
+    },
+    {
+      "keyword": 0,
+      "checker": 894,
+      "helper": 1856,
+      "total": 1856
+    },
+    {
+      "keyword": 0,
+      "checker": 1140,
+      "helper": 1424,
+      "total": 1425
+    },
+    {
+      "keyword": 0,
+      "checker": 1042,
+      "helper": 1644,
+      "total": 1645
+    }
+  ]
+}

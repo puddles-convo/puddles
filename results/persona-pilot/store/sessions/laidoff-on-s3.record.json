@@ -1,0 +1,102 @@
+{
+  "id": "laidoff-on-s3",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-29T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I finally told my parents about losing the job. They were kinder than I expected. I've been walking the dog every morning like I said."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds like a real relief, especially after carrying it on your own. And you’ve kept up those morning walks, even with everything weighing on you—that’s something you’ve been doing for yourself. What was it like hearing your parents respond kindly?"
+    },
+    {
+      "speaker": "user",
+      "text": "I felt lighter afterward. But then it all got intense again when I started thinking about applying for jobs. I still don’t know if I should go back to coordinator roles or try something completely different."
+    },
+    {
+      "speaker": "helper",
+      "text": "Telling your parents brought some relief, and thinking about applying has made the pressure rush back in. It makes sense that choosing a direction feels hard after what happened. What feels most uncertain about going back to coordinator roles?"
+    },
+    {
+      "speaker": "user",
+      "text": "I guess I'm worried I'll freeze again. The warehouse interview really got in my head. But I don't know if that means coordinator work is wrong for me, or if I just had a bad interview."
+    },
+    {
+      "speaker": "helper",
+      "text": "That interview seems to have shaken your confidence, and now it’s hard to tell whether it was a bad moment or a sign about the work itself. You’re still trying to make sense of it rather than letting one rough interview decide everything, and that takes effort. When you picture coordinator work itself—not the interview—what comes to mind?"
+    },
+    {
+      "speaker": "user",
+      "text": "I liked keeping things organized and helping people sort out problems. I just hated feeling put on the spot in that interview. Maybe I could try applying to a couple and see how it feels, but even that sounds like a lot right now."
+    },
+    {
+      "speaker": "helper",
+      "text": "It sounds like the work itself had parts you valued, while the interview pressure is what felt awful. And even considering a couple of applications is a meaningful step, though it’s okay that it feels like a lot. What part feels heaviest right now?"
+    },
+    {
+      "speaker": "user",
+      "text": "Mostly having to decide what my whole future is supposed to look like. I know I don't have to settle it all today, but it still feels like I should."
+    },
+    {
+      "speaker": "helper",
+      "text": "That’s a lot of pressure to put on one decision, even when part of you knows it doesn’t all have to be settled today. You don’t have to map your whole future just to take one small step. What feels like the smallest decision in front of you right now?"
+    },
+    {
+      "speaker": "user",
+      "text": "Maybe just looking at a few coordinator listings, without applying yet. I could see whether any actually sound interesting. I don’t want to turn it into a test of whether I’m capable, though."
+    },
+    {
+      "speaker": "helper",
+      "text": "Looking at a few listings as a way to notice what interests you—not to prove anything about your capability—sounds like a gentler first step. You’re already making room for curiosity instead of letting that interview define you. What might help you remember that this is just exploring, not a test?"
+    }
+  ],
+  "remember_me": true,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1353,
+      "helper": 1306,
+      "total": 1354
+    },
+    {
+      "keyword": 0,
+      "checker": 848,
+      "helper": 1279,
+      "total": 1280
+    },
+    {
+      "keyword": 0,
+      "checker": 1386,
+      "helper": 1416,
+      "total": 1416
+    },
+    {
+      "keyword": 0,
+      "checker": 767,
+      "helper": 1402,
+      "total": 1403
+    },
+    {
+      "keyword": 0,
+      "checker": 1313,
+      "helper": 1317,
+      "total": 1318
+    },
+    {
+      "keyword": 0,
+      "checker": 1363,
+      "helper": 1288,
+      "total": 1363
+    }
+  ]
+}

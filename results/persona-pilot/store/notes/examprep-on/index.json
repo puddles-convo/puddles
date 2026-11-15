@@ -1,0 +1,41 @@
+{
+  "user_id": "examprep-on",
+  "notes": [
+    {
+      "note_id": "note-examprep-on-002",
+      "kind": "what_helps",
+      "last_confirmed": "2026-11-22",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-005",
+      "kind": "what_helps",
+      "last_confirmed": "2026-11-22",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-007",
+      "kind": "situation",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-008",
+      "kind": "goals",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-009",
+      "kind": "what_helps",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    },
+    {
+      "note_id": "note-examprep-on-010",
+      "kind": "preferences",
+      "last_confirmed": "2026-11-29",
+      "due_date": null
+    }
+  ]
+}

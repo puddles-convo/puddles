@@ -1,0 +1,63 @@
+{
+  "note-laidoff-on-002": {
+    "id": "note-laidoff-on-002",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-15T12:00:00Z",
+    "parent_ids": [
+      "laidoff-on-s1"
+    ],
+    "user_id": "laidoff-on",
+    "session_id": "laidoff-on-s1",
+    "kind": "preferences",
+    "fact": "When they are sharing something difficult, they prefer listening and space to talk rather than advice or tips.",
+    "last_confirmed": "2026-11-15",
+    "due_date": null
+  },
+  "note-laidoff-on-005": {
+    "id": "note-laidoff-on-005",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-22T12:00:00Z",
+    "parent_ids": [
+      "laidoff-on-s2"
+    ],
+    "user_id": "laidoff-on",
+    "session_id": "laidoff-on-s2",
+    "kind": "what_helps",
+    "fact": "Morning walks with their dog give them a brief period when their mind feels quiet.",
+    "last_confirmed": "2026-11-22",
+    "due_date": null
+  },
+  "note-laidoff-on-006": {
+    "id": "note-laidoff-on-006",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "laidoff-on-s3",
+      "note-laidoff-on-004"
+    ],
+    "user_id": "laidoff-on",
+    "session_id": "laidoff-on-s3",
+    "kind": "situation",
+    "fact": "They were laid off from their last job and are weighing whether to return to coordinator roles or try something different; a difficult interview has shaken their confidence, and they have told their parents, who responded kindly.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  },
+  "note-laidoff-on-007": {
+    "id": "note-laidoff-on-007",
+    "schema_version": 4,
+    "written_by": "note-taker",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [
+      "laidoff-on-s3"
+    ],
+    "user_id": "laidoff-on",
+    "session_id": "laidoff-on-s3",
+    "kind": "goals",
+    "fact": "They plan to look at a few coordinator job listings to see whether any interest them, without treating the search as a test of their capability.",
+    "last_confirmed": "2026-11-29",
+    "due_date": null
+  }
+}
