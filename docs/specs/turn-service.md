@@ -143,7 +143,7 @@ Nothing in a request calls `sweep`: a person's turn never waits for another pers
 
 ### Requests that are refused
 
-- A body that is not valid JSON, or does not fit the shapes above, gets `422` and `{"error": "invalid_request", "fields": ["text"]}`: the names of the top-level fields at fault, sorted, and `[]` when the body as a whole is at fault. **The response never repeats a value that was sent.** FastAPI's own validation response does, so it is replaced.
+- A body that is not valid JSON, or does not fit the shapes above, gets `422` and `{"error": "invalid_request", "fields": ["text"]}`: the names of the top-level fields at fault, sorted, and `[]` when the body as a whole is at fault. A field the contract does not know is named only when its name is made of letters, digits and `_` and is at most 64 characters; any other unknown key is left out of the list, because a key is something that was sent and could hold anything. **The response never repeats a value that was sent.** FastAPI's own validation response does, so it is replaced.
 - An error inside a handler that this contract does not name gets `500` and `{"error": "internal"}`.
 - No error response, at any status, holds the person's text, a note's text or an exception's message.
 

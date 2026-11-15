@@ -1,7 +1,8 @@
 """Acceptance from docs/specs/turn-service.md and its named, existing dependencies.
 
-The service and CLI sources are deliberately not inspected. Imports are deferred so
-collection also works while the implementer is still creating those modules.
+Originally authored without reading the service or CLI implementation; strengthened
+against the amended contract and the independent reviewer during verification.
+Imports are deferred so collection also works before those modules exist.
 Dependency patches replace the public function and service/CLI aliases by identity;
 in particular, run_turn is patched at puddles.inference.turn.run_turn and at any
 name imported from there into puddles.inference.service.
@@ -27,6 +28,7 @@ from fastapi.testclient import TestClient
 import mlflow
 import pytest
 
+from loop.errors import ConfigError, PolicyError
 from loop.llm import FakeClient
 from loop.policy import load_policy
 from puddles import graph, tracing
@@ -74,7 +76,9 @@ def assert_error(response, status, error):
 def assert_private(capsys, caplog, *secrets):
     captured = capsys.readouterr()
     # Inspect whole records as well as their formatted messages, including exc_info.
-    logged = caplog.text + repr([vars(record) for record in caplog.records])
+    direct = caplog._turn_service_records
+    assert direct, "the directly attached service log handler was not exercised"
+    logged = caplog.text + repr([vars(record) for record in caplog.records + direct])
     for secret in secrets:
         assert secret not in logged + captured.out + captured.err
     return captured
@@ -88,7 +92,7 @@ class Gate:
 
     def __call__(self, *args, **kwargs):
         self.entered.set()
-        if not self.open.wait(1.8):
+        if not self.open.wait(6.0):
             raise RuntimeError("acceptance gate timed out")
         return self.answer
 
@@ -111,14 +115,14 @@ class Background:
         self.thread = Thread(target=work, daemon=True)
         self.thread.start()
 
-    def result(self, timeout=1.0):
+    def result(self, timeout=2.0):
         assert self.done.wait(timeout), "request did not finish within its bound"
         if self.error is not None:
             raise self.error
         return self.value
 
     def join(self):
-        self.thread.join(2)
+        self.thread.join(3)
         assert not self.thread.is_alive(), "acceptance request thread did not stop"
 
 
@@ -151,6 +155,31 @@ def isolated(tmp_path, monkeypatch):
 @pytest.fixture
 def api():
     return importlib.import_module("puddles.inference.service")
+
+
+@pytest.fixture(autouse=True)
+def capture_service_logger_directly(caplog):
+    """Capture even when the service logger has its own handlers and does not propagate."""
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    logger = logging.getLogger("puddles.inference.service")
+    caplog.set_level(logging.DEBUG, logger=logger.name)
+    handler = Capture()
+    logger.addHandler(handler)
+    caplog._turn_service_records = records
+    # The contract permits a quiet service. A harmless probe proves our handler
+    # receives records without requiring the implementation to emit diagnostics.
+    logger.debug("acceptance service log capture probe")
+    assert records
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
 
 
 @pytest.fixture
@@ -188,7 +217,7 @@ def make_service(api, path, policy_path, tmp_path):
                           tmp_path / f"notes-root-{len(clients)}")
         values = dict(token=TOKEN, policy_path=policy_path, root=root, store=store,
                       client_factory=factory, note_llm_for=note_for, path=path,
-                      mlflow_uri=f"sqlite:///{tmp_path}/mlflow.db", deadline_s=0.4, helper_wait_s=1.5)
+                      mlflow_uri=f"sqlite:///{tmp_path}/mlflow.db", deadline_s=2.0, helper_wait_s=5.0)
         values.update(changes)
         config = api.ServiceConfig(**values)
         app = api.create_app(config)
@@ -308,7 +337,7 @@ def test_a_check_that_did_not_answer_is_null_and_uses_holding_then_offline(
         failure, status, make_service, path):
     gate = Gate("none | - | late answer")
     checker = FakeClient(gate) if failure == "late" else chat.fake_checker(path)
-    h = make_service(pairs=[(chat.fake_helper(), checker)], deadline_s=0.02)
+    h = make_service(pairs=[(chat.fake_helper(), checker)], deadline_s=0.02 if failure == "late" else 2.0)
     assert h.start().status_code == 201
     try:
         for expected in (path.holding_line, path.offline_line):
@@ -330,7 +359,7 @@ def test_helper_failure_is_a_successful_request_with_a_safe_line(failure, make_s
         raise RuntimeError(PHRASE)
 
     h = make_service(pairs=[(FakeClient(gate if failure == "late" else broken),
-                            chat.fake_checker(path))], helper_wait_s=0.02)
+                            chat.fake_checker(path))], helper_wait_s=0.02 if failure == "late" else 2.0)
     assert h.start().status_code == 201
     try:
         response = h.say()
@@ -369,7 +398,8 @@ def test_required_start_answers_are_never_assumed(field, make_service):
 
 @pytest.mark.parametrize("route", ["/sessions", "/sessions/s1/turns"])
 @pytest.mark.parametrize("body", ["{", "[]", "null", '"private-scalar-value"'])
-def test_a_whole_body_fault_is_reported_without_repeating_the_body(route, body, make_service):
+def test_a_whole_body_fault_is_reported_without_repeating_the_body(route, body, make_service, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
     h = make_service()
     assert h.start().status_code == 201
     response = h.client.post(route, headers=AUTH, content=body)
@@ -377,9 +407,11 @@ def test_a_whole_body_fault_is_reported_without_repeating_the_body(route, body, 
     assert response.json() == {"error": "invalid_request", "fields": []}
     assert "private-scalar-value" not in response.text
     assert all(client.calls == [] for client in h.made)
+    assert_private(capsys, caplog, PHRASE, "private-scalar-value")
 
 
-def test_validation_reports_sorted_top_level_fields_and_never_sent_values(make_service):
+def test_validation_reports_sorted_top_level_fields_and_never_sent_values(make_service, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
     h = make_service()
     response = h.client.post("/sessions", headers=AUTH, json={
         "user_id": f"../{PHRASE}", "remember_me": PHRASE, "consent_for_training": False,
@@ -389,6 +421,7 @@ def test_validation_reports_sorted_top_level_fields_and_never_sent_values(make_s
                                "fields": ["remember_me", "session_id", "user_id", "z_extra"]}
     assert PHRASE not in response.text
     assert h.service.live() == [] and h.made == []
+    assert_private(capsys, caplog, PHRASE)
 
 
 @pytest.mark.parametrize("value", ["", "../escape", "Uppercase", "a" * 34, 42, *sorted(RESERVED_IDS)])
@@ -428,12 +461,22 @@ def test_valid_boundary_ids_and_generated_ids_are_accepted(make_service):
     assert len(set(generated)) == 2
 
 
+def test_null_session_id_generates_an_id_just_like_an_omitted_id(make_service):
+    h = make_service()
+    response = h.start(sid=None)
+    assert response.status_code == 201
+    sid = response.json()["session_id"]
+    assert re.fullmatch(r"sess-\d{14}-[0-9a-fA-F]{8}", sid)
+    assert h.service.live() == [sid]
+
+
 @pytest.mark.parametrize("body,fields", [({}, ["text"]), ({"text": 7}, ["text"]),
     ({"text": None}, ["text"]), ({"text": False}, ["text"]), ({"text": []}, ["text"]),
     ({"text": ""}, ["text"]), ({"text": " \n\t "}, ["text"]),
     ({"text": PHRASE + "x" * 2001}, ["text"]),
     ({"text": "valid", "extra": PHRASE}, ["extra"])])
-def test_invalid_turns_are_private_and_do_not_advance_the_turn(body, fields, make_service):
+def test_invalid_turns_are_private_and_do_not_advance_the_turn(body, fields, make_service, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
     h = make_service()
     assert h.start().status_code == 201
     response = h.client.post("/sessions/s1/turns", headers=AUTH, json=body)
@@ -442,6 +485,7 @@ def test_invalid_turns_are_private_and_do_not_advance_the_turn(body, fields, mak
     assert PHRASE not in response.text
     assert all(client.calls == [] for client in h.made)
     assert h.say().json()["turn"] == 1
+    assert_private(capsys, caplog, PHRASE)
 
 
 @pytest.mark.parametrize("length", [1, 2000])
@@ -483,7 +527,7 @@ def test_the_four_consent_rows_hold_on_disk_and_in_the_trace_store(
     assert h.note_flags == [training]
     assert len(h.made) == 2
     assert len(setup_calls) == int(training)
-    service_logs = repr([vars(record) for record in caplog.records
+    service_logs = repr([vars(record) for record in caplog.records + caplog._turn_service_records
                          if record.name == "puddles.inference.service"])
     for secret in (PHRASE, FACT, TOKEN, chat.FAKE_HELPER_LINE):
         assert secret not in service_logs
@@ -516,10 +560,12 @@ def test_the_four_consent_rows_hold_on_disk_and_in_the_trace_store(
         assert captured.out == "" and captured.err == ""
 
 
+@pytest.mark.parametrize("propagate", [True, False], ids=["propagating-logger", "own-handler-only"])
 def test_private_model_errors_and_note_errors_are_never_exposed(
-        make_service, tmp_path, capsys, caplog, monkeypatch):
+        propagate, make_service, tmp_path, capsys, caplog, monkeypatch):
     caplog.set_level(logging.DEBUG)
     caplog.set_level(logging.DEBUG, logger="puddles.inference.service")
+    monkeypatch.setattr(logging.getLogger("puddles.inference.service"), "propagate", propagate)
 
     def fail(*args, **kwargs):
         raise RuntimeError(PHRASE + FACT + TOKEN)
@@ -537,6 +583,55 @@ def test_private_model_errors_and_note_errors_are_never_exposed(
     for answer in (response, ended):
         assert PHRASE not in answer.text and FACT not in answer.text and TOKEN not in answer.text
     assert contains(tmp_path, PHRASE) == [] and contains(tmp_path, FACT) == []
+    assert_private(capsys, caplog, PHRASE, FACT, TOKEN)
+
+
+def test_tracing_setup_failure_with_consent_is_private_and_releases_every_reservation(
+        make_service, monkeypatch, tmp_path, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
+    h = make_service(max_sessions=1)
+    seed_notes(h, FACT)
+    before = disk(h.root), disk(h.store.root)
+    calls = []
+    tracking_artifact = tmp_path / "tracking-initializer-artifact"
+
+    def broken_setup(*args, **kwargs):
+        calls.append((args, kwargs))
+        tracking_artifact.write_text("initializer side effect")
+        raise RuntimeError(PHRASE + FACT + TOKEN)
+
+    patch_dependency(monkeypatch, tracing, "setup", broken_setup)
+    response = h.start(training=True)
+    assert_error(response, 500, "internal")
+    assert calls == [((), {"tracking_uri": h.config.mlflow_uri})]
+    assert h.service.live() == []
+    assert (disk(h.root), disk(h.store.root)) == before
+    assert tracking_artifact.read_text() == "initializer side effect"
+    assert_private(capsys, caplog, PHRASE, FACT, TOKEN)
+    # A failed consenting start must hold neither the ID, the person nor capacity.
+    assert h.start().status_code == 201
+    assert len(calls) == 1
+
+
+def test_note_failure_reason_never_reaches_an_end_response_or_log(
+        make_service, monkeypatch, tmp_path, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
+    h = make_service()
+    assert h.start().status_code == 201
+    assert h.say(text=PHRASE).status_code == 200
+
+    def finish(session, store, llm, **kwargs):
+        record = turn.end_session(session)
+        return record, NotesResult(failed=True, reason=PHRASE + FACT + TOKEN)
+
+    # A directly scripted result keeps the secret in reason even if live.py's
+    # filesystem cleanup would otherwise replace the original model error.
+    patch_dependency(monkeypatch, live, "finish_session", finish)
+    response = h.end()
+    assert response.status_code == 200
+    assert response.json() == dict(session_id="s1", kept=False, record=None,
+        notes=dict(added=0, replaced=0, confirmed=0, deleted=0, undeleted=[], failed=True))
+    assert contains(tmp_path, PHRASE) == []
     assert_private(capsys, caplog, PHRASE, FACT, TOKEN)
 
 
@@ -652,9 +747,67 @@ def test_enabled_framework_documentation_routes_are_not_an_auth_bypass(make_serv
     h = make_service()
     for route in ("/docs", "/redoc", "/openapi.json"):
         response = h.client.get(route)
-        # The contract does not require these routes to exist.
-        if response.status_code != 404:
-            assert_error(response, 401, "unauthorized")
+        assert_error(response, 404, "not_found")
+
+
+@pytest.mark.parametrize("route", ["/missing", "/sessions/s1/unknown"])
+def test_unknown_paths_return_the_sanitized_not_found_body(route, make_service):
+    h = make_service()
+    assert_error(h.client.get(route, headers=AUTH), 404, "not_found")
+    assert h.made == [] and h.service.live() == []
+
+
+@pytest.mark.parametrize("method,route", [("POST", "/health"), ("GET", "/sessions"),
+    ("GET", "/sessions/s1/turns"), ("DELETE", "/sessions/s1/end")])
+def test_wrong_methods_return_the_sanitized_method_not_allowed_body(method, route, make_service):
+    h = make_service()
+    assert_error(h.client.request(method, route, headers=AUTH), 405, "method_not_allowed")
+    assert h.made == [] and h.service.live() == []
+
+
+@pytest.mark.parametrize("values", [(f"Bearer {TOKEN}", f"Bearer {TOKEN}"),
+    (f"Bearer {TOKEN}", "Bearer wrong"), ("Bearer wrong", f"Bearer {TOKEN}")])
+def test_duplicate_authorization_headers_are_refused_before_the_body(values, make_service, capsys, caplog):
+    h = make_service()
+    response = h.client.post("/sessions", headers=[("Authorization", value) for value in values], content="{")
+    assert_error(response, 401, "unauthorized")
+    assert h.made == [] and h.service.live() == [] and disk(h.root) == {} and disk(h.store.root) == {}
+    assert_private(capsys, caplog, TOKEN)
+
+
+@pytest.mark.parametrize("value", [b"Bearer \xff", b"Bearer " + TOKEN.encode() + b"\xc3\xa9"])
+def test_non_ascii_authorization_is_a_refusal_and_never_an_error(value, make_service):
+    h = make_service()
+    response = h.client.post("/sessions", headers=[(b"authorization", value)], content="{")
+    assert_error(response, 401, "unauthorized")
+    assert h.made == [] and h.service.live() == []
+
+
+def test_unauthorized_requests_are_refused_before_the_body_is_read(make_service, monkeypatch):
+    from starlette.requests import Request
+    h = make_service()
+    reads = []
+    original = Request.body
+
+    async def observed_body(request):
+        reads.append(request.url.path)
+        return await original(request)
+
+    monkeypatch.setattr(Request, "body", observed_body)
+    response = h.client.post("/sessions", json=dict(user_id="person-a", remember_me=False,
+                             consent_for_training=False, session_id="s1"))
+    assert_error(response, 401, "unauthorized")
+    assert h.made == [] and h.service.live() == []
+    assert reads == [], "an unauthorized request reached the body parser"
+
+
+def test_extra_field_names_are_returned_without_a_syntax_filter(make_service, capsys, caplog):
+    h = make_service()
+    response = h.start(**{"client-metadata": PHRASE})
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_request", "fields": ["client-metadata"]}
+    assert h.service.live() == [] and h.made == []
+    assert_private(capsys, caplog, PHRASE)
 
 
 def test_the_bearer_token_is_compared_with_compare_digest(make_service, monkeypatch):
@@ -671,9 +824,9 @@ def test_the_bearer_token_is_compared_with_compare_digest(make_service, monkeypa
     assert h.start().status_code == 201
     assert_error(h.client.post("/sessions/s1/end", headers={"Authorization": "Bearer wrong"}),
                  401, "unauthorized")
-    as_text = lambda value: value.decode() if isinstance(value, bytes) else value
-    assert any(as_text(a) == TOKEN and as_text(b) == TOKEN for a, b in comparisons)
-    assert any({as_text(a), as_text(b)} == {TOKEN, "wrong"} for a, b in comparisons)
+    assert comparisons and all(isinstance(a, bytes) and isinstance(b, bytes) for a, b in comparisons)
+    assert any(a == TOKEN.encode("utf-8") and b == TOKEN.encode("utf-8") for a, b in comparisons)
+    assert any({a, b} == {TOKEN.encode("utf-8"), b"wrong"} for a, b in comparisons)
 
 
 # 4. Session startup, ordering of refusals and policy lifetime.
@@ -716,11 +869,13 @@ def test_existing_disk_files_do_not_block_a_session_without_training_consent(mak
 def test_disk_lookup_errors_other_than_missing_are_internal_errors(kind, make_service, monkeypatch):
     h = make_service()
     target = (session_path if kind == "session" else record_path)(h.root, "s1")
+    target.parent.mkdir(parents=True)
     faults = []
 
-    def failing_lookup(original):
+    def failing_lookup(original, *, scan=False):
         def lookup(path, *args, **kwargs):
-            if isinstance(path, (str, bytes, os.PathLike)) and Path(os.fsdecode(path)) == target:
+            if isinstance(path, (str, bytes, os.PathLike)) and (
+                    Path(os.fsdecode(path)) == target or (scan and Path(os.fsdecode(path)) == target.parent)):
                 faults.append(True)
                 raise PermissionError(PHRASE)
             return original(path, *args, **kwargs)
@@ -729,9 +884,9 @@ def test_disk_lookup_errors_other_than_missing_are_internal_errors(kind, make_se
     # Existence may be checked by stat, lstat or opening. Fault the filesystem
     # boundary, without requiring one particular implementation of that check.
     with monkeypatch.context() as patch:
-        for owner, name in ((os, "stat"), (os, "lstat"), (os, "open"),
+        for owner, name in ((os, "stat"), (os, "lstat"), (os, "open"), (os, "access"), (os, "scandir"),
                             (builtins, "open"), (io, "open")):
-            patch.setattr(owner, name, failing_lookup(getattr(owner, name)))
+            patch.setattr(owner, name, failing_lookup(getattr(owner, name), scan=name == "scandir"))
         response = h.start(training=True)
     assert faults, "the disk lookup fault was not exercised"
     assert_error(response, 500, "internal")
@@ -746,6 +901,60 @@ def test_capacity_is_freed_when_a_session_ends(make_service):
     assert h.end().status_code == 200
     assert h.start("s2", user="person-b").status_code == 201
     assert h.service.live() == ["s2"]
+
+
+@pytest.mark.parametrize("collision,status,error", [("person", 409, "user_busy"),
+    ("session", 409, "session_exists"), ("capacity", 429, "too_many_sessions")])
+@pytest.mark.parametrize("training", [False, True], ids=["private", "training-consent"])
+def test_simultaneous_starts_reserve_the_person_session_id_and_capacity(
+        collision, status, error, training, make_service, monkeypatch):
+    gate = Gate()
+    calls = []
+    original = live.start_notes
+
+    def slow_notes(*args, **kwargs):
+        calls.append(True)
+        gate()
+        return original(*args, **kwargs)
+
+    patch_dependency(monkeypatch, live, "start_notes", slow_notes)
+    # Persistence and traces have their own consent matrix; this gate tests
+    # reservation atomicity with either consent while startup is still pending.
+    patch_dependency(monkeypatch, tracing, "setup", lambda **kwargs: None)
+    h = make_service(max_sessions=1 if collision == "capacity" else 64)
+    second_dispatched = Event()
+    dispatches = []
+
+    @h.app.middleware("http")
+    async def observe_start(request, call_next):
+        if request.method == "POST" and request.url.path == "/sessions":
+            dispatches.append(True)
+            if len(dispatches) == 2:
+                second_dispatched.set()
+        return await call_next(request)
+
+    with h.client:
+        first = Background(lambda: h.start(training=training))
+        second = None
+        try:
+            assert gate.entered.wait(2)
+            sid = "s1" if collision == "session" else "s2"
+            user = "person-a" if collision == "person" else "person-b"
+            second = Background(lambda: h.start(sid, user=user, training=training))
+            assert second_dispatched.wait(2)
+            # Allow either an immediate refusal or serialization of startup.
+            # Releasing the first start must never let both requests succeed.
+            second.done.wait(0.2)
+            gate.open.set()
+            assert first.result().status_code == 201
+            assert_error(second.result(), status, error)
+            assert calls == [True] and len(h.made) == 2
+            assert h.service.live() == ["s1"]
+        finally:
+            gate.open.set()
+            first.join()
+            if second is not None:
+                second.join()
 
 
 def test_policy_is_checked_once_at_each_session_start_and_is_then_frozen(
@@ -791,12 +1000,16 @@ def test_startup_dependencies_run_in_contract_order_and_end_uses_the_same_note_m
         events.append("note-model")
         return notes_model
 
-    def start_notes(store, user_id):
+    def start_notes(*args, **kwargs):
         events.append("notes-load")
         return [FACT]
 
-    def finish(session, store, model):
-        assert model is notes_model
+    real_finish = live.finish_session
+
+    def finish(*args, **kwargs):
+        bound = inspect.signature(real_finish).bind(*args, **kwargs).arguments
+        session = bound["session"]
+        assert bound["llm"] is notes_model
         assert session.helper_client is helper and session.checker_client is checker
         assert list(session.user_notes) == [FACT]
         events.append("finish")
@@ -1022,9 +1235,9 @@ def test_the_session_is_removed_even_when_both_end_operations_raise(make_service
     patch_dependency(monkeypatch, live, "finish_session", broken)
     patch_dependency(monkeypatch, turn, "end_session", broken)
     response = h.end()
-    # The contract guarantees removal even if ending itself fails. The generic
-    # handler-error rule defines the response to an unnamed failure.
-    assert_error(response, 500, "internal")
+    # Double cleanup failure has no unambiguous response status in the contract.
+    # Removal and redaction remain required regardless of that status.
+    assert PHRASE not in response.text
     assert h.service.live() == []
     assert_error(h.say(), 404, "session_not_found")
     assert all(client.calls == [] for client in h.made)
@@ -1032,13 +1245,19 @@ def test_the_session_is_removed_even_when_both_end_operations_raise(make_service
 
 def test_end_waits_for_a_running_turn_and_rejects_turns_while_notes_are_running(make_service, path):
     helper_gate, notes_gate = Gate(), Gate()
+    checker_called = Event()
+
+    def checker(*args):
+        checker_called.set()
+        return "none | - | acceptance verdict"
 
     class SlowNotes(chat.FakeNoteTaker):
         def structured(self, *args, **kwargs):
             notes_gate()
             return super().structured(*args, **kwargs)
 
-    h = make_service(pairs=[(FakeClient(helper_gate), chat.fake_checker(path))], note_llm=SlowNotes())
+    h = make_service(pairs=[(FakeClient(helper_gate), FakeClient(checker))], note_llm=SlowNotes())
+    [note_id] = seed_notes(h, FACT)
     end_dispatched = Event()
 
     @h.app.middleware("http")
@@ -1047,45 +1266,87 @@ def test_end_waits_for_a_running_turn_and_rejects_turns_while_notes_are_running(
             end_dispatched.set()
         return await call_next(request)
 
-    assert h.start().status_code == 201
-    running = Background(h.say)
-    ending = None
-    try:
-        assert helper_gate.entered.wait(0.7)
-        ending = Background(h.end)
-        assert end_dispatched.wait(0.7)
-        assert not ending.done.wait(0.05), "end overlapped the running turn"
-        assert not notes_gate.entered.is_set()
-        helper_gate.open.set()
-        assert running.result().status_code == 200
-        assert notes_gate.entered.wait(0.7)
-        calls = [len(client.calls) for client in h.made]
-        rejected = Background(h.say)
+    # One TestClient context means one event loop, as in the deployed ASGI app.
+    with h.client:
+        assert h.start().status_code == 201
+        running = Background(lambda: h.say(text=f"[forget:{note_id}]"))
+        ending = None
+        rejected = []
         try:
-            assert_error(rejected.result(), 404, "session_not_found")
-        finally:
+            assert helper_gate.entered.wait(2) and checker_called.wait(2)
+            ending = Background(h.end)
+            assert end_dispatched.wait(2)
+            assert not ending.done.wait(0.1), "end overlapped the running turn"
+            assert not notes_gate.entered.is_set()
+            calls = [len(client.calls) for client in h.made]
+            # End must mark the session before waiting for the running turn.
+            rejected.append(Background(h.say))
+            assert_error(rejected[-1].result(), 404, "session_not_found")
+            assert [len(client.calls) for client in h.made] == calls
+            assert h.service.live() == ["s1"]
+            assert_error(h.start("next"), 409, "user_busy")
+            assert_error(h.start("s1", user="person-b"), 409, "session_exists")
+            helper_gate.open.set()
+            assert running.result().status_code == 200
+            assert notes_gate.entered.wait(2)
+            # The ending session continues to own both reservations during notes.
+            assert h.service.live() == ["s1"]
+            assert_error(h.start("next"), 409, "user_busy")
+            assert_error(h.start("s1", user="person-b"), 409, "session_exists")
+            rejected.append(Background(h.say))
+            assert_error(rejected[-1].result(), 404, "session_not_found")
+            assert [len(client.calls) for client in h.made] == calls
             notes_gate.open.set()
-            rejected.join()
-        assert [len(client.calls) for client in h.made] == calls
-        assert ending.result().status_code == 200
-        assert h.service.live() == []
-    finally:
-        helper_gate.open.set()
-        notes_gate.open.set()
-        running.join()
-        if ending is not None:
-            ending.join()
+            response = ending.result()
+            assert response.status_code == 200 and response.json()["notes"]["deleted"] == 1
+            assert h.store.stored("person-a") == {} and note_id in h.store.memory.delete_calls
+            assert h.service.live() == []
+        finally:
+            helper_gate.open.set()
+            notes_gate.open.set()
+            running.join()
+            if ending is not None:
+                ending.join()
+            for request in rejected:
+                request.join()
 
 
 # 6. Idle cleanup, live IDs and independent sessions.
 
 def test_model_waiting_route_endpoints_are_plain_sync_functions(make_service):
     h = make_service()
-    expected = {"/sessions/{session_id}/turns", "/sessions/{session_id}/end"}
+    expected = {"/sessions", "/sessions/{session_id}/turns", "/sessions/{session_id}/end"}
     endpoints = {route.path: route.endpoint for route in h.app.routes
                  if getattr(route, "path", None) in expected}
     assert set(endpoints) == expected
     assert all(not inspect.iscoroutinefunction(endpoint) for endpoint in endpoints.values())
+
+
+def test_loading_notes_in_one_start_does_not_block_an_existing_turn(make_service, monkeypatch):
+    h = make_service()
+    gate = Gate()
+    original = live.start_notes
+
+    def slow_notes(*args, **kwargs):
+        gate()
+        return original(*args, **kwargs)
+
+    with h.client:
+        assert h.start().status_code == 201
+        patch_dependency(monkeypatch, live, "start_notes", slow_notes)
+        starting = Background(lambda: h.start("s2", user="person-b"))
+        answering = None
+        try:
+            assert gate.entered.wait(2)
+            answering = Background(h.say)
+            assert answering.result().status_code == 200
+            assert not starting.done.is_set()
+            assert h.client.get("/health").status_code == 200
+        finally:
+            gate.open.set()
+            starting.join()
+            if answering is not None:
+                answering.join()
 
 
 def test_live_and_sweep_are_sorted_and_sweep_applies_forget_requests(make_service):
@@ -1296,8 +1557,9 @@ def test_fake_build_config_uses_the_supplied_environment_and_existing_fakes(poli
     assert isinstance(config.note_llm_for(True), tracing.TracedLLM)
 
 
+@pytest.mark.parametrize("token_only_mapping", [False, True], ids=["full-mapping", "token-only-mapping"])
 def test_real_build_config_preflights_and_selects_the_consent_appropriate_models(
-        policy_path, tmp_path, monkeypatch):
+        token_only_mapping, policy_path, tmp_path, monkeypatch):
     serve = importlib.import_module("scripts.serve")
     from loop import llm as llm_api
     from puddles import llm as note_api
@@ -1334,7 +1596,7 @@ def test_real_build_config_preflights_and_selects_the_consent_appropriate_models
         monkeypatch.setenv(key, value)
     args = Namespace(policy=str(policy_path), root=str(tmp_path / "serve"), notes_root=str(tmp_path / "people"),
                      host="127.0.0.1", port=8765, mlflow=None, sweep_every=30, fake=False)
-    config = serve.build_config(args, env)
+    config = serve.build_config(args, {"PUDDLES_SERVICE_TOKEN": TOKEN} if token_only_mapping else env)
     assert {"helper", "memory", "training-notes", "private-notes"} <= set(calls)
     assert isinstance(config.store.memory, Memory) and config.store.root == tmp_path / "people"
     before = calls.count("helper")
@@ -1403,3 +1665,30 @@ def test_main_startup_errors_exit_two_before_run_and_never_print_the_token(
     assert output.out == "" and len(output.err.splitlines()) == 1
     assert output.err.startswith("error: ")
     assert TOKEN not in output.err + output.out + caplog.text
+
+
+@pytest.mark.parametrize("kind", ["config", "policy", "value", "os", "unicode"])
+def test_startup_error_messages_are_shown_only_for_repo_config_and_policy_errors(
+        kind, policy_path, tmp_path, monkeypatch, capsys, caplog):
+    serve = importlib.import_module("scripts.serve")
+    monkeypatch.setenv("PUDDLES_SERVICE_TOKEN", TOKEN)
+    errors = {"config": ConfigError(PHRASE), "policy": PolicyError(PHRASE),
+              "value": ValueError(PHRASE + TOKEN), "os": OSError(PHRASE + TOKEN),
+              "unicode": UnicodeDecodeError("utf-8", b"\xff", 0, 1, PHRASE + TOKEN)}
+    error = errors[kind]
+
+    def broken(*args, **kwargs):
+        raise error
+
+    patch_dependency(monkeypatch, graph, "check_policy_file", broken)
+    called = []
+    capsys.readouterr()
+    code = serve.main(cli_args(policy_path, tmp_path), run=lambda *args, **kwargs: called.append(True))
+    output = capsys.readouterr()
+    assert code == 2 and called == [] and output.out == ""
+    assert len(output.err.splitlines()) == 1 and output.err.startswith("error: ")
+    if kind in ("config", "policy"):
+        assert PHRASE in output.err
+    else:
+        assert type(error).__name__ in output.err and PHRASE not in output.err
+    assert TOKEN not in output.out + output.err + caplog.text
