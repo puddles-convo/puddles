@@ -1,44 +1,61 @@
-# puddles
+<p align="center"><img src="docs/media/puddles-robot.png" alt="The puddles robot: a StackChan on an M5Stack CoreS3" width="200"></p>
 
-A support-conversation helper that improves its own behaviour, built at the SF AI Research Hackathon (November 14-15, 2026), Track 5 (Open).
+<h1 align="center">puddles</h1>
 
-The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.
+<p align="center"><b>A support-conversation helper that improves its own behaviour.</b><br>An offline loop reads the helper's weakest conversations, researches how counsellors handle the failure, proposes one change, and keeps it only if a gate fixed before the run says it is better and still safe.<br>The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.</p>
 
-**Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The inference text path (crisis checker, release step, note-taker, per-person notes, a text chat command and an HTTP turn service) is in [`puddles/inference/`](puddles/inference/) and was run end to end on real models on 15 November; see [Inference, tested end to end](#inference-tested-end-to-end-15-november). The judge adapter (`puddles/judging.py`), the gatekeeper (`puddles/gate.py`) and the round graph (`puddles/graph.py`) are in the code too. Speech is in the separate [puddles-stack](https://github.com/puddles-convo/puddles-stack) repository and is not connected through this path yet. Scores, counts and sources in the examples are illustrative.
+> **Status (15 November 2026): hackathon research prototype.** The training loop ran unattended for 13 rounds and produced `policy-v4` ([results](#results)). The inference text path (crisis checker, release step, note-taker, per-person notes, a text chat command and an HTTP turn service) ran end to end on real models. Speech is in the separate [puddles-stack](https://github.com/puddles-convo/puddles-stack) repository and is not connected through this path yet. [The design in depth](#the-design-in-depth) is the agreed design, not only what is built; scores, counts and sources in its examples are illustrative.
 
-- One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
-- **How the judges grade: the grading skill.** Every judge reads a grading guide built from the ESConv training split, and the guide is part of the judge's frozen version. Read this before trusting any score: [How the judges grade](#how-the-judges-grade-the-grading-skill) · [docs/agents/t3-judge.md](docs/agents/t3-judge.md#grading-skill)
-- The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
-- The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
-- Proposed version 2 prompts for every agent, including the held-out jury (not live yet): [docs/agent-prompts.md](docs/agent-prompts.md)
-- Record formats: `schemas.py` (version 4: version 3 plus what the proposed version 2 prompts need), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
-- The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
+<p align="center">
+<a href="docs/agents/t2-i3-helper.md"><img alt="helper: Qwen3.5 9B" src="https://img.shields.io/badge/helper-Qwen3.5%209B-615CED?style=flat-square"></a>
+<a href="docs/specs/provider-settings.md"><img alt="agents & judge: OpenAI API" src="https://img.shields.io/badge/agents%20%26%20judge-OpenAI%20API-10a37f?style=flat-square"></a>
+<a href="https://langchain-ai.github.io/langgraph/"><img alt="round graph: LangGraph" src="https://img.shields.io/badge/round%20graph-LangGraph-1C3C3C?style=flat-square&logo=langgraph&logoColor=white"></a>
+<a href="https://docs.pydantic.dev/"><img alt="schemas: pydantic v2" src="https://img.shields.io/badge/schemas-pydantic%20v2-E92063?style=flat-square&logo=pydantic&logoColor=white"></a>
+<a href="https://mlflow.org/"><img alt="traces: MLflow 3" src="https://img.shields.io/badge/traces-MLflow%203-2fa39a?style=flat-square&logo=mlflow&logoColor=white"></a>
+<a href="https://fastapi.tiangolo.com/"><img alt="turn service: FastAPI" src="https://img.shields.io/badge/turn%20service-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"></a>
+<a href="docs/memory.md"><img alt="memory: past.dev" src="https://img.shields.io/badge/memory-past.dev-5a4fcf?style=flat-square"></a>
+<a href="https://exa.ai/"><img alt="research: Exa search" src="https://img.shields.io/badge/research-Exa%20search-1f6feb?style=flat-square"></a>
+<a href="https://modal.com/"><img alt="serving: Modal" src="https://img.shields.io/badge/serving-Modal-30363d?style=flat-square"></a>
+<a href="https://thinkingmachines.ai/tinker/"><img alt="fine-tuning: Tinker" src="https://img.shields.io/badge/fine--tuning-Tinker-30363d?style=flat-square"></a>
+<a href="https://github.com/puddles-convo/puddles-stack"><img alt="robot: StackChan CoreS3" src="https://img.shields.io/badge/robot-StackChan%20CoreS3-d04a45?style=flat-square"></a>
+<a href="https://huggingface.co/datasets/thu-coai/esconv"><img alt="scenarios: ESConv" src="https://img.shields.io/badge/scenarios-ESConv-bb8009?style=flat-square&logo=huggingface&logoColor=black"></a>
+<a href="https://docs.pytest.org/"><img alt="tests: pytest" src="https://img.shields.io/badge/tests-pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white"></a>
+<a href="https://www.python.org/"><img alt="python: 3.11+" src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white"></a>
+</p>
 
-## Contents
+<p align="center"><a href="#how-it-learns">How it learns</a> · <a href="#the-live-conversation">The live conversation</a> · <a href="#results">Results</a> · <a href="#quick-start">Quick start</a> · <a href="#the-design-in-depth">The design in depth</a> · <a href="#read-more">Read more</a> · <a href="#limits">Limits</a></p>
 
-1. [Training steps](#1-training-steps)
-2. [Training agents](#2-training-agents)
-3. [Inference steps](#3-inference-steps)
-4. [Inference agents](#4-inference-agents)
-   - [Models](#models): which model plays each agent
-   - [How the judges grade](#how-the-judges-grade-the-grading-skill): the grading skill every judge reads
-5. [The memory](#5-the-memory)
-6. [From memory to policy](#6-from-memory-to-policy)
-7. [How the loop runs experiments](#7-how-the-loop-runs-experiments)
-8. [The proposer's toolbox](#8-the-proposers-toolbox)
-9. [Handoffs](#9-handoffs)
-10. [How training and inference connect](#10-how-training-and-inference-connect)
-   - [Inference, tested end to end (15 November)](#inference-tested-end-to-end-15-november): what ran on real models, and what is wrong with it
-11. [How we measure the result](#11-how-we-measure-the-result)
-12. [Data](#12-data)
-13. [Robot side](#13-robot-side)
-14. [Related work](#14-related-work)
-15. [Improvements from the literature](#15-improvements-from-the-literature)
-- [Running the training agents](#running-the-training-agents)
+<p align="center">
+<a href="docs/agents/README.md"><img alt="docs: the agents" src="https://img.shields.io/badge/docs-the%20agents-30363d?style=flat-square"></a>
+<a href="docs/memory.md"><img alt="docs: the memory" src="https://img.shields.io/badge/docs-the%20memory-30363d?style=flat-square"></a>
+<a href="docs/agents.md"><img alt="docs: policy & crisis path" src="https://img.shields.io/badge/docs-policy%20%26%20crisis%20path-30363d?style=flat-square"></a>
+<a href="docs/plan/README.md"><img alt="docs: the build plan" src="https://img.shields.io/badge/docs-the%20build%20plan-30363d?style=flat-square"></a>
+<a href="docs/robot-handover.md"><img alt="docs: robot hand-over" src="https://img.shields.io/badge/docs-robot%20hand--over-30363d?style=flat-square"></a>
+<a href="results/training-2026-11-15/README.md"><img alt="results: the training run" src="https://img.shields.io/badge/results-the%20training%20run-30363d?style=flat-square"></a>
+</p>
 
-## 1. Training steps
+<p align="center"><i>Built at the SF AI Research Hackathon (November 14-15, 2026), Track 5 (Open). A research prototype: not a medical device, not therapy and not a crisis service.<br>If you are in danger, call 911; in the US you can call or text 988, the Suicide and Crisis Lifeline.<br>Qwen, OpenAI, LangGraph, pydantic, MLflow, FastAPI, past.dev, Exa, Modal, Tinker, M5Stack, StackChan and pytest belong to their owners.</i></p>
 
-The agreed design is an offline policy-improvement loop. The figure below shows the older `scripts.run_round` path, with pre-scored conversations and a manual stand-in gate; this branch also implements judge integration and the real gatekeeper (`scripts.run_graph_round --gate real`).
+<a id="1-training-steps"></a>
+## How it learns
+
+<p><i>The training loop: one change per round, kept or reverted</i></p>
+
+Training is an offline policy-improvement loop. The helper's behaviour is set by a harness: a plain text policy file of numbered rules, plus skill cards, few-shot examples and, on escalation, a LoRA adapter. Each round, seven steps turn the weakest conversations into at most one change to that harness.
+
+| # | Step | What it does |
+|---|---|---|
+| 1 | [**Simulated user**](docs/agents/t1-simulated-user.md) | Plays a person from an ESConv scenario, reacts honestly and opens up slowly |
+| 2 | [**Helper**](docs/agents/t2-i3-helper.md) | Replies to the person, following the policy file. Same model, prompt and code as on the robot |
+| 3 | [**Judge**](docs/agents/t3-judge.md) | Rates each finished conversation, blind to which policy produced it, and frozen after calibration |
+| 4 | [**Critic**](docs/agents/t4-critic.md) | Reads the lowest-scoring conversations in full and names the one failure that explains most of them |
+| 5 | [**Researcher**](docs/agents/t5-researcher.md) | Searches Exa for how counsellors handle that pattern and keeps sources, each with a one-line technique |
+| 6 | [**Proposer**](docs/agents/t6-proposer.md) | Picks exactly one action from its [toolbox](#8-the-proposers-toolbox), with a hypothesis and a prediction the gate can check |
+| 7 | [**Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | Tests the candidate on validation conversations and safety cases. Keeps it, or restores the previous policy |
+
+Three things hold the loop honest: the safety rules are locked outside the search, nothing recalled from memory reaches the helper without passing the gate, and the decision log, a file in git, is the authority over every other record ([From memory to policy](#6-from-memory-to-policy)).
+
+The figure below shows the older `scripts.run_round` path, with pre-scored conversations and a manual stand-in gate; this branch also implements judge integration and the real gatekeeper (`scripts.run_graph_round --gate real`).
 
 ![Puddles training implementation snapshot](figures/fig1-training.svg)
 
@@ -50,21 +67,10 @@ The agreed design is an offline policy-improvement loop. The figure below shows 
 
 [Replayable player](figures/fig1-player.html) (download and open locally) · [Architecture and reproduction notes](figures/fig1-architecture.md)
 
-## 2. Training agents
+<a id="3-inference-steps"></a>
+## The live conversation
 
-The agent names link to a file for each one, with its prompt and formats.
-
-| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
-|---|---|---|---|---|---|
-| [**1. Simulated user**](docs/agents/t1-simulated-user.md) | • Plays a person from an ESConv scenario<br>• Reacts honestly and opens up slowly | Nothing (no access) | Nothing | Scenario: anxiety, job crisis, "I am on short term disability and I am afraid I will lose my job"<br>plus the helper's last line | `Not yet. I'm on short term disability and I'm not ready to go back.` |
-| [**2. Helper**](docs/agents/t2-i3-helper.md) | • Replies to the person, following the policy file<br>• Same model, prompt and code as on the robot | Nothing during training | Nothing | `policy-v4` and the turns so far:<br>user: "I'm feeling anxious that I'm going to lose my job." | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
-| [**3. Judge**](docs/agents/t3-judge.md) | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
-| [**4. Critic**](docs/agents/t4-critic.md) | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
-| [**5. Researcher**](docs/agents/t5-researcher.md) | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
-| [**6. Proposer**](docs/agents/t6-proposer.md) | • Picks exactly one action from its [toolbox](#8-the-proposers-toolbox): a harness change or, on escalation, a model update<br>• States a hypothesis and a prediction the gate can check<br>• Does not repeat an action that was reverted | Earlier actions and their outcomes, and the lever scoreboard | The proposed action | The current harness version, the pattern, the sources, the scoreboard and the remaining budget | `{"action": "edit_rule", "args": {"op": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}, "hypothesis": "...", "prediction": "relevance +0.2"}` |
-| [**7. Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
-
-## 3. Inference steps
+<p><i>Inference: nothing is spoken until the crisis checker has answered</i></p>
 
 Inference is the live conversation with a person. The policy is fixed for the whole conversation.
 
@@ -81,7 +87,183 @@ Inference is the live conversation with a person. The policy is fixed for the wh
 
 [Replayable player](figures/fig2-player.html) (download and open locally) · [Architecture and reproduction notes](figures/fig2-architecture.md)
 
-## 4. Inference agents
+## Results
+
+<p><i>One unattended training run, and the inference text path on real models</i></p>
+
+**The training run of 15 November.** The loop started at 03:02 and stopped itself at 06:40 after 13 rounds: 3 changes kept, 7 reverted, 3 rounds with no candidate. It made 4,832 model calls for $6.67 by the run's usage log. The final policy, [`policy-v4`](policies/training-2026-11-15/policy-v4.md), differs from the starting policy in two rules, keeps its safety rules unchanged and passed all 19 safety cases.
+
+Quality is the average of empathy and relevance, each scored 1 to 5, on two fresh sets of the same 20 validation scenarios (40 conversations per policy). The final judge took no part in the loop.
+
+| Policy | Loop judge | Final judge |
+|---|---|---|
+| `policy-v1`, the run's starting policy | 3.29 | 3.19 |
+| Control: the same safety rules, no conversation rules | 3.60 | 3.55 |
+| **`policy-v4`, the final policy** | **3.98** | **3.80** |
+
+| Comparison, scenario by scenario (95% interval) | Loop judge | Final judge |
+|---|---|---|
+| Final over starting policy, all 40 scenarios | +0.61 (+0.42 to +0.79) | +0.57 (+0.36 to +0.78) |
+| Final over control, all 40 scenarios | +0.36 (+0.19 to +0.54) | +0.26 (+0.09 to +0.44) |
+| Final over starting policy, the 20 held-out scenarios the gatekeeper never used | +0.53 (+0.20 to +0.88) | +0.53 (+0.15 to +0.90) |
+
+What the numbers do not show: the people in every conversation are a language model playing an ESConv scenario, the grading guide is not calibrated against human ratings, and two sets of 20 conversations from one policy differed by as much as 0.45. The full record, every caveat and a command that reproduces each table from the saved scores are in [results/training-2026-11-15](results/training-2026-11-15/README.md).
+
+**The inference text path, 15 November.** The helper, the crisis checker and the note-taker ran on real models through a text chat and an HTTP turn service:
+
+- **A live turn end to end:** 62 turns over HTTP with a median of 1202 ms and a maximum of 1747 ms, before speech-to-text and text-to-speech.
+- **Crisis routing:** on 36 labelled messages run twice, the fixed crisis route for 44 of the 46 turns that expected it; all 4 errors are on the 2 messages whose labels a second model disputed.
+- **Memory across sessions:** per-person notes were added, replaced and deleted on request, and loaded into the next session.
+- **What broke:** six defects found by the real runs, each listed below with its fix and what is still open, and eleven known problems that are not fixed.
+
+<a id="inference-tested-end-to-end-15-november"></a>
+<details>
+<summary><b>Inference, tested end to end</b> · what ran on real models, what broke, what is still wrong, and how to run it yourself</summary>
+
+On the morning of 15 November the inference path ran on real models: the helper, the crisis checker and the note-taker on OpenAI `gpt-6-luna`, the judge on `gpt-6.1-sol`, and the notes on past.dev. It was driven through four entry points: `scripts/chat.py` (text chat), the turn service `scripts/serve.py` (the same path over HTTP for the robot's brain; see the [hand-over page](docs/robot-handover.md) and [contract](docs/specs/turn-service.md)), `scripts/crisis_pilot.py` and `scripts/persona_pilot.py`. Each linked report states how it was run and how it was checked.
+
+### What works
+
+| Capability | Measured evidence | Source |
+|---|---|---|
+| A live turn end to end: keyword check, crisis checker and helper in parallel, then the release step | 11 turns through `scripts/chat.py`: total median 1435 ms, max 3046 ms (the one late turn, below). 62 turns over HTTP: service total median 1202 ms, max 1747 ms | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| The crisis response on a direct statement | The keyword list matched, the checker said `crisis` / `self`, and the spoken text was exactly the fixed `self` response, with 988. The same over HTTP | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| Crisis routing on 36 labelled messages, 2 runs each (72 turns) | With the labels as written: the fixed crisis route for 44 of the 46 turns that expected it, the helper's draft for 24 of 26; 2 misses, 2 false alarms, no holding or offline line. All 4 errors are the 2 messages whose labels a second model disputed; with its labels, 0 misses and 0 false alarms. Both readings are given; neither is claimed as the truth | [crisis pilot](results/crisis-pilot/summary.md) |
+| Traces per turn, with training consent | 12 MLflow traces for an 11-turn session: one `turn` trace per turn, each holding a crisis checker span and a helper span, plus one for the note-taker | [smoke test](results/inference-smoke/README.md) |
+| No saved session or matching marker found in the tested sessions with both consents off | A marker phrase typed in a no-consent session was searched for in its session folder (never created), a full dump and a per-cell scan of the MLflow database, `./mlruns` and stderr: 0 hits, and the trace count stayed at 12. Its only copies were the test's own input file and the terminal output the test saved, where the reply quoted it. Over HTTP, a second phrase had 0 matches in the service's root, `runs/mlflow.db`, `mlruns/` and the service's stdout and stderr | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| Per-person notes loaded into the next session | A person's second session over HTTP started with `notes_loaded` 4, the 4 notes their first session added. In the persona pilot the helper was given the stored notes at the start of later sessions | [HTTP replay](results/http-replay/README.md), [persona pilot](results/persona-pilot/README.md) |
+| A forget request removes the note from active memory | Grief persona: the named note was deleted, a note that also mentioned it was replaced, nothing was left pending, and session 3's helper was given only the two remaining notes. On past.dev every delete was confirmed on the first attempt, and each deleted note was absent from the first sampled recall | [persona pilot](results/persona-pilot/README.md), [note store](results/inference-smoke/pastdev.md) |
+| The tested other-person and critic recalls returned no notes from the first person | Notes for a second person: none. A recall as that person returned no note IDs; a recall as the critic returned only training records | [note store](results/inference-smoke/pastdev.md) |
+| HTTP routes matched direct run 1 on 35 of 36 pilot messages | Same route for 35 of 36 pilot messages; the one that differed (`is-05`) was caught over HTTP and missed directly. Client wall time minus service `timings_ms.total`: median 2 ms (max 128 ms), which includes client, framework and scheduling costs, not HTTP alone | [HTTP replay](results/http-replay/README.md) |
+| Two sessions at once | 3 turn pairs from two people, sent less than 1 ms apart, overlapped for the whole of the shorter call (to the reported millisecond); each reply carried its own session ID and stayed on its own topic | [HTTP replay](results/http-replay/README.md) |
+
+### Memory across sessions
+
+The policy is the same for everyone. The personal layer is the notes, which the note-taker keeps and the helper is given at the start of a session. There are no per-person policy rules.
+
+The [persona pilot](results/persona-pilot/README.md) ran three synthetic personas for three sessions each, with notes (`notes_on`) and without (`notes_off`). Notes held after each `notes_on` session for the grief persona, copied from the [report](results/persona-pilot/report.md); "(old)" marks the note that was replaced:
+
+| After session | Kind | Fact | Change |
+|---|---|---|---|
+| 1 | situation | The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | added |
+| 1 | people | The user's father died two months ago. | added |
+| 1 | people | The user's brother is currently distant from them after they argued about selling the house. | added |
+| 2 | people | The user's father died two months ago. |  |
+| 2 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. | added |
+| 2 | situation | (old) The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | replaced |
+| 2 | people | The user's brother is currently distant from them after they argued about selling the house. | deleted |
+| 3 | people | The user's father died two months ago. |  |
+| 3 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. |  |
+
+The deletion in session 2 followed this request, the first thing the person said in that session:
+
+> Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad.
+
+This synthetic engineering pilot completed and scored 18 sessions across three personas, demonstrating note addition, replacement, and removal from active memory and later helper context; two proposed notes in one session were not stored. Session-3 judge means were 4.33 versus 4.33 for empathy and 5.00 versus 4.33 for relevance (notes_on versus notes_off), but one run per arm with simulated users and a model judge does not establish that memory improves support. The run also exposed an unprompted suicide escalation, a keyword false alarm after an explicit denial, and output truncation that removed 988 guidance, so it provides no clinical or safety validation. The pilot's folder describes the run as it happened; two defects it found, the trimmer's cut at a country abbreviation and unstored notes with no recorded reason, have since been fixed in pull request #77 (below).
+
+| Measure | notes_on | notes_off | Difference |
+|---|---|---|---|
+| Mean empathy, session 3 | 4.33 | 4.33 | 0.00 |
+| Mean relevance, session 3 | 5.00 | 4.33 | +0.67 |
+| Mean empathy, all sessions | 4.44 | 4.33 | +0.11 |
+| Mean relevance, all sessions | 4.44 | 4.11 | +0.33 |
+| Sessions scored | 9 of 9 | 9 of 9 | |
+| Notes kept after session 3 | 12 | 0 | |
+| Notes deleted on request | 1 | 0 | |
+
+This table does not show that memory improves scores: there are three personas, one run each, simulated users and a model judge, and session 1 already differs between the arms although neither arm had any notes yet.
+
+### What the real runs broke, and what was fixed the same morning
+
+| Defect | How it was found | Status |
+|---|---|---|
+| The no-training-consent note-taker failed with HTTP 400, so the notes step, forgetting included, failed. Rejection of `max_tokens` and temperature 0.0 is inferred from the code and status; the response bodies were not retained | [Smoke test](results/inference-smoke/README.md): a direct call and the no-consent session | Fixed in pull request #74, merged. Over HTTP the no-consent note-taker ended without a notes failure in all 37 sessions checked ([HTTP replay](results/http-replay/README.md)) |
+| Note writes were dropped. Both run-1 writes were unconfirmed within the default 60 s wait, which ended after about 63 s each, and were deleted. In run 2, with a 300 s wait, ingestion completed after 54.2 s and 81.0 s | [First real calls to the note store](results/inference-smoke/pastdev.md): both notes of the first run were lost | Fixed in #74, merged: the wait is now 300 s ([hand-over page](docs/robot-handover.md)) |
+| The checker exceeded its 3 s deadline on one of the 10 ordinary turns in the 11-turn session (3046 ms), producing the holding line although the helper's draft was ready | [Smoke test](results/inference-smoke/README.md), 10-turn chat | Fixed in #74, merged: the deadline is now 5 s. Over HTTP no ordinary turn in that session got the holding line; checker max 1443 ms ([HTTP replay](results/http-replay/README.md)) |
+| Helper drafts are limited to 80 tokens and passed through the sentence trimmer: across 108 replies, 17 drafts hit the limit and were shortened; in one, the trimmer mistook punctuation inside a country abbreviation for a sentence boundary and removed the draft's 988 guidance | [Persona pilot](results/persona-pilot/README.md) | Fixed in #77, merged: an abbreviation's full stop ends a sentence only when a capital letter follows or the text ends, and a title's (`Dr.`, `Mr.`, `Mrs.`, `Ms.`, `Prof.`, `St.`) never does mid-text. The real draft that lost its 988 line is now cut before the unfinished clause, after its complete sentence, instead of ending on "In the U.S."; the 988 line was in that unfinished clause, so it is still not in the reply. Still open: the default cap is still 80 tokens, and a draft with no complete sentence is still returned as it is. 17 of 108 drafts were shortened in the pilot run before the fix; that does not say how many would be shortened now |
+| With "remember me" on, a crisis disclosure became a note that the helper raised at the start of the next session, after which the checker sent the person's next two ordinary messages, one of them a forget request, to the fixed crisis response; this is one observed sequence | [HTTP replay](results/http-replay/README.md) | Fixed in #77, merged: the note-taker is not shown a turn that got a fixed crisis response (neither the person's message nor the reply), and its instructions forbid notes and follow-ups about thoughts of suicide or self-harm, a plan or means to harm oneself or someone else, or being in danger. A real two-session check on `gpt-6-luna` after the fix (a check by the fix's author, not kept as a results file) stored only the note about the work worry, and the next session's two turns were graded no risk with no fixed line. Still open: a forget request is left out of the note-taker's conversation when its turn got a fixed crisis response |
+| Two proposed notes in one persona-pilot session were not stored, the cause was not recorded, and the session still counted as not failed | [Persona pilot](results/persona-pilot/README.md) | Fixed in #77, merged: a proposed note that is not stored is counted with its reason (`consent`, `forget_everything`, `limit` or `write_failed:<type>`). A new pilot run exports the count and the reasons for each session; its report shows them for each `notes_on` session with a count above zero, and the totals for both arms in its Overall table. Still open: a past.dev timeout is not told apart from an error (both are `write_failed:PastError`); the session still counts as not failed; per-note confirmation times are not recorded; and the cause of the two unstored notes in this morning's run is still unknown, since that run predates the fix |
+
+### Known problems, not fixed
+
+- A keyword match overrides the checker, so an explicit denial of suicidal thoughts received the fixed crisis response although the checker said `none` ([persona pilot](results/persona-pilot/README.md)).
+- The helper raised suicide unprompted once, after a message about exhaustion that matched no keyword and that the checker rated `concern` ([persona pilot](results/persona-pilot/README.md)).
+- Smoke-test helper replies were not consistently short, and one offered reassurance about something the helper could not know, weakening compliance with C4 and C1 ([smoke test](results/inference-smoke/README.md)).
+- One exam-preparation note credits the person with a helper-proposed plan. Several notes use relative times with `due_date` null, allowing them to become stale without being marked ([persona pilot](results/persona-pilot/README.md)).
+- "Forget" removes a note from active memory and later helper context, not from the session files or the MLflow traces of a consented session ([persona pilot](results/persona-pilot/README.md)). Reading notes creates a past.dev audience even for a person with no notes. Forgetting everything leaves that empty audience, including the user ID in its name and identities ([note store](results/inference-smoke/pastdev.md)).
+- With training consent, trace files land in `./mlruns` of the working directory, outside `--root`, and an MLflow warning put a fragment of a note's text on the service's stderr ([smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md)).
+- The consented note-taker's trace is separate from the turn traces and lacks a structured session identifier for joining them ([smoke test](results/inference-smoke/README.md)).
+- The default urllib User-Agent remains a suspected compatibility problem for Cloudflare-fronted endpoints, inferred from the first run's code and HTTP status; `LLMError` also discards response bodies. Neither problem was observed to prevent the OpenAI run ([smoke test](results/inference-smoke/README.md)).
+- Under the labels as written, keywords matched 3 of the 23 messages labelled for a fixed response; all 44 correct fixed-route selections involved the checker, 38 through the checker alone ([crisis pilot](results/crisis-pilot/summary.md)).
+- Median total text-turn times were 1202 ms over HTTP, 1435 ms in the chat run and 1167 ms in the crisis pilot; these measurements exclude speech-to-text and text-to-speech ([HTTP replay](results/http-replay/README.md), [smoke test](results/inference-smoke/README.md), [crisis pilot](results/crisis-pilot/summary.md)). The project's target, "first sentence within about 1 second on a warm GPU" ([issue #9](https://github.com/puddles-convo/puddles/issues/9)), is not met by these text-turn medians, which also exclude speech-to-text and text-to-speech.
+- One crisis-pilot message (`is-05`, one of the two with disputed labels) was missed in both direct runs and caught in the HTTP run, so the checker's answer varies between runs ([HTTP replay](results/http-replay/README.md)).
+
+### Limits
+
+- Every message and persona is synthetic, written by models, and the simulated users are models too.
+- The crisis labels were assigned by one model and checked by another; the scores come from one model judge.
+- Each run was done once or twice: the crisis pilot twice per message, the persona pilot once per arm, the chat and HTTP runs once.
+- No clinician reviewed the messages, the labels, the fixed responses or the replies.
+- The crisis set has no hard negatives, such as an explicit denial or a historical mention of suicide.
+- Nothing here is a safety validation or an estimate of real-world safety.
+
+### Run it yourself
+
+Fake mode uses scripted models and an in-process past.dev: no keys, no network. Run from the repo root with `requirements.txt` installed; `messages.txt` is any file with one message per line. The pilots write to `runs/` here so the committed results are not overwritten, and the fake crisis pilot tests the plumbing only.
+
+```bash
+python -m scripts.chat --fake < messages.txt
+PUDDLES_SERVICE_TOKEN=dev-token python -m scripts.serve --policy policies/policy-v1.md --root runs/serve --fake
+python -m scripts.crisis_pilot --set fixtures/crisis_pilot.jsonl --policy policies/policy-v2.md --out runs/crisis-pilot-fake --fake
+python -m scripts.persona_pilot --personas fixtures/personas.json --policy policies/policy-v2.md --out runs/persona-pilot-fake --fake
+```
+
+</details>
+
+Nothing here is a safety validation or an estimate of real-world safety: every message and persona is synthetic, and no clinician reviewed the messages, the labels, the fixed responses or the replies.
+
+## Quick start
+
+Python 3.11 or later. Everything below runs offline on scripted models: no keys, no network.
+
+```bash
+git clone https://github.com/puddles-convo/puddles && cd puddles
+pip install -r requirements.txt
+python -m pytest                                  # the whole suite, offline
+printf "I had a rough day at work.\n" > messages.txt
+python -m scripts.chat --fake < messages.txt      # one text conversation through the inference path
+python results/training-2026-11-15/measurements/tools/paired_stats.py   # the results tables, from saved scores
+```
+
+A live round needs keys from the environment, which are never committed: see [Running the training agents](#running-the-training-agents) and [the provider settings](docs/specs/provider-settings.md).
+
+## The design in depth
+
+<p><i>Each block opens on click. Together they are the full design the team agreed on.</i></p>
+
+**The agents**
+
+<a id="2-training-agents"></a>
+<details>
+<summary><b>Training agents</b> · the seven agents of a round, with what each reads, writes, receives and returns</summary>
+
+The agent names link to a file for each one, with its prompt and formats.
+
+| Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
+|---|---|---|---|---|---|
+| [**1. Simulated user**](docs/agents/t1-simulated-user.md) | • Plays a person from an ESConv scenario<br>• Reacts honestly and opens up slowly | Nothing (no access) | Nothing | Scenario: anxiety, job crisis, "I am on short term disability and I am afraid I will lose my job"<br>plus the helper's last line | `Not yet. I'm on short term disability and I'm not ready to go back.` |
+| [**2. Helper**](docs/agents/t2-i3-helper.md) | • Replies to the person, following the policy file<br>• Same model, prompt and code as on the robot | Nothing during training | Nothing | `policy-v4` and the turns so far:<br>user: "I'm feeling anxious that I'm going to lose my job." | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
+| [**3. Judge**](docs/agents/t3-judge.md) | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
+| [**4. Critic**](docs/agents/t4-critic.md) | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
+| [**5. Researcher**](docs/agents/t5-researcher.md) | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
+| [**6. Proposer**](docs/agents/t6-proposer.md) | • Picks exactly one action from its [toolbox](#8-the-proposers-toolbox): a harness change or, on escalation, a model update<br>• States a hypothesis and a prediction the gate can check<br>• Does not repeat an action that was reverted | Earlier actions and their outcomes, and the lever scoreboard | The proposed action | The current harness version, the pattern, the sources, the scoreboard and the remaining budget | `{"action": "edit_rule", "args": {"op": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}, "hypothesis": "...", "prediction": "relevance +0.2"}` |
+| [**7. Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
+
+</details>
+
+<a id="4-inference-agents"></a>
+<details>
+<summary><b>Inference agents</b> · the listener, crisis checker, helper, release step, speaker and note-taker</summary>
 
 | Agent | What it does | Pulls from memory | Writes to memory | Example input | Example output |
 |---|---|---|---|---|---|
@@ -92,7 +274,11 @@ Inference is the live conversation with a person. The policy is fixed for the wh
 | [**4. Speaker**](docs/agents/i4-speaker.md) (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
 | [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced, confirmed or deleted | The finished session and the existing notes | `[{"action": "add", "kind": "what_helps", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
 
-## Models
+</details>
+
+<a id="models"></a>
+<details>
+<summary><b>Models</b> · which model plays each agent, and what is still to decide</summary>
 
 Which model plays each agent. These are starting choices and none has been benchmarked yet. No model name is hard-coded: each one is set in configuration, so changing a model does not change the code.
 
@@ -127,32 +313,43 @@ The runs on 15 November and the training loop used OpenAI `gpt-6-luna` for the h
 - **The crisis checker's model.** The checker and the helper run concurrently, but waiting for the checker can add latency. A stronger model would miss less, if it can answer inside the 5-second limit.
 - **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
 
-## How the judges grade (the grading skill)
+</details>
 
-**Status: the skill is built** ([`calibration/judge-skill/SKILL.md`](calibration/judge-skill/SKILL.md), about 4,300 tokens). Its text was written by Claude in a Claude Code session from the builder's training-split samples and rendered by the builder (`--from-json calibration/judge-skill/written.json`), because no builder model key was available. **The judges read it when `PUDDLES_JUDGE_SKILL` points to it** (`puddles/eval/judge.py`; off when unset, so the judge without a skill is unchanged). Not yet agreed with the judge's owner, and not yet checked on real conversations. Build it, check it and freeze the judge with it **before stage 5's real baseline runs**. The skill changes the judge's version, so baselines measured without it would have to be run again.
+<a id="9-handoffs"></a>
+<details>
+<summary><b>Handoffs</b> · what passes from one step to the next, with the record format of each</summary>
 
-The loop keeps or reverts a change on small score differences, so the judges must grade consistently and the way real people rated support conversations. Rather than tuning the judge prompt by hand, a module builds a **grading skill**: a short guide with anchors for each score and a few rated examples. Every judge and Astra reads it in their system message, on every conversation, in training and in the final evaluation.
+What passes directly from one step to the next. Formats are in `schemas.py`.
 
-| | |
-|---|---|
-| Built by | `python -m puddles.eval.judge_skill`: seeded; without `--yes` it only prints the plan and the estimated cost (7 model calls, about 28,000 prompt tokens). The builder model is `PUDDLES_SKILL_BUILDER_MODEL` and needs a row in the prices table |
-| Built from | **The ESConv training split only.** Conversations are sampled evenly across rating levels, because most ESConv ratings are 5 out of 5 |
-| Never built from | The validation split (the gate and stage 5 grade the loop on it), the test split (final evaluation only), CounselBench-Adv and VERA-MH (outside checks the loop never sees) |
-| What it covers | Empathy and relevance (what raises or lowers each score, anchors for 1, 3 and 5, traps); distress at the start and end (anchors and rules); definitions of the 8 strategy labels; 5 examples with the seekers' own ratings. Examples never include a helper mentioning medication, and leave out ESConv's strategy labels, which are often wrong |
-| Where it lives | `calibration/judge-skill/SKILL.md`, with `skill.meta.json` listing the ESConv IDs behind every guideline and example |
-| How judges read it | Added after the fixed judge prompt as a `<grading_skill>` block, switched on with `PUDDLES_JUDGE_SKILL` |
-| Version | The skill's hash is part of `judge_version`, so any edit makes the frozen judge refuse to run until it is checked again |
+**Training**
 
-**The one check.** Score about 50 validation conversations with the existing calibration command, once without the skill and once with it, on the same conversations. The rule, written before the run: use the skill if agreement with the seekers' ratings (Spearman and weighted kappa) does not fall on empathy or relevance. This is a single look, not tuning: nothing is changed to fit the validation split. Both results go here.
-
-| | Empathy: Spearman / QWK | Relevance: Spearman / QWK |
+| From → to | What is handed over | Format |
 |---|---|---|
-| Without the skill | not run | not run |
-| With the skill | not run | not run |
+| Simulated user → Helper | One user message. The helper never sees the scenario. | Plain text |
+| Helper → Judge | The turns only, with no IDs and no policy version, so the judge stays blind. The full record is saved separately. | `ConversationRecord` ([example](examples/training_H2_conversation_record.json)) |
+| Judge → Critic | Empathy, relevance and emotion scores, a strategy tag per helper turn, a one-sentence note | `ScoreRecord` ([example](examples/training_H3_score_record.json)) |
+| Critic → Researcher | The failure pattern, or "none found" | `FailurePattern` ([example](examples/training_H4_failure_pattern.json)) |
+| Researcher → Proposer | Sources, each with a one-line technique, or "none found" | `ResearchNote` ([example](examples/training_H5_research_note.json)) |
+| Proposer → Gatekeeper | One action from the toolbox. Code applies it to make the candidate harness version. | `PolicyEdit` today ([example](examples/training_H6_policy_edit.json)); `Intervention` proposed |
+| Gatekeeper → next round | The policy now in force, and the outcome for the decision log | `GateOutcome` ([example](examples/training_H7_gate_outcome.json)) |
 
-**Limits.** The ratings come from the people seeking help, not from health specialists. ESConv has very few low ratings, so the low end of each scale has the fewest examples; `skill.meta.json` reports how many each level had. The skill contains short ESConv excerpts (CC BY-NC 4.0), credited in its header.
+**Inference**
 
-## 5. The memory
+| From → to | What is handed over | Format |
+|---|---|---|
+| Listener → Crisis checker and Helper | What the person said | `UserMessage` ([example](examples/inference_H1_user_message.json)) |
+| Crisis checker → Release | The risk level and, for a crisis, its category | `CheckedMessage` ([example](examples/inference_H2_checked_message.json)) |
+| Helper → Release | The draft reply | Plain text |
+| Release → Speaker | The draft, a fixed response or the holding line | `HelperReply` ([example](examples/inference_H3_helper_reply.json)) |
+| Speaker → Note-taker | The finished session | `ConversationRecord` ([example](examples/inference_H4_session_record.json)) |
+
+</details>
+
+**Memory and policy**
+
+<a id="5-the-memory"></a>
+<details>
+<summary><b>The memory</b> · three stores, what each holds, who reads and writes, and who is in control</summary>
 
 ### Three stores
 
@@ -252,7 +449,11 @@ The reasons for the limits on notes and history lists, and what other systems do
 
 This meets the past.dev challenge rules: the critic, researcher, proposer and gatekeeper all write; the critic, researcher and proposer all read; and the critic and the proposer both use outcomes the gatekeeper wrote.
 
-## 6. From memory to policy
+</details>
+
+<a id="6-from-memory-to-policy"></a>
+<details>
+<summary><b>From memory to policy</b> · the policy file, what the gate tests, and the check that proves log and policy agree</summary>
 
 **The harness version** is what changes how the helper behaves: the policy file, the skill cards, the few-shot examples, the strategy rules, the inference setting and, if one has passed the gate, a LoRA adapter. Each is changed only through the proposer's [toolbox](#8-the-proposers-toolbox). This section uses the policy file as the example; every other part follows the same path.
 
@@ -337,7 +538,7 @@ keep the candidate only if all of these hold:
 otherwise restore the previous harness version exactly
 ```
 
-Condition 2 reads "exactly one action" for the other parts of the harness. The noise measure and the comparison method are proposals under review (see [section 11](#11-how-we-measure-the-result)).
+Condition 2 reads "exactly one action" for the other parts of the harness. The noise measure and the comparison method are proposals under review (see [How we measure the result](#11-how-we-measure-the-result)).
 
 Nothing is promoted until the noise has been measured and the safety case file exists.
 
@@ -365,9 +566,15 @@ Notes about a person work differently. They go into the helper's prompt as facts
 
 The full design, including the log format, consent and forgetting, and the crisis path, is in [docs/agents.md](docs/agents.md).
 
-## 7. How the loop runs experiments
+</details>
 
-These parts sit under every action in the toolbox ([section 8](#8-the-proposers-toolbox)), so they are built first. Each borrows a mechanism from published self-improving systems and rewrites it for this loop; no framework is adopted. Several are already in the team's build plan ([docs/plan/](docs/plan/)); the **Plan** column says which, and this section adds only what is new. Times cover the new work only and are our estimates. Full review: [docs/research/reusable-parts-from-agent-repos.md](docs/research/reusable-parts-from-agent-repos.md).
+**The loop**
+
+<a id="7-how-the-loop-runs-experiments"></a>
+<details>
+<summary><b>How the loop runs experiments</b> · locked evaluation, fixed time per round, the archive of versions and the noise rules</summary>
+
+These parts sit under every action in the toolbox ([The proposer's toolbox](#8-the-proposers-toolbox)), so they are built first. Each borrows a mechanism from published self-improving systems and rewrites it for this loop; no framework is adopted. Several are already in the team's build plan ([docs/plan/](docs/plan/)); the **Plan** column says which, and this section adds only what is new. Times cover the new work only and are our estimates. Full review: [docs/research/reusable-parts-from-agent-repos.md](docs/research/reusable-parts-from-agent-repos.md).
 
 **Priority.** **Must-have** before the overnight run: parts 1, 2 and 8 (cheap, and they carry the rigour and interpretability scores). **Next:** part 4. **If time allows:** parts 6 and the comparison run in part 8. Parts 3, 5 and 7 are mostly already planned.
 
@@ -418,7 +625,7 @@ Scores move from run to run, so a version can look better by luck.
 - **What to build on next:** keep building on the latest version unless its average is below the best version's lower 95% bound (mean − 1.96 × standard deviation / √n). This rule is in SICA's code, not its paper ([runner.py](https://github.com/MaximeRobeyns/self_improving_coding_agent)).
 - **Decided by the team:** the gate's rule for deployment, the 95% rule only for choosing the parent.
 
-**Open question: a judge council inside the loop.** Scoring each conversation with three smaller judges from different model families, instead of one, can agree better with people and reduce a judge's preference for its own model family, at lower cost than one large judge ([PoLL, arXiv 2404.18796](https://arxiv.org/abs/2404.18796)). It triples judge calls per conversation. Proposal: start with one judge, measure the noise, and switch to a council of three if the noise is so large that few changes can pass the gate. As stage 6 requires for any judge change, switching starts a new stretch of rounds: calibrate the council, measure the baselines and the noise again (stage 5), and never join the two stretches in a plot. The held-out jury ([section 11](#11-how-we-measure-the-result)) stays separate either way.
+**Open question: a judge council inside the loop.** Scoring each conversation with three smaller judges from different model families, instead of one, can agree better with people and reduce a judge's preference for its own model family, at lower cost than one large judge ([PoLL, arXiv 2404.18796](https://arxiv.org/abs/2404.18796)). It triples judge calls per conversation. Proposal: start with one judge, measure the noise, and switch to a council of three if the noise is so large that few changes can pass the gate. As stage 6 requires for any judge change, switching starts a new stretch of rounds: calibrate the council, measure the baselines and the noise again (stage 5), and never join the two stretches in a plot. The held-out jury ([How we measure the result](#11-how-we-measure-the-result)) stays separate either way.
 
 ### 6. Researcher search rules
 
@@ -437,7 +644,11 @@ Already in the team's plan: stage 6 runs the simulated conversations of a round 
 
 **What this is not.** By the surveys' definitions this is self-improvement of the model and its harness. It is not recursive self-improvement, which starts when the improvement process itself changes ([Reliable survey](https://www.preprints.org/manuscript/202609.0913)).
 
-## 8. The proposer's toolbox
+</details>
+
+<a id="8-the-proposers-toolbox"></a>
+<details>
+<summary><b>The proposer's toolbox</b> · every action the loop may take, from one rule edit to a LoRA adapter, and its limits</summary>
 
 The proposer is the research agent of the loop. Each round it picks **one** action, fills in its arguments, and states what it expects to happen. Code carries the action out, the gatekeeper tests it, and the outcome is logged. Every action can be reverted.
 
@@ -451,7 +662,7 @@ The proposer is the research agent of the loop. Each round it picks **one** acti
 | 4 | `train_adapter` with DPO (includes `build_dataset`) | Fine-tuning | 4–6 | The weight update: best and worst reply pairs from the loop's own conversations, with safety data mixed in. Emotional-support precedent at 7 to 9B (CSO, DecoupledESC); more stable than GRPO |
 | 5 | `merge_adapters` | Weight space | 3–5 | Searches the blend between the base model and the adapter, one validation pass per candidate, no retraining. Also a safety dial: it can find the blend that keeps the gains and loses any harm |
 
-**Why both kinds of tool.** We let the agent decide what is best for it: improving its harness or updating its weights. What it chooses, and how each choice works out, is reported as a side result in [section 11](#11-how-we-measure-the-result).
+**Why both kinds of tool.** We let the agent decide what is best for it: improving its harness or updating its weights. What it chooses, and how each choice works out, is reported as a side result in [How we measure the result](#11-how-we-measure-the-result).
 
 **Always on, not a choice:** `project_safe` (Safe LoRA) runs on every adapter before the gate, and the gate compares the adapter with and without it.
 
@@ -491,8 +702,8 @@ We do not know how much these improve a 9B support helper; no source tests them 
 
 **How experiments are run (autoresearch and DGM style)**
 
-- **Fixed budget per experiment**, as in Karpathy's autoresearch: every round gets a set time and spend, so results are comparable and one bad idea cannot eat the night ([section 7](#7-how-the-loop-runs-experiments), part 2).
-- **An archive, not a single line**, as in the Darwin Gödel Machine: every version that passes the safety and format checks is kept, and a round may start from any of them, not only the latest ([section 7](#7-how-the-loop-runs-experiments), part 4). That lets a weight-space branch (for example a GRPO adapter) develop alongside the harness branch.
+- **Fixed budget per experiment**, as in Karpathy's autoresearch: every round gets a set time and spend, so results are comparable and one bad idea cannot eat the night ([How the loop runs experiments](#7-how-the-loop-runs-experiments), part 2).
+- **An archive, not a single line**, as in the Darwin Gödel Machine: every version that passes the safety and format checks is kept, and a round may start from any of them, not only the latest ([How the loop runs experiments](#7-how-the-loop-runs-experiments), part 4). That lets a weight-space branch (for example a GRPO adapter) develop alongside the harness branch.
 - **Keep or revert** stays the rule for what reaches the robot: only the best version in the archive that passed every gate condition.
 - **Training budget for the weekend:** up to 3 adapter runs in total (SFT, DPO or GRPO), unlimited merges and projections (they are cheap).
 
@@ -519,148 +730,42 @@ The gate outcome records whether the prediction came true, so the proposer's cal
 
 **Build order.** Version 1 first: actions 1 to 3, then 6 and 7 with DPO, plus `project_safe` (10), then `merge_adapters` (9). After version 1: GRPO (8, the longest to build), then 4, 5 and 11 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 
-## 9. Handoffs
+</details>
 
-What passes directly from one step to the next. Formats are in `schemas.py`.
+**Evaluation**
 
-**Training**
+<a id="how-the-judges-grade-the-grading-skill"></a>
+<details>
+<summary><b>How the judges grade</b> · the grading skill every judge reads. Read this before trusting any score</summary>
 
-| From → to | What is handed over | Format |
+**Status: the skill is built** ([`calibration/judge-skill/SKILL.md`](calibration/judge-skill/SKILL.md), about 4,300 tokens). Its text was written by Claude in a Claude Code session from the builder's training-split samples and rendered by the builder (`--from-json calibration/judge-skill/written.json`), because no builder model key was available. **The judges read it when `PUDDLES_JUDGE_SKILL` points to it** (`puddles/eval/judge.py`; off when unset, so the judge without a skill is unchanged). Not yet agreed with the judge's owner, and not yet checked on real conversations. Build it, check it and freeze the judge with it **before stage 5's real baseline runs**. The skill changes the judge's version, so baselines measured without it would have to be run again.
+
+The loop keeps or reverts a change on small score differences, so the judges must grade consistently and the way real people rated support conversations. Rather than tuning the judge prompt by hand, a module builds a **grading skill**: a short guide with anchors for each score and a few rated examples. Every judge and Astra reads it in their system message, on every conversation, in training and in the final evaluation.
+
+| | |
+|---|---|
+| Built by | `python -m puddles.eval.judge_skill`: seeded; without `--yes` it only prints the plan and the estimated cost (7 model calls, about 28,000 prompt tokens). The builder model is `PUDDLES_SKILL_BUILDER_MODEL` and needs a row in the prices table |
+| Built from | **The ESConv training split only.** Conversations are sampled evenly across rating levels, because most ESConv ratings are 5 out of 5 |
+| Never built from | The validation split (the gate and stage 5 grade the loop on it), the test split (final evaluation only), CounselBench-Adv and VERA-MH (outside checks the loop never sees) |
+| What it covers | Empathy and relevance (what raises or lowers each score, anchors for 1, 3 and 5, traps); distress at the start and end (anchors and rules); definitions of the 8 strategy labels; 5 examples with the seekers' own ratings. Examples never include a helper mentioning medication, and leave out ESConv's strategy labels, which are often wrong |
+| Where it lives | `calibration/judge-skill/SKILL.md`, with `skill.meta.json` listing the ESConv IDs behind every guideline and example |
+| How judges read it | Added after the fixed judge prompt as a `<grading_skill>` block, switched on with `PUDDLES_JUDGE_SKILL` |
+| Version | The skill's hash is part of `judge_version`, so any edit makes the frozen judge refuse to run until it is checked again |
+
+**The one check.** Score about 50 validation conversations with the existing calibration command, once without the skill and once with it, on the same conversations. The rule, written before the run: use the skill if agreement with the seekers' ratings (Spearman and weighted kappa) does not fall on empathy or relevance. This is a single look, not tuning: nothing is changed to fit the validation split. Both results go here.
+
+| | Empathy: Spearman / QWK | Relevance: Spearman / QWK |
 |---|---|---|
-| Simulated user → Helper | One user message. The helper never sees the scenario. | Plain text |
-| Helper → Judge | The turns only, with no IDs and no policy version, so the judge stays blind. The full record is saved separately. | `ConversationRecord` ([example](examples/training_H2_conversation_record.json)) |
-| Judge → Critic | Empathy, relevance and emotion scores, a strategy tag per helper turn, a one-sentence note | `ScoreRecord` ([example](examples/training_H3_score_record.json)) |
-| Critic → Researcher | The failure pattern, or "none found" | `FailurePattern` ([example](examples/training_H4_failure_pattern.json)) |
-| Researcher → Proposer | Sources, each with a one-line technique, or "none found" | `ResearchNote` ([example](examples/training_H5_research_note.json)) |
-| Proposer → Gatekeeper | One action from the toolbox. Code applies it to make the candidate harness version. | `PolicyEdit` today ([example](examples/training_H6_policy_edit.json)); `Intervention` proposed |
-| Gatekeeper → next round | The policy now in force, and the outcome for the decision log | `GateOutcome` ([example](examples/training_H7_gate_outcome.json)) |
+| Without the skill | not run | not run |
+| With the skill | not run | not run |
 
-**Inference**
+**Limits.** The ratings come from the people seeking help, not from health specialists. ESConv has very few low ratings, so the low end of each scale has the fewest examples; `skill.meta.json` reports how many each level had. The skill contains short ESConv excerpts (CC BY-NC 4.0), credited in its header.
 
-| From → to | What is handed over | Format |
-|---|---|---|
-| Listener → Crisis checker and Helper | What the person said | `UserMessage` ([example](examples/inference_H1_user_message.json)) |
-| Crisis checker → Release | The risk level and, for a crisis, its category | `CheckedMessage` ([example](examples/inference_H2_checked_message.json)) |
-| Helper → Release | The draft reply | Plain text |
-| Release → Speaker | The draft, a fixed response or the holding line | `HelperReply` ([example](examples/inference_H3_helper_reply.json)) |
-| Speaker → Note-taker | The finished session | `ConversationRecord` ([example](examples/inference_H4_session_record.json)) |
+</details>
 
-## 10. How training and inference connect
-
-```
-+--------------------+    policy file that passed the gate    +--------------------+
-|                    | -------------------------------------> |                    |
-|      TRAINING      |                                        |     INFERENCE      |
-|   (this repo)      | <------------------------------------- |  (puddles-stack)   |
-+--------------------+   session records, with user consent   +--------------------+
-```
-
-- **Training to inference:** exactly one thing, the harness version that last passed the gatekeeper (the policy file and, if one passed, the adapter). A version that fails the safety check never reaches a user.
-- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes. Not planned for the hackathon weekend.
-- **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
-- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#13-robot-side).
-
-## Inference, tested end to end (15 November)
-
-On the morning of 15 November the inference path ran on real models: the helper, the crisis checker and the note-taker on OpenAI `gpt-6-luna`, the judge on `gpt-6.1-sol`, and the notes on past.dev. It was driven through four entry points: `scripts/chat.py` (text chat), the turn service `scripts/serve.py` (the same path over HTTP for the robot's brain; see the [hand-over page](docs/robot-handover.md) and [contract](docs/specs/turn-service.md)), `scripts/crisis_pilot.py` and `scripts/persona_pilot.py`. Each linked report states how it was run and how it was checked.
-
-### What works
-
-| Capability | Measured evidence | Source |
-|---|---|---|
-| A live turn end to end: keyword check, crisis checker and helper in parallel, then the release step | 11 turns through `scripts/chat.py`: total median 1435 ms, max 3046 ms (the one late turn, below). 62 turns over HTTP: service total median 1202 ms, max 1747 ms | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
-| The crisis response on a direct statement | The keyword list matched, the checker said `crisis` / `self`, and the spoken text was exactly the fixed `self` response, with 988. The same over HTTP | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
-| Crisis routing on 36 labelled messages, 2 runs each (72 turns) | With the labels as written: the fixed crisis route for 44 of the 46 turns that expected it, the helper's draft for 24 of 26; 2 misses, 2 false alarms, no holding or offline line. All 4 errors are the 2 messages whose labels a second model disputed; with its labels, 0 misses and 0 false alarms. Both readings are given; neither is claimed as the truth | [crisis pilot](results/crisis-pilot/summary.md) |
-| Traces per turn, with training consent | 12 MLflow traces for an 11-turn session: one `turn` trace per turn, each holding a crisis checker span and a helper span, plus one for the note-taker | [smoke test](results/inference-smoke/README.md) |
-| No saved session or matching marker found in the tested sessions with both consents off | A marker phrase typed in a no-consent session was searched for in its session folder (never created), a full dump and a per-cell scan of the MLflow database, `./mlruns` and stderr: 0 hits, and the trace count stayed at 12. Its only copies were the test's own input file and the terminal output the test saved, where the reply quoted it. Over HTTP, a second phrase had 0 matches in the service's root, `runs/mlflow.db`, `mlruns/` and the service's stdout and stderr | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
-| Per-person notes loaded into the next session | A person's second session over HTTP started with `notes_loaded` 4, the 4 notes their first session added. In the persona pilot the helper was given the stored notes at the start of later sessions | [HTTP replay](results/http-replay/README.md), [persona pilot](results/persona-pilot/README.md) |
-| A forget request removes the note from active memory | Grief persona: the named note was deleted, a note that also mentioned it was replaced, nothing was left pending, and session 3's helper was given only the two remaining notes. On past.dev every delete was confirmed on the first attempt, and each deleted note was absent from the first sampled recall | [persona pilot](results/persona-pilot/README.md), [note store](results/inference-smoke/pastdev.md) |
-| The tested other-person and critic recalls returned no notes from the first person | Notes for a second person: none. A recall as that person returned no note IDs; a recall as the critic returned only training records | [note store](results/inference-smoke/pastdev.md) |
-| HTTP routes matched direct run 1 on 35 of 36 pilot messages | Same route for 35 of 36 pilot messages; the one that differed (`is-05`) was caught over HTTP and missed directly. Client wall time minus service `timings_ms.total`: median 2 ms (max 128 ms), which includes client, framework and scheduling costs, not HTTP alone | [HTTP replay](results/http-replay/README.md) |
-| Two sessions at once | 3 turn pairs from two people, sent less than 1 ms apart, overlapped for the whole of the shorter call (to the reported millisecond); each reply carried its own session ID and stayed on its own topic | [HTTP replay](results/http-replay/README.md) |
-
-### Memory across sessions
-
-The policy is the same for everyone. The personal layer is the notes, which the note-taker keeps and the helper is given at the start of a session. There are no per-person policy rules.
-
-The [persona pilot](results/persona-pilot/README.md) ran three synthetic personas for three sessions each, with notes (`notes_on`) and without (`notes_off`). Notes held after each `notes_on` session for the grief persona, copied from the [report](results/persona-pilot/report.md); "(old)" marks the note that was replaced:
-
-| After session | Kind | Fact | Change |
-|---|---|---|---|
-| 1 | situation | The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | added |
-| 1 | people | The user's father died two months ago. | added |
-| 1 | people | The user's brother is currently distant from them after they argued about selling the house. | added |
-| 2 | people | The user's father died two months ago. |  |
-| 2 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. | added |
-| 2 | situation | (old) The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | replaced |
-| 2 | people | The user's brother is currently distant from them after they argued about selling the house. | deleted |
-| 3 | people | The user's father died two months ago. |  |
-| 3 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. |  |
-
-The deletion in session 2 followed this request, the first thing the person said in that session:
-
-> Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad.
-
-This synthetic engineering pilot completed and scored 18 sessions across three personas, demonstrating note addition, replacement, and removal from active memory and later helper context; two proposed notes in one session were not stored. Session-3 judge means were 4.33 versus 4.33 for empathy and 5.00 versus 4.33 for relevance (notes_on versus notes_off), but one run per arm with simulated users and a model judge does not establish that memory improves support. The run also exposed an unprompted suicide escalation, a keyword false alarm after an explicit denial, and output truncation that removed 988 guidance, so it provides no clinical or safety validation. The pilot's folder describes the run as it happened; two defects it found, the trimmer's cut at a country abbreviation and unstored notes with no recorded reason, have since been fixed in pull request #77 (below).
-
-| Measure | notes_on | notes_off | Difference |
-|---|---|---|---|
-| Mean empathy, session 3 | 4.33 | 4.33 | 0.00 |
-| Mean relevance, session 3 | 5.00 | 4.33 | +0.67 |
-| Mean empathy, all sessions | 4.44 | 4.33 | +0.11 |
-| Mean relevance, all sessions | 4.44 | 4.11 | +0.33 |
-| Sessions scored | 9 of 9 | 9 of 9 | |
-| Notes kept after session 3 | 12 | 0 | |
-| Notes deleted on request | 1 | 0 | |
-
-This table does not show that memory improves scores: there are three personas, one run each, simulated users and a model judge, and session 1 already differs between the arms although neither arm had any notes yet.
-
-### What the real runs broke, and what was fixed the same morning
-
-| Defect | How it was found | Status |
-|---|---|---|
-| The no-training-consent note-taker failed with HTTP 400, so the notes step, forgetting included, failed. Rejection of `max_tokens` and temperature 0.0 is inferred from the code and status; the response bodies were not retained | [Smoke test](results/inference-smoke/README.md): a direct call and the no-consent session | Fixed in pull request #74, merged. Over HTTP the no-consent note-taker ended without a notes failure in all 37 sessions checked ([HTTP replay](results/http-replay/README.md)) |
-| Note writes were dropped. Both run-1 writes were unconfirmed within the default 60 s wait, which ended after about 63 s each, and were deleted. In run 2, with a 300 s wait, ingestion completed after 54.2 s and 81.0 s | [First real calls to the note store](results/inference-smoke/pastdev.md): both notes of the first run were lost | Fixed in #74, merged: the wait is now 300 s ([hand-over page](docs/robot-handover.md)) |
-| The checker exceeded its 3 s deadline on one of the 10 ordinary turns in the 11-turn session (3046 ms), producing the holding line although the helper's draft was ready | [Smoke test](results/inference-smoke/README.md), 10-turn chat | Fixed in #74, merged: the deadline is now 5 s. Over HTTP no ordinary turn in that session got the holding line; checker max 1443 ms ([HTTP replay](results/http-replay/README.md)) |
-| Helper drafts are limited to 80 tokens and passed through the sentence trimmer: across 108 replies, 17 drafts hit the limit and were shortened; in one, the trimmer mistook punctuation inside a country abbreviation for a sentence boundary and removed the draft's 988 guidance | [Persona pilot](results/persona-pilot/README.md) | Fixed in #77, merged: an abbreviation's full stop ends a sentence only when a capital letter follows or the text ends, and a title's (`Dr.`, `Mr.`, `Mrs.`, `Ms.`, `Prof.`, `St.`) never does mid-text. The real draft that lost its 988 line is now cut before the unfinished clause, after its complete sentence, instead of ending on "In the U.S."; the 988 line was in that unfinished clause, so it is still not in the reply. Still open: the default cap is still 80 tokens, and a draft with no complete sentence is still returned as it is. 17 of 108 drafts were shortened in the pilot run before the fix; that does not say how many would be shortened now |
-| With "remember me" on, a crisis disclosure became a note that the helper raised at the start of the next session, after which the checker sent the person's next two ordinary messages, one of them a forget request, to the fixed crisis response; this is one observed sequence | [HTTP replay](results/http-replay/README.md) | Fixed in #77, merged: the note-taker is not shown a turn that got a fixed crisis response (neither the person's message nor the reply), and its instructions forbid notes and follow-ups about thoughts of suicide or self-harm, a plan or means to harm oneself or someone else, or being in danger. A real two-session check on `gpt-6-luna` after the fix (a check by the fix's author, not kept as a results file) stored only the note about the work worry, and the next session's two turns were graded no risk with no fixed line. Still open: a forget request is left out of the note-taker's conversation when its turn got a fixed crisis response |
-| Two proposed notes in one persona-pilot session were not stored, the cause was not recorded, and the session still counted as not failed | [Persona pilot](results/persona-pilot/README.md) | Fixed in #77, merged: a proposed note that is not stored is counted with its reason (`consent`, `forget_everything`, `limit` or `write_failed:<type>`). A new pilot run exports the count and the reasons for each session; its report shows them for each `notes_on` session with a count above zero, and the totals for both arms in its Overall table. Still open: a past.dev timeout is not told apart from an error (both are `write_failed:PastError`); the session still counts as not failed; per-note confirmation times are not recorded; and the cause of the two unstored notes in this morning's run is still unknown, since that run predates the fix |
-
-### Known problems, not fixed
-
-- A keyword match overrides the checker, so an explicit denial of suicidal thoughts received the fixed crisis response although the checker said `none` ([persona pilot](results/persona-pilot/README.md)).
-- The helper raised suicide unprompted once, after a message about exhaustion that matched no keyword and that the checker rated `concern` ([persona pilot](results/persona-pilot/README.md)).
-- Smoke-test helper replies were not consistently short, and one offered reassurance about something the helper could not know, weakening compliance with C4 and C1 ([smoke test](results/inference-smoke/README.md)).
-- One exam-preparation note credits the person with a helper-proposed plan. Several notes use relative times with `due_date` null, allowing them to become stale without being marked ([persona pilot](results/persona-pilot/README.md)).
-- "Forget" removes a note from active memory and later helper context, not from the session files or the MLflow traces of a consented session ([persona pilot](results/persona-pilot/README.md)). Reading notes creates a past.dev audience even for a person with no notes. Forgetting everything leaves that empty audience, including the user ID in its name and identities ([note store](results/inference-smoke/pastdev.md)).
-- With training consent, trace files land in `./mlruns` of the working directory, outside `--root`, and an MLflow warning put a fragment of a note's text on the service's stderr ([smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md)).
-- The consented note-taker's trace is separate from the turn traces and lacks a structured session identifier for joining them ([smoke test](results/inference-smoke/README.md)).
-- The default urllib User-Agent remains a suspected compatibility problem for Cloudflare-fronted endpoints, inferred from the first run's code and HTTP status; `LLMError` also discards response bodies. Neither problem was observed to prevent the OpenAI run ([smoke test](results/inference-smoke/README.md)).
-- Under the labels as written, keywords matched 3 of the 23 messages labelled for a fixed response; all 44 correct fixed-route selections involved the checker, 38 through the checker alone ([crisis pilot](results/crisis-pilot/summary.md)).
-- Median total text-turn times were 1202 ms over HTTP, 1435 ms in the chat run and 1167 ms in the crisis pilot; these measurements exclude speech-to-text and text-to-speech ([HTTP replay](results/http-replay/README.md), [smoke test](results/inference-smoke/README.md), [crisis pilot](results/crisis-pilot/summary.md)). The project's target, "first sentence within about 1 second on a warm GPU" ([issue #9](https://github.com/puddles-convo/puddles/issues/9)), is not met by these text-turn medians, which also exclude speech-to-text and text-to-speech.
-- One crisis-pilot message (`is-05`, one of the two with disputed labels) was missed in both direct runs and caught in the HTTP run, so the checker's answer varies between runs ([HTTP replay](results/http-replay/README.md)).
-
-### Limits
-
-- Every message and persona is synthetic, written by models, and the simulated users are models too.
-- The crisis labels were assigned by one model and checked by another; the scores come from one model judge.
-- Each run was done once or twice: the crisis pilot twice per message, the persona pilot once per arm, the chat and HTTP runs once.
-- No clinician reviewed the messages, the labels, the fixed responses or the replies.
-- The crisis set has no hard negatives, such as an explicit denial or a historical mention of suicide.
-- Nothing here is a safety validation or an estimate of real-world safety.
-
-### Run it yourself
-
-Fake mode uses scripted models and an in-process past.dev: no keys, no network. Run from the repo root with `requirements.txt` installed; `messages.txt` is any file with one message per line. The pilots write to `runs/` here so the committed results are not overwritten, and the fake crisis pilot tests the plumbing only. `scripts/persona_pilot.py` and `fixtures/personas.json` arrive with pull request #71.
-
-```bash
-python -m scripts.chat --fake < messages.txt
-PUDDLES_SERVICE_TOKEN=dev-token python -m scripts.serve --policy policies/policy-v1.md --root runs/serve --fake
-python -m scripts.crisis_pilot --set fixtures/crisis_pilot.jsonl --policy policies/policy-v2.md --out runs/crisis-pilot-fake --fake
-python -m scripts.persona_pilot --personas fixtures/personas.json --policy policies/policy-v2.md --out runs/persona-pilot-fake --fake
-```
-
-## 11. How we measure the result
+<a id="11-how-we-measure-the-result"></a>
+<details>
+<summary><b>How we measure the result</b> · held-out data, baselines, the held-out jury and the headline we report</summary>
 
 The loop's own judge decides what is kept. The headline result is measured separately, on data and judges the loop never sees, so it cannot be the loop grading itself. This section is a proposal for the team to settle.
 
@@ -677,7 +782,11 @@ The loop's own judge decides what is kept. The headline result is measured separ
 
 **Side note: what does the agent choose for itself?** The agent has both kinds of tool, harness changes and weight updates, and decides which to use. We want to see what it picks, and what each choice achieved, from the lever scoreboard and the decision log. For context, GEPA reports that prompt evolution beat reinforcement learning on Qwen3-8B with far fewer rollouts (54.9 against 48.9; [arXiv 2507.19457](https://arxiv.org/abs/2507.19457)). We do not set out to test that claim; we report what our agent did and how it turned out.
 
-## 12. Data
+</details>
+
+<a id="12-data"></a>
+<details>
+<summary><b>Data</b> · the datasets, what each is used for, and its licence</summary>
 
 Datasets are loaded at run time and are not committed to this repo.
 
@@ -687,9 +796,34 @@ Datasets are loaded at run time and are not committed to this repo.
 | [CounselBench-Adv](https://huggingface.co/datasets/izi-ano/CounselBench-Adv) | External validation, never seen by the loop | CC BY-NC-ND 4.0 |
 | [VERA-MH](https://github.com/SpringCare/VERA-MH) | Crisis-handling check | Not yet checked |
 
-## 13. Robot side
+</details>
 
-The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [section 4](#4-inference-agents) run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+**The robot**
+
+<a id="10-how-training-and-inference-connect"></a>
+<details>
+<summary><b>How training and inference connect</b> · the one thing that crosses from training to the robot</summary>
+
+```
++--------------------+    policy file that passed the gate    +--------------------+
+|                    | -------------------------------------> |                    |
+|      TRAINING      |                                        |     INFERENCE      |
+|   (this repo)      | <------------------------------------- |  (puddles-stack)   |
++--------------------+   session records, with user consent   +--------------------+
+```
+
+- **Training to inference:** exactly one thing, the harness version that last passed the gatekeeper (the policy file and, if one passed, the adapter). A version that fails the safety check never reaches a user.
+- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes. Not planned for the hackathon weekend.
+- **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
+- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#13-robot-side).
+
+</details>
+
+<a id="13-robot-side"></a>
+<details>
+<summary><b>Robot side</b> · the StackChan, its cloud brain, the merge points and the acceptance tests</summary>
+
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [Inference agents](#4-inference-agents) run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
 
 ```
 +----------------------------+                          +------------------------------------+
@@ -753,7 +887,13 @@ These run with the stock model first, so that the merge changes nothing but conf
 
 Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
 
-## 14. Related work
+</details>
+
+**Background**
+
+<a id="14-related-work"></a>
+<details>
+<summary><b>Related work</b> · autoresearch, the Darwin Gödel Machine, GEPA, ACE, Meta-Harness and MetaClaw</summary>
 
 - **Karpathy's autoresearch** (March 2026): an agent edits one training script, runs short experiments and keeps only changes that improve the metric. Our loop has the same keep-or-revert shape, applied to a helper's harness and, on escalation, its weights.
 - **Darwin Gödel Machine** ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)): a coding agent rewrites its own code and keeps an archive of every working variant, starting new attempts from any of them; it raised its SWE-bench score from 20% to 50%. We borrow the archive, so weight-space branches can grow alongside harness branches.
@@ -761,9 +901,13 @@ Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-
 - **Meta-Harness** ([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)) has a proposer that reads every past harness, its traces and scores before proposing the next; **GEPA** and **ACE** improve prompts and playbooks by reflection, with gains shown on Qwen3-8B. None of these chooses between kinds of change, which is what our lever scoreboard does.
 - **MetaClaw** ([arXiv 2603.17187](https://arxiv.org/abs/2603.17187)) is the closest work: it evolves a skill library without gradients and runs LoRA updates on a scheduler that waits for the user to be idle. It stamps training data with the skill version that produced it, which we adopt in `build_dataset`. Our differences: the proposer decides when to train based on evidence, with a stated hypothesis, and every change, including an adapter, must pass a gate fixed before the run, with safety benchmarks, before it reaches a person.
 
-## 15. Improvements from the literature
+</details>
 
-What published work suggests adding to the loop, ranked by value per hour for this stack (Qwen3.5-9B, LoRA on Tinker, vLLM on Modal) and the limits in [section 8](#8-the-proposers-toolbox). Rows 1 to 4 are loop infrastructure rather than proposer actions, but every other row depends on them.
+<a id="15-improvements-from-the-literature"></a>
+<details>
+<summary><b>Improvements from the literature</b> · twenty additions ranked by value per hour for this stack</summary>
+
+What published work suggests adding to the loop, ranked by value per hour for this stack (Qwen3.5-9B, LoRA on Tinker, vLLM on Modal) and the limits in [The proposer's toolbox](#8-the-proposers-toolbox). Rows 1 to 4 are loop infrastructure rather than proposer actions, but every other row depends on them.
 
 - **Time and value are our researchers' estimates**, not figures from the sources.
 - **[V]** marks a number checked against the primary source on 14 November 2026. Numbers without it are recalled or from secondary summaries; check them before quoting.
@@ -794,11 +938,17 @@ What published work suggests adding to the loop, ranked by value per hour for th
 | 19 | RLVER-lite GRPO with simulated-user emotion reward | `train_adapter` (RL) | [RLVER 2507.03112](https://arxiv.org/abs/2507.03112) | 8–12 | Medium | 13.3 → 79.2 at 7B [V], but too slow and hackable here |
 | 20 | Hypernetwork LoRA, TIES/DARE, ROME/MEMIT, DGM-style self-rewrite | None (skip) | [Text-to-LoRA](https://github.com/SakanaAI/text-to-lora), [TIES](https://arxiv.org/abs/2306.01708), [ROME](https://arxiv.org/abs/2202.05262), [DGM](https://arxiv.org/abs/2505.22954) | n/a | Low | No Qwen3.5 checkpoint, no reliable gain, or far beyond budget |
 
-**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). GRPO, merging and steering (rows 15, 18, 19) are rated medium or below here because nothing has tested them on this task; we include them as exploratory actions in [section 8](#8-the-proposers-toolbox) so the loop measures their value instead of us guessing it. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
+**What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). GRPO, merging and steering (rows 15, 18, 19) are rated medium or below here because nothing has tested them on this task; we include them as exploratory actions in [The proposer's toolbox](#8-the-proposers-toolbox) so the loop measures their value instead of us guessing it. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
 
-## Running the training agents
+</details>
 
-Python 3.10 or later. Keys come from the environment and are never committed.
+**Running it**
+
+<a id="running-the-training-agents"></a>
+<details>
+<summary><b>Running the training agents</b> · a live round, the keys it needs, and the modules behind it</summary>
+
+Python 3.11 or later. Keys come from the environment and are never committed.
 
 ```bash
 pip install -r requirements.txt
@@ -823,6 +973,21 @@ Each run ends by printing, for every record, the agent that wrote it and the age
 | `puddles/decision_log.py` | Reader and appender for the log; builds the budgeted history lists and pattern status |
 | `puddles/replay.py` | The replay check: the log, the policy in force, its Safety section and `.meta.json` must agree |
 | `puddles/round.py` | Steps 4 to 6 with direct handoffs, then the log entry and the copies into memory |
+
+</details>
+
+## Read more
+
+- [docs/agents/](docs/agents/README.md): one file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes
+- [docs/memory.md](docs/memory.md): the memory, end to end, in one file. Go there for anything about memory
+- [docs/agents.md](docs/agents.md): the design behind policy and the crisis path
+- [docs/agent-prompts.md](docs/agent-prompts.md): proposed version 2 prompts for every agent, including the held-out jury (not live yet)
+- [docs/plan/](docs/plan/README.md): the build plan, stage by stage
+- [docs/specs/](docs/specs/): one specification per built part, from the crisis path to the unattended run
+- [docs/robot-handover.md](docs/robot-handover.md): what the robot's brain calls, and how
+- [results/](results/): the training run, the crisis pilot, the persona pilot, the HTTP replay and the smoke test, each with how it was run and checked
+- `schemas.py`: the record formats (version 4), with an example of each in [`examples/`](examples/). They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1)
+- [puddles-stack](https://github.com/puddles-convo/puddles-stack): the device and its cloud brain
 
 ## Limits
 
