@@ -13,7 +13,7 @@
 | Model | A small OpenAI model. It runs after the session, so speed does not matter. |
 | Reads from memory | This person's existing notes |
 | Writes to memory | Notes added, replaced, confirmed or deleted |
-| Task | [puddles-stack #7](https://github.com/puddles-convo/puddles-stack/issues/7), [#10](https://github.com/puddles-convo/puddles-stack/issues/10) |
+| Task | puddles-stack #7, #10 |
 
 ## 1. The prompt
 

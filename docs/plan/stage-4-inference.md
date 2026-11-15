@@ -10,7 +10,7 @@
 
 ## Goal
 
-A person's text goes in and the robot's text comes out, through the crisis checker, the helper and the release step, with the note-taker after the session. No audio in this repo: speech in and out belong to [puddles-stack](https://github.com/puddles-convo/puddles-stack). The robot pair calls the same functions from their cloud brain.
+A person's text goes in and the robot's text comes out, through the crisis checker, the helper and the release step, with the note-taker after the session. No audio in this repo: speech in and out belong to puddles-stack. The robot pair calls the same functions from their cloud brain.
 
 Specs: [crisis checker](../agents/i2-crisis-checker.md), [release step](../agents/i3b-release.md), [note-taker](../agents/i5-note-taker.md), and the crisis path in [docs/agents.md](../agents.md).
 

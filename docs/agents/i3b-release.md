@@ -12,7 +12,7 @@
 | Model | Code, not a model. |
 | Reads from memory | Nothing |
 | Writes to memory | Nothing |
-| Task | [puddles-stack #6](https://github.com/puddles-convo/puddles-stack/issues/6) |
+| Task | puddles-stack #6 |
 
 ## 1. The prompt
 

@@ -12,7 +12,7 @@
 | Model | A keyword list in code first, then the helper model with the prompt below. It runs at the same time as the helper, so it adds no delay. |
 | Reads from memory | Nothing |
 | Writes to memory | Nothing |
-| Task | [puddles-stack #6](https://github.com/puddles-convo/puddles-stack/issues/6), [#5](https://github.com/puddles-convo/puddles/issues/5) |
+| Task | puddles-stack #6, [#5](https://github.com/puddles-convo/puddles/issues/5) |
 
 ## 1. The prompt
 

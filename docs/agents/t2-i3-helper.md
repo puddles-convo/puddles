@@ -12,7 +12,7 @@
 | Model | Qwen3.5-9B with thinking mode off. Training and the robot use the same model, prompt and code, or the learned policy would not transfer. |
 | Reads from memory | On the robot only: notes about this person |
 | Writes to memory | Nothing |
-| Task | [#9](https://github.com/puddles-convo/puddles/issues/9), [puddles-stack #3](https://github.com/puddles-convo/puddles-stack/issues/3) |
+| Task | [#9](https://github.com/puddles-convo/puddles/issues/9), puddles-stack #3 |
 
 ## 1. The prompt
 
