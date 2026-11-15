@@ -164,3 +164,14 @@ def test_third_failed_attempt_stops_before_the_next_round(tmp_path):
     with pytest.raises(PastError, match="gate-r01"):
         retry_pending(loop.log, loop.mem, tmp_path)
     assert loop.log.copy_events()[(1, "gate-r01")].attempt == 3
+
+
+def test_restart_leaves_the_starting_policy_and_older_files_alone(tmp_path):
+    (tmp_path / "policies").mkdir()
+    start = tmp_path / "policies/policy-v3.md"
+    start.write_text(START.read_text())
+    older = tmp_path / "policies/policy-v1.md"
+    older.write_text("# policy-v1\n")
+    log = DecisionLog(tmp_path)
+    assert prepare_round(log, FakeMemory(), tmp_path, start) == start
+    assert start.exists() and older.exists()

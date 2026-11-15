@@ -5,6 +5,7 @@ order. The policy file in force, its Safety section and its .meta.json must matc
 Any mismatch raises ReplayError, and the loop stops.
 """
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -135,14 +136,25 @@ def check(log: DecisionLog, root: Path, start_path: Path) -> Path:
     return path
 
 
-def undo_interrupted_promotion(log: DecisionLog, root: Path) -> list[Path]:
-    """Remove promoted policy files no round event knows about: a crash between the write and the log."""
+def _number(version: str) -> int:
+    match = re.fullmatch(r"policy-v(\d+)", version)
+    return int(match.group(1)) if match else -1
+
+
+def undo_interrupted_promotion(log: DecisionLog, root: Path, start_path: Path) -> list[Path]:
+    """Remove a promoted policy no round event knows about: a crash between the write and the log.
+
+    Only versions newer than the one in force can come from such a crash; older or unrelated
+    files in policies/, and the starting policy itself, are left alone.
+    """
+    current, _, _ = in_force(log, root, start_path)
     known = {r.policy.new for r in log.rounds() if r.outcome == "kept" and r.policy.new}
     removed = []
     for path in sorted((root / "policies").glob("policy-v*.md")):
-        if "candidate" not in path.name and path.stem not in known:
-            for stray in (path, meta_path(root, path.stem)):
-                if stray.exists():
-                    stray.unlink()
-                    removed.append(stray)
+        if path.resolve() == start_path.resolve() or path.stem in known or _number(path.stem) <= _number(current):
+            continue
+        for stray in (path, meta_path(root, path.stem)):
+            if stray.exists():
+                stray.unlink()
+                removed.append(stray)
     return removed

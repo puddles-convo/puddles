@@ -162,7 +162,7 @@ def replay_model(record_id: str) -> type[Record]:
 def prepare_round(log: DecisionLog, memory: Memory, root: Path, start_policy: Path) -> Path:
     """Start of a round: undo an interrupted promotion, settle memory copies, run the replay check.
     Returns the policy file in force, taken from the log."""
-    replay.undo_interrupted_promotion(log, root)
+    replay.undo_interrupted_promotion(log, root, start_policy)
     retry_pending(log, memory, root)
     return replay.check(log, root, start_policy)
 
