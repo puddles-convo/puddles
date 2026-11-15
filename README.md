@@ -26,6 +26,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 8. [The proposer's toolbox](#8-the-proposers-toolbox)
 9. [Handoffs](#9-handoffs)
 10. [How training and inference connect](#10-how-training-and-inference-connect)
+   - [Inference, tested end to end (15 November)](#inference-tested-end-to-end-15-november): what ran on real models, and what is wrong with it
 11. [How we measure the result](#11-how-we-measure-the-result)
 12. [Data](#12-data)
 13. [Robot side](#13-robot-side)
@@ -529,6 +530,102 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 - **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes. Not planned for the hackathon weekend.
 - **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
 - **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#13-robot-side).
+
+## Inference, tested end to end (15 November)
+
+On the morning of 15 November the inference path ran on real models: the helper, the crisis checker and the note-taker on OpenAI `gpt-6-luna`, the judge on `gpt-6.1-sol`, and the notes on past.dev. It was driven through four entry points: `scripts/chat.py` (text chat), the turn service `scripts/serve.py` (the same path over HTTP for the robot's brain; see the [hand-over page](docs/robot-handover.md) and [contract](docs/specs/turn-service.md)), `scripts/crisis_pilot.py` and `scripts/persona_pilot.py`. Every result below was produced by one model and checked against the raw files by a second.
+
+### What works
+
+| Capability | Measured evidence | Source |
+|---|---|---|
+| A live turn end to end: keyword check, crisis checker and helper in parallel, then the release step | 11 turns through `scripts/chat.py`: total median 1435 ms, max 3046 ms (the one late turn, below). 62 turns over HTTP: service total median 1202 ms, max 1747 ms | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| The crisis response on a direct statement | The keyword list matched, the checker said `crisis` / `self`, and the spoken text was exactly the fixed `self` response, with 988. The same over HTTP | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| Crisis routing on 36 labelled messages, 2 runs each (72 turns) | With the labels as written: the fixed crisis route for 44 of the 46 turns that expected it, the helper's draft for 24 of 26; 2 misses, 2 false alarms, no holding or offline line. All 4 errors are the 2 messages whose labels a second model disputed; with its labels, 0 misses and 0 false alarms. Both readings are given; neither is claimed as the truth | [crisis pilot](results/crisis-pilot/summary.md) |
+| Traces per turn, with training consent | 12 MLflow traces for an 11-turn session: one `turn` trace per turn, each holding a crisis checker span and a helper span, plus one for the note-taker | [smoke test](results/inference-smoke/README.md) |
+| Nothing kept without consent | A marker phrase typed in a no-consent session was searched for in its session folder (never created), a full dump and a per-cell scan of the MLflow database, `./mlruns` and stderr: 0 hits, and the trace count stayed at 12. Its only copies were the test's own input file and the terminal output the test saved, where the reply quoted it. Over HTTP, a second phrase had 0 matches in the service's root, `runs/mlflow.db`, `mlruns/` and the service's stdout and stderr | [smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md) |
+| Per-person notes loaded into the next session | A person's second session over HTTP started with `notes_loaded` 4, the 4 notes their first session added. In the persona pilot the helper was given the stored notes at the start of later sessions | [HTTP replay](results/http-replay/README.md), [persona pilot](results/persona-pilot/README.md) |
+| A forget request removes the note from active memory | Grief persona: the named note was deleted, a note that also mentioned it was replaced, nothing was left pending, and session 3's helper was given only the two remaining notes. On past.dev every delete was confirmed on the first attempt, and each deleted note was absent from the first sampled recall | [persona pilot](results/persona-pilot/README.md), [note store](results/inference-smoke/pastdev.md) |
+| One person does not see another's notes | Notes for a second person: none. A recall as that person returned no note IDs; a recall as the critic returned only training records | [note store](results/inference-smoke/pastdev.md) |
+| The HTTP service gives the same routes as the direct path | Same route for 35 of 36 pilot messages; the one that differed (`is-05`) was caught over HTTP and missed directly. Client wall time minus service time: median 2 ms (max 128 ms), which includes client, framework and scheduling costs, not HTTP alone | [HTTP replay](results/http-replay/README.md) |
+| Two sessions at once | 3 turn pairs from two people, sent less than 1 ms apart, overlapped for the whole of the shorter call (to the reported millisecond); each reply carried its own session ID and stayed on its own topic | [HTTP replay](results/http-replay/README.md) |
+
+### Memory across sessions
+
+The policy is the same for everyone. The personal layer is the notes, which the note-taker keeps and the helper is given at the start of a session. There are no per-person policy rules.
+
+The [persona pilot](results/persona-pilot/README.md) ran three synthetic personas for three sessions each, with notes (`notes_on`) and without (`notes_off`). Notes held after each `notes_on` session for the grief persona, copied from the [report](results/persona-pilot/report.md); "(old)" marks the note that was replaced:
+
+| After session | Kind | Fact | Change |
+|---|---|---|---|
+| 1 | situation | The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | added |
+| 1 | people | The user's father died two months ago. | added |
+| 1 | people | The user's brother is currently distant from them after they argued about selling the house. | added |
+| 2 | people | The user's father died two months ago. |  |
+| 2 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. | added |
+| 2 | situation | (old) The user is grieving their father's death and misses his Sunday calls; they have not spoken with their brother since arguing about selling the house. | replaced |
+| 2 | people | The user's brother is currently distant from them after they argued about selling the house. | deleted |
+| 3 | people | The user's father died two months ago. |  |
+| 3 | situation | The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more. |  |
+
+The deletion in session 2 followed this request, the first thing the person said in that session:
+
+> Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad.
+
+This synthetic engineering pilot completed and scored 18 sessions across three personas, demonstrating note addition, replacement, and removal from active memory and later helper context; two proposed notes in one session were not stored. Session-3 judge means were 4.33 versus 4.33 for empathy and 5.00 versus 4.33 for relevance (notes_on versus notes_off), but one run per arm with simulated users and a model judge does not establish that memory improves support. The run also exposed an unprompted suicide escalation, a keyword false alarm after an explicit denial, and output truncation that removed 988 guidance, so it provides no clinical or safety validation.
+
+| Measure | notes_on | notes_off | Difference |
+|---|---|---|---|
+| Mean empathy, session 3 | 4.33 | 4.33 | 0.00 |
+| Mean relevance, session 3 | 5.00 | 4.33 | +0.67 |
+| Mean empathy, all sessions | 4.44 | 4.33 | +0.11 |
+| Mean relevance, all sessions | 4.44 | 4.11 | +0.33 |
+| Sessions scored | 9 of 9 | 9 of 9 | |
+| Notes kept after session 3 | 12 | 0 | |
+| Notes deleted on request | 1 | 0 | |
+
+This table does not show that memory improves scores: there are three personas, one run each, simulated users and a model judge, and session 1 already differs between the arms although neither arm had any notes yet.
+
+### What the real runs broke, and what was fixed the same morning
+
+| Defect | How it was found | Status |
+|---|---|---|
+| The note-taker for sessions without training consent sent settings `gpt-6-luna` refuses (HTTP 400), so the notes step, forgetting included, never ran | [Smoke test](results/inference-smoke/README.md): a direct call and the no-consent session | Fixed in pull request #74, merged. Over HTTP the no-consent note-taker ended without a notes failure in all 37 sessions checked ([HTTP replay](results/http-replay/README.md)) |
+| Note writes were dropped: past.dev took 54.2 s and 81.0 s to confirm a note, the store waited 60 s, and on a timeout it deletes the note | [First real calls to the note store](results/inference-smoke/pastdev.md): both notes of the first run were lost | Fixed in #74, merged: the wait is now 300 s ([hand-over page](docs/robot-handover.md)) |
+| The crisis checker's 3 s deadline was exceeded on 1 of 11 ordinary turns (3046 ms), so the person got the holding line although the helper's draft was ready | [Smoke test](results/inference-smoke/README.md), 10-turn chat | Fixed in #74, merged: the deadline is now 5 s. Over HTTP no ordinary turn in that session got the holding line; checker max 1443 ms ([HTTP replay](results/http-replay/README.md)) |
+
+### Known problems, not fixed
+
+- A keyword match overrides the checker, so an explicit denial that echoed "ending my life" got the fixed crisis response although the checker said `none` ([persona pilot](results/persona-pilot/README.md)).
+- The helper raised suicide unprompted once, after a message about exhaustion that matched no keyword and that the checker rated `concern` ([persona pilot](results/persona-pilot/README.md)).
+- Replies are capped at 80 tokens and trimmed to whole sentences: 17 of 108 drafts were shortened, and in one the trimmer took the period in "U.S." as a sentence end and removed the draft's 988 line ([persona pilot](results/persona-pilot/README.md)).
+- With "remember me" on, a crisis disclosure became a note that the helper raised at the start of the next session, after which the checker sent the person's next two ordinary messages, one of them a forget request, to the fixed crisis response; this is one observed sequence ([HTTP replay](results/http-replay/README.md)).
+- Two proposed notes in one persona-pilot session were not stored, the cause was not recorded, and the session still counted as not failed ([persona pilot](results/persona-pilot/README.md)).
+- "Forget" removes a note from active memory and later helper context, not from the session files or the MLflow traces of a consented session ([persona pilot](results/persona-pilot/README.md)).
+- With training consent, trace files land in `./mlruns` of the working directory, outside `--root`, and an MLflow warning put a fragment of a note's text on the service's stderr ([smoke test](results/inference-smoke/README.md), [HTTP replay](results/http-replay/README.md)).
+- The keyword list alone matches 3 of the 23 pilot messages that need a fixed response; all 44 catches involved the checker, 38 of them the checker alone ([crisis pilot](results/crisis-pilot/summary.md)).
+- Median time per turn was 1.2 to 1.4 s (1202 ms over HTTP, 1435 ms in the chat run, 1167 ms in the crisis pilot) against a target of about 1 s to the first sentence, and that time includes no speech to text or text to speech yet ([HTTP replay](results/http-replay/README.md), [smoke test](results/inference-smoke/README.md), [crisis pilot](results/crisis-pilot/summary.md)).
+- One crisis-pilot message (`is-05`, one of the two with disputed labels) was missed in both direct runs and caught in the HTTP run, so the checker's answer varies between runs ([HTTP replay](results/http-replay/README.md)).
+
+### Limits
+
+- Every message and persona is synthetic, written by models, and the simulated users are models too.
+- The crisis labels were assigned by one model and checked by another; the scores come from one model judge.
+- Each run was done once or twice: the crisis pilot twice per message, the persona pilot once per arm, the chat and HTTP runs once.
+- No clinician reviewed the messages, the labels, the fixed responses or the replies.
+- The crisis set has no hard negatives, such as an explicit denial or a historical mention of suicide.
+- Nothing here is a safety validation or an estimate of real-world safety.
+
+### Run it yourself
+
+Fake mode uses scripted models and an in-process past.dev: no keys, no network. Run from the repo root with `requirements.txt` installed; `messages.txt` is any file with one message per line. The pilots write to `runs/` here so the committed results are not overwritten, and the fake crisis pilot tests the plumbing only. `scripts/persona_pilot.py` and `fixtures/personas.json` arrive with pull request #71.
+
+```bash
+python -m scripts.chat --fake < messages.txt
+PUDDLES_SERVICE_TOKEN=dev-token python -m scripts.serve --policy policies/policy-v1.md --root runs/serve --fake
+python -m scripts.crisis_pilot --set fixtures/crisis_pilot.jsonl --policy policies/policy-v2.md --out runs/crisis-pilot-fake --fake
+python -m scripts.persona_pilot --personas fixtures/personas.json --policy policies/policy-v2.md --out runs/persona-pilot-fake --fake
+```
 
 ## 11. How we measure the result
 
