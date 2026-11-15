@@ -56,9 +56,10 @@ The person answers two questions at the start: may the robot remember them, and 
 | No | Yes | The session record. No new notes. |
 | Yes | Yes | Both |
 
-- [ ] **With training use off, the person's words are never written to disk and never traced.** That covers the session record, MLflow traces of the helper and the checker, and traces of the note-taker's own model calls. The conversation is held in memory for the session, given to the note-taker if "remember me" is on, then dropped.
-- [ ] With training use on, each turn is saved as it happens: the `CheckedMessage` and the `HelperReply`, one line each, in `<root>/sessions/<session_id>.jsonl`. Those two existing formats carry the text, the risk level, the category and whether the response was fixed. A `ConversationRecord` with `source` set to `live` is built from them at the end, for the loop.
-- [ ] Timings have no field in either format. `scripts/chat.py` prints them. Where they are stored is a question for issue #1.
+- [ ] **With training use off, the person's words are never written to disk and never traced.** That covers the session record, MLflow traces of the helper and the checker, and traces of the note-taker's own model calls. The conversation is held in memory for the session, given to the note-taker, then dropped. **The note-taker always runs,** because forgetting must work whatever the person answered: with "remember me" off it may only delete.
+- [ ] With training use on, each turn is saved as it happens, one line per turn, in `<root>/sessions/<session_id>.jsonl`. A line holds: the person's text; whether a keyword matched; the check's status, one of `answered`, `failed`, `late` or `unreadable`; the `CheckedMessage` when the status is `answered`, and nothing otherwise; and the `HelperReply` that was released. **A check that did not answer is never written as `none`.** `CheckedMessage` allows only `none`, `concern` or `crisis`, so a failed check has no `CheckedMessage` at all.
+- [ ] This per-turn line is a new format. Add it to `schemas.py` with the note format change, and agree it on issue #1.
+- [ ] At the end of the session a `ConversationRecord` with `source` set to `live` is built from the lines, for the loop and for the robot pair. The time each step took goes in its existing `timings_ms` field, one entry per turn.
 
 ## Part B checklist: notes
 
@@ -99,7 +100,7 @@ All offline, with scripted models.
 
 **Notes**
 
-12. With "remember me" off, adds and replaces are dropped and deletes are applied.
+12. With "remember me" off, adds and replaces are dropped and deletes are applied. Run it through a whole session, not the note-taker alone: the person says no to being remembered, asks the robot to forget one thing, and that note is gone afterwards.
 13. After "forget everything", the index is empty, and an add or a replace from the same session is not stored.
 14. A note taken off the index is not returned by recall, even while the fake past.dev still holds it.
 15. A `note_id` that is unknown, or that belongs to another person, is refused.
@@ -128,4 +129,4 @@ The plan promises crisis checker misses and false alarms. No stage here produces
 
 ## Done when
 
-`scripts/chat.py` holds a 10-turn conversation with the real helper model and the frozen prompt, the crisis message gets the fixed response, and with training use on the session file round-trips: every turn's released text, risk level, category and fixed-response flag read back as written.
+`scripts/chat.py` holds a 10-turn conversation with the real helper model and the frozen prompt, the crisis message gets the fixed response, and with training use on the session file and the final record round-trip: every turn's released text, check status, risk level, category, fixed-response flag and timings read back as written, including a turn whose check failed.

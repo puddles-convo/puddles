@@ -21,12 +21,12 @@ One training round runs as a LangGraph graph, from conversations to the log entr
 | `finish` | `puddles.round.finish_round(result, gate, log, memory, root)`, which returns the `RoundEvent` | Real code, `puddles.memory.FakeMemory` |
 
 ```
-START -> converse -> judge -> critic --(pattern)--> researcher --(sources)--> proposer -> gate -> finish -> END
-                                 |                       |
-                                 +---(no pattern)--------+---(no sources)-----------------------> finish
+START -> converse -> judge -> critic --(pattern)--> researcher --(sources)--> proposer --(edit)--> gate -> finish -> END
+                                 |                       |                        |
+                                 +---(no pattern)--------+---(no sources)---------+---(no edit)-----------> finish
 ```
 
-On the two short paths the gate has not run, so `finish` calls `finish_round(result, None, ...)`. The existing function already handles that; do not make up a gate result.
+On the three short paths the gate has not run, so `finish` calls `finish_round(result, None, ...)`. The existing function already handles that; do not make up a gate result.
 
 ## What the state carries
 
@@ -44,8 +44,8 @@ On the two short paths the gate has not run, so `finish` calls `finish_round(res
 - [ ] Add `langgraph` and `mlflow` to `pyproject.toml` and `requirements.txt`.
 - [ ] Split `puddles.round.run_agents` into three functions, one per agent, at its two early returns. Keep `run_agents` as a wrapper that calls the three, so `tests/test_memory_wiring.py` passes unchanged.
 - [ ] `puddles/graph.py`: `build_round_graph(deps)` returns the compiled graph. `deps` carries the two chat clients, the structured model, the search function, the memory, the log and the root folder, so tests can pass fakes.
-- [ ] `converse` loads the policy with `loop.policy.load_policy(path)` and passes `out_path=root / "conversations" / "round-NN.jsonl"`, so the conversations are saved. `run_batch` writes the failures file beside it. The agents read the same policy file as text and parse it with `puddles.policy.parse_policy`.
-- [ ] Each agent node catches `puddles.llm.AgentFailed` and follows the table in the [plan README](README.md#when-an-agents-answer-fails-twice). The open question there, about a round with no edit, needs an answer before the proposer node is finished.
+- [ ] `converse` loads the policy with `loop.policy.load_policy(path)` and passes `out_path=root / "conversations" / "round-NN-train.jsonl"`, so the conversations are saved. The gate's own conversations get a different file and different IDs in stage 2. `run_batch` writes the failures file beside it. The agents read the same policy file as text and parse it with `puddles.policy.parse_policy`.
+- [ ] Each agent node catches `puddles.llm.AgentFailed` and follows the table in the [plan README](README.md#when-an-agents-answer-fails-twice). A failed researcher leaves `result.research` empty, and a failed proposer leaves `result.edit` empty, so the routing below tests for both. `stand_in_gate` asserts that an edit exists; never send it a round without one.
 - [ ] Before the graph starts, call `memory.ensure_training_audience()` and then `puddles.round.retry_pending(log, memory, root)`, as `scripts/run_round.py` does.
 - [ ] `puddles/tracing.py`: `setup()` sets the tracking address from `MLFLOW_TRACKING_URI` (default `sqlite:///runs/mlflow.db`) and calls `mlflow.langchain.autolog()` and `mlflow.openai.autolog()`.
 - [ ] `TracedClient` in `puddles/tracing.py`: wraps any `ChatClient` and opens one span per `complete()` call. `loop.llm` uses plain HTTP, so MLflow's automatic OpenAI tracing does not see those calls.
@@ -65,8 +65,9 @@ All offline, in `tests/test_graph.py`.
 5. Two rounds in a row give round numbers 1 and 2 from `DecisionLog.next_round()`.
 6. A batch in which one scenario fails still finishes the round. The failure is in the state, in the failures file and in the MLflow metric.
 7. The conversations file for the round exists and holds one line per finished conversation.
-8. Each agent failing twice gives the outcome in the README table, and the failure is in the event's reason.
-9. Both policy loaders agree: the candidate file the proposer writes loads with `loop.policy.load_policy`, and its Safety text is byte-for-byte the Safety text of the file it was made from. A policy with a rule wrapped onto a second line fails this test, by design.
+8. Each agent failing twice gives the outcome in the README table, and the failure is in the event's reason. A failed researcher never reaches the proposer. A failed proposer never reaches the gate, and its round is logged as `no_pattern` with the pattern attached, which is what `finish_round` does today.
+9. Both policy loaders agree: `policies/policy-v1.md` and `policies/baseline-plain.md` load in both, and the candidate file the proposer writes loads with `loop.policy.load_policy` with its Safety text byte-for-byte the Safety text of the file it was made from.
+10. A starting policy with a rule wrapped onto a second line, or with Windows line endings, is refused before the round starts.
 
 `python -m pytest` still passes in full.
 
@@ -90,14 +91,14 @@ b.add_edge(START, "converse")
 b.add_edge("converse", "judge")
 b.add_edge("judge", "critic")
 b.add_conditional_edges("critic", lambda s: "researcher" if s["result"].pattern else "finish")
-b.add_conditional_edges("researcher", lambda s: "proposer" if s["result"].research.sources else "finish")
-b.add_edge("proposer", "gate")
+b.add_conditional_edges("researcher", lambda s: "proposer" if s["result"].research and s["result"].research.sources else "finish")
+b.add_conditional_edges("proposer", lambda s: "gate" if s["result"].edit else "finish")
 b.add_edge("gate", "finish")
 b.add_edge("finish", END)
 graph = b.compile()
 ```
 
-The spike ended the two short paths at `END` and had no `finish` node. Routing them through `finish`, the failure handling and the saved conversations file are new here and have not been run.
+The spike ended its two short paths at `END` and had no `finish` node. Routing through `finish`, the third short path, the failure handling and the saved conversations file are new here and have not been run.
 
 ## Not in this stage
 

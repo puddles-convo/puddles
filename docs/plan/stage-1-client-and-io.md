@@ -25,7 +25,8 @@ The critic, researcher and proposer already follow both rules: each has a `rende
 - [ ] Every attempt counts: a retry after a failed check, and a schema fallback, each add their own tokens.
 - [ ] A `Usage` tally keyed by agent name: tokens in and out, calls, estimated calls, and for the researcher the number of Exa searches.
 - [ ] A prices table in the run's config file: dollars per million input and output tokens for each model, and dollars per Exa search. **Whoever holds each account fills it in from the provider's price page.** No price is assumed in code; a model with no price stops the run.
-- [ ] At the end of a round the graph logs the tally to MLflow (`tokens_in.<agent>`, `tokens_out.<agent>`, `cost_usd`) and appends one line to `<root>/log/usage.jsonl`. The line also names any agent that failed twice. Stage 6 reads that file to know what has been spent after a restart.
+- [ ] **As each node finishes**, the graph appends one line to `<root>/log/usage.jsonl`: the round, the node, its tokens, searches and cost, and the agent's name if it failed twice. Writing per node, not per round, keeps the spend of a round that was interrupted. Stage 6 reads that file to know what has been spent after a restart.
+- [ ] At the end of a round the graph logs the totals to MLflow (`tokens_in.<agent>`, `tokens_out.<agent>`, `cost_usd`).
 
 **Schema output on an OpenAI-compatible endpoint**
 
@@ -55,9 +56,10 @@ All offline.
 3. `complete_json` falls back when the fake server answers the first request with HTTP 400.
 4. `complete_json` raises when its deadline passes during the retry.
 5. `transcript` output for the four conversations in `fixtures/bad_conversations.json` contains every turn in order and nothing else.
-6. After one fake round, the MLflow run has token metrics for every agent that ran, and each model-call span carries its own counts. That includes `complete_json` spans and the researcher's search calls.
-7. A model with no entry in the prices table stops the run before the first call.
-8. `<root>/log/usage.jsonl` has one line for the round, and its totals match the spans.
+6. After one fake round, the MLflow run has token metrics for every agent that ran, and each model-call span carries its own counts, the researcher's search calls included.
+7. Separately, with a fake HTTP server: a `complete_json` call through `TracedClient` leaves one span per attempt, each with its own counts. The fake round does not call `complete_json`, so it cannot test this.
+8. A model with no entry in the prices table stops the run before the first call.
+9. The round's lines in `<root>/log/usage.jsonl` add up to the spans. A round stopped after the judge leaves the lines for `converse` and `judge` in the file.
 
 ## Unknowns to settle with one real call each
 
@@ -72,4 +74,4 @@ All offline.
 
 ## Done when
 
-A fake round shows, in MLflow, one span per model call with its token counts, the usage file has the round's line, and `python -m pytest` passes.
+A fake round shows, in MLflow, one span per model call with its token counts, the usage file has the round's lines, and `python -m pytest` passes.

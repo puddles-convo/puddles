@@ -47,7 +47,7 @@ This plan was reviewed against the code by a second model on 14 November and cor
 
 Do not merge the two packages tonight. The graph in stage 0 imports from both.
 
-**A policy rule is one line.** `puddles.policy` accepts a rule that wraps onto a second line; `loop.policy` raises "is not a rule" on the same file. `render_policy` writes one line per rule, so files written by code load in both. A file edited by hand must keep to one line per rule. Stage 0 adds the test.
+**A policy rule is one line, and lines end with a plain newline.** `puddles.policy` accepts a rule that wraps onto a second line; `loop.policy` raises "is not a rule" on the same file. `render_policy` does not repair this: it writes each Conversation rule on one line, but copies the Safety section exactly as it was written, wrapped lines included. So the check is on the way in: a policy file is used only if `loop.policy.load_policy` accepts it. Stage 0 adds the test, and the loop refuses a starting policy that fails it.
 
 ## Rules for every agent
 
@@ -68,10 +68,10 @@ Do not merge the two packages tonight. The graph in stage 0 imports from both.
 | Judge | That conversation is left unscored and counted in the round's log entry | [t3-judge.md](../agents/t3-judge.md) |
 | Critic | The round ends as `no_pattern`, with the failure in the reason | [t4-critic.md](../agents/t4-critic.md) |
 | Researcher | Not stated in its spec. Proposed: the round ends as `no_evidence`, with the failure in the reason | To confirm on issue #1 |
-| Proposer | The round ends with no edit, and the pattern stays open | [t6-proposer.md](../agents/t6-proposer.md) |
+| Proposer | The round ends with no edit and goes straight to `finish`, skipping the gate. The pattern stays on the to-do list, with whatever status the log gives it | [t6-proposer.md](../agents/t6-proposer.md) |
 | Gatekeeper | A test run that crashes, or a conversation left failed or unscored, reverts the candidate | [t7-gatekeeper.md](../agents/t7-gatekeeper.md) |
 
-**Open format question.** A round event's outcome is one of `kept`, `reverted`, `no_pattern`, `no_evidence`. None of them means "a pattern and sources, but no edit". `finish_round` would log such a round as `no_pattern`. Settle on issue #1 whether to add an outcome or to log it as `no_evidence` with the reason; stage 0 needs the answer.
+**Open format question.** A round event's outcome is one of `kept`, `reverted`, `no_pattern`, `no_evidence`. None of them means "a pattern and sources, but no edit". Today `finish_round` logs such a round as `no_pattern`, with the pattern attached and the failure in the reason. Stage 0 builds and tests exactly that. Whether to add a fifth outcome is a question for issue #1; if one is added, the test changes with it.
 
 ## Rules for every change
 

@@ -14,7 +14,7 @@ Spec: [docs/agents/t3-judge.md](../agents/t3-judge.md).
 
 - [ ] `puddles/agents/judge.py` with the five functions. Input is `JudgeInput` (turns only). Output is `JudgeOutput`. `to_record` makes a `ScoreRecord`; code adds `conversation_id` and `judge_version`.
 - [ ] A second failed answer leaves that conversation unscored. The round counts it; it does not stop.
-- [ ] The scores are saved to `<root>/scores/round-NN.jsonl`, one `ScoreRecord` per line.
+- [ ] The training conversations' scores are saved to `<root>/scores/round-NN-train.jsonl`, one `ScoreRecord` per line.
 - [ ] A helper that turns a `ConversationRecord` and its `ScoreRecord` into the `ScoredConversation` the critic takes.
 - [ ] `select_for_critic(scored, n)`: the `n` lowest by (empathy + relevance) / 2, ties broken by conversation ID. The critic's spec says about ten. Today `critic.build_input` passes on whatever it is given, so without this the critic reads every conversation.
 - [ ] The judge model comes from its own variable, with the version pinned and temperature 0.
@@ -30,12 +30,16 @@ Spec: [docs/agents/t7-gatekeeper.md](../agents/t7-gatekeeper.md). It is code. It
 
 - [ ] `fixtures/safety-v1.json`: safety cases as `SafetyCase`, covering rules S1, S2 and S3, **written by hand**. Do not take them from CounselBench-Adv or VERA-MH. Those are the outside check, and the gate's decisions shape the policy, so a case taken from them would let the loop see them.
 - [ ] `puddles/gate.py`: takes a `GateInput`, runs the validation scenarios under the candidate policy (converse, then judge), runs the safety cases against the helper alone, and applies the six checks in the spec. Returns a `GateOutcome` with real `Scores` and a `reason` that names the check that decided it.
+- [ ] **The gate's conversations never overwrite the round's training evidence.** `run_batch` writes its file with `write_text`, and a conversation ID is `conv-rNN-<scenario>`, so a second batch in the same round on the same scenario would replace both the file and the ID. Give `run_batch` and `run_conversation` a tag that goes into the ID (`conv-rNN-val-<scenario>`), and save the gate's batches as `conversations/round-NN-validation.jsonl` and `scores/round-NN-validation.jsonl`. The scoring of the current policy before round 1 uses round 0 and the tag `current`.
 - [ ] **Complete evidence or revert.** Every validation scenario must come back with a score. A failed conversation, an unscored conversation or a crashed run reverts the candidate, with the reason "incomplete evidence". Averaging the conversations that survived can look like a gain.
 - [ ] A yes-or-no answer that is neither word is asked again once, then the assertion counts as failed.
 - [ ] `GateInput` needs `validation_scenario_ids` and `current_scores`. The loop keeps the current policy's scores: measured once before round 1, then replaced by the candidate's scores each time an edit is kept.
 - [ ] **No promotion on provisional noise.** The gate takes the noise and a `noise_measured` flag. While the flag is false it runs every check, writes what it would have decided in the reason, and returns `reverted`. The spec says nothing is promoted until the noise has been measured. Stage 5 turns the flag on.
 - [ ] `finish_round` takes the scores, the noise and the safety results, and writes them into the round event as `scores` (`LogScores`) and `safety` (`LogSafety`). Today it leaves both empty, and the plots need them.
-- [ ] When an edit is kept, `finish_round` also writes `policies/<version>.meta.json` as `PolicyMeta`: the parent version, the policy hash, the Safety hash, the base rules, and for each learned rule its edit, pattern, round and text hash.
+- [ ] `policies/<version>.meta.json`, as `PolicyMeta`, exists for every policy that is ever in force:
+  - for the starting policy, written when a run's root folder is first set up: no parent, every rule a base rule, no learned rules;
+  - for each promoted policy, written by `finish_round` when an edit is kept: the parent version, the policy hash, the same Safety hash, the base rules, and for each learned rule its edit, pattern, round and text hash.
+  A reverted round writes none; the policy in force keeps the one it has.
 - [ ] Replaces `stand_in_gate` in the graph. Keep the stand-in for tests.
 
 ## Lane C: the critic, researcher and proposer
@@ -69,8 +73,9 @@ They are built. This lane is tuning the persona.
 4. The gate's offline tests giving `kept`: a clean case; and one dimension falling by less than the noise, or by exactly the noise, while quality rises by more than the noise.
 5. With `noise_measured` false, the clean case gives `reverted`, the reason says what the checks found, and no policy file is written.
 6. A reverted candidate leaves the policy file in force byte-for-byte unchanged.
-7. A kept round's event has `scores` and `safety` filled in, and the `.meta.json` validates as `PolicyMeta` with the Safety hash of the starting policy.
-8. Every agent has made one real call that passed its checks.
+7. A kept round's event has `scores` and `safety` filled in, and the `.meta.json` validates as `PolicyMeta` with the Safety hash of the starting policy. A new root has the starting policy's `.meta.json` before round 1. A reverted round adds no `.meta.json`.
+8. After a round that reached the gate, the training conversations file and the validation file both exist, and no conversation ID appears in both.
+9. Every agent has made one real call that passed its checks.
 
 ## Not in this stage
 
