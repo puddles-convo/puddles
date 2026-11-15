@@ -74,6 +74,8 @@ class NoteChanges:
     deleted: list[dict] = field(default_factory=list)
     failed: bool = False
     reason: str = ""
+    not_written: int = 0  # proposed adds and replaces not stored (amendment 11)
+    not_written_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -185,7 +187,8 @@ def note_changes(before: list[dict], after: list[dict], result: NotesResult) -> 
 
     return NoteChanges(added=from_after(result.added), replaced=from_before(result.replaced),
                        confirmed=from_before(result.confirmed), deleted=from_before(result.deleted),
-                       failed=result.failed, reason=result.reason)
+                       failed=result.failed, reason=result.reason, not_written=result.not_written,
+                       not_written_reasons=dict(result.not_written_reasons))
 
 
 # ---------- one session ----------
@@ -266,7 +269,9 @@ def session_dict(result: SessionResult, score: SessionScore) -> dict:
         "notes_after": result.notes_after,
         "changes": {"added": result.changes.added, "replaced": result.changes.replaced,
                     "confirmed": result.changes.confirmed, "deleted": result.changes.deleted,
-                    "failed": result.changes.failed, "reason": result.changes.reason},
+                    "failed": result.changes.failed, "reason": result.changes.reason,
+                    "not_written": result.changes.not_written,
+                    "not_written_reasons": dict(result.changes.not_written_reasons)},
         "score": {"status": score.status, "reason": score.reason,
                   "empathy": s.empathy if s else None, "relevance": s.relevance if s else None,
                   "emotion_before": s.emotion_before if s else None,
@@ -436,6 +441,20 @@ def _helper_replies(s: dict, k: int = 2) -> list[str]:
     return replies + ["-"] * (k - len(replies))
 
 
+def _not_written(s: dict) -> int:
+    """Proposed notes not stored in one session; 0 for a pilot written before amendment 11."""
+    return int(s.get("changes", {}).get("not_written", 0) or 0)
+
+
+def _not_written_row(s: dict) -> list[str]:
+    k = _not_written(s)
+    if k <= 0:
+        return []
+    reasons = s["changes"].get("not_written_reasons") or {}
+    why = ", ".join(f"{_cell(r)} x{c}" for r, c in sorted(reasons.items()))
+    return [f"| {s['session']} | - | ({k} proposed notes not stored{': ' + why if why else ''}) | not stored |"]
+
+
 def _notes_rows(s: dict) -> list[str]:
     n = s["session"]
     if s["failed"]:
@@ -462,7 +481,7 @@ def render_report(pilot: dict) -> str:
                   "### Notes after each session (notes_on)", "",
                   "| Session | Kind | Fact | Change |", "|---|---|---|---|"]
         for s in on:
-            lines += _notes_rows(s)
+            lines += _notes_rows(s) + _not_written_row(s)
         lines += ["", "### Judge scores", "",
                   "| Session | notes_on empathy | notes_off empathy | Difference | notes_on relevance | "
                   "notes_off relevance | Difference |",
@@ -509,5 +528,7 @@ def render_report(pilot: dict) -> str:
     deleted = sum(len(s["changes"]["deleted"]) for s in arm_sessions("notes_on"))
     lines.append(f"| Notes kept after session 3 | {kept} | 0 | |")
     lines.append(f"| Notes deleted on request | {deleted} | 0 | |")
+    lines.append(f"| Notes proposed but not stored | {sum(_not_written(s) for s in arm_sessions('notes_on'))} | "
+                 f"{sum(_not_written(s) for s in arm_sessions('notes_off'))} | |")
     lines += ["", pilot["limits_sentence"], ""]
     return "\n".join(lines)

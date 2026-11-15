@@ -21,6 +21,15 @@ from schemas import NOTE_CAPS, ExistingNote, LiveNote, LiveNoteIndex, NoteAction
 SYSTEM = system_prompt("i5-note-taker.md")
 NEEDS_NOTE_ID = ("replace", "confirm", "delete")
 WRITES = ("add", "replace")
+NOT_WRITTEN_REASONS = ("consent", "forget_everything", "limit")  # and "write_failed:" + the exception's type name
+
+
+def _not_stored(result: "NotesResult", reason: str, n: int = 1) -> None:
+    """Count n proposed adds or replaces as not stored, under one reason. Never holds an exception's message."""
+    if n <= 0:
+        return
+    result.not_written += n
+    result.not_written_reasons[reason] = result.not_written_reasons.get(reason, 0) + n
 
 
 class NoteTakerOutput(Strict):
@@ -38,6 +47,8 @@ class NotesResult:
     deleted: list[str] = field(default_factory=list)  # taken off by a delete or by "forget everything"
     dropped_by_limit: list[str] = field(default_factory=list)  # existing note IDs dropped by a limit
     not_written: int = 0  # adds and replaces dropped by consent, by "forget everything" or by a limit
+    # why each of those was not stored; keys from NOT_WRITTEN_REASONS, or "write_failed:<type name>"; sums to not_written
+    not_written_reasons: dict[str, int] = field(default_factory=dict)
     undeleted: list[str] = field(default_factory=list)  # off the index, not confirmed deleted by past.dev
     forgot_everything: bool = False
     failed: bool = False  # the model's answer failed twice; nothing was changed
@@ -127,13 +138,13 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
     # 1-2. Which actions are kept.
     if out.forget_everything:
         result.deleted = [n.note_id for n in index.notes]
-        result.not_written = len(writes)
+        _not_stored(result, "forget_everything", len(writes))
         writes, confirms = [], []
     else:
         result.deleted = [a.note_id for a in out.actions if a.action == "delete"]
         confirms = [a.note_id for a in out.actions if a.action == "confirm"]
         if not remember_me:
-            result.not_written = len(writes)
+            _not_stored(result, "consent", len(writes))
             writes, confirms = [], []
     result.replaced = [a.note_id for a in writes if a.action == "replace"]
 
@@ -153,7 +164,7 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
         of_kind = sorted((n for n in candidates if n.kind == kind), key=_drop_order)
         dropped |= {n.note_id for n in of_kind[:max(0, len(of_kind) - limit)]}
     result.dropped_by_limit = [n.note_id for n in kept if n.note_id in dropped]
-    result.not_written += sum(1 for note_id in new_notes if note_id in dropped)
+    _not_stored(result, "limit", sum(1 for note_id in new_notes if note_id in dropped))
     result.confirmed = [n.note_id for n in kept if n.note_id in confirms and n.note_id not in dropped]
     came_off = result.deleted + result.replaced + result.dropped_by_limit
 
@@ -169,8 +180,8 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
             continue
         try:
             store.write(note)
-        except PastError:
-            result.not_written += 1
+        except PastError as exc:
+            _not_stored(result, "write_failed:" + type(exc).__name__)
             continue
         written.append(LiveNote(note_id=note_id, kind=note.kind, last_confirmed=note.last_confirmed,
                                 due_date=note.due_date))

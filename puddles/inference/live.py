@@ -22,7 +22,7 @@ from puddles.inference.note_store import NOTE_TAKER, NoteStore, check_user_id, e
 from puddles.inference.notes import NotesResult, take_notes
 from puddles.inference.turn import Session, end_session
 from puddles.llm import LLM, OpenAILLM
-from schemas import ConversationRecord
+from schemas import ConversationRecord, Turn
 
 T = TypeVar("T", bound=BaseModel)
 OPENAI_DEFAULT_URL = "https://api.openai.com/v1"  # what the OpenAI SDK uses when OPENAI_BASE_URL is not set
@@ -147,15 +147,32 @@ def finish_session(session: Session, store: NoteStore, llm: LLM, *, today: date 
             raise ValueError("training use is off, so the note-taker's model must be known to be untraced: "
                              "a PlainLLM over loop.llm's OpenAICompatClient, or a scripted model marked untraced")
     user_id = session.user_id
-    turns = list(session.turns)  # end_session clears them
+    turns = note_taker_view(session)  # a copy, because end_session clears the session
+    had_turns = bool(session.turns)
     notes = NotesResult()
     try:
         record = end_session(session, now)
     finally:  # the note-taker runs even if the record could not be written
-        if turns:
+        if had_turns:  # even when every turn was a crisis turn: forgetting and expiry must still work
             notes = _take(store, llm, session, user_id, turns, today=today, now=now)
         del turns
     return record, notes
+
+
+def note_taker_view(session: Session) -> list[Turn]:
+    """A copy of the conversation for the note-taker, without any turn that got a fixed crisis response.
+
+    The robot keeps no note about a crisis: the crisis path handles it in the moment, and a note would
+    bring it back in the next session. On such a turn both the person's message and the robot's reply
+    are left out. A turn is a crisis turn when the release step spoke a fixed line that is one of the
+    path's crisis responses; the holding line and the offline line are fixed too, and those turns are kept.
+    `session.turns` holds two entries per turn, the person's and the robot's, in the order of `session.lines`.
+    """
+    crisis_texts = set(session.path.fixed_responses.values())
+    crisis = {i for i, line in enumerate(session.lines)
+              if line.reply.fixed_handoff_response and line.reply.text in crisis_texts}
+    turns = session.turns
+    return [t for i in range(0, len(turns), 2) if i // 2 not in crisis for t in turns[i:i + 2]]
 
 
 def _take(store: NoteStore, llm: LLM, session: Session, user_id: str, turns: list, *,

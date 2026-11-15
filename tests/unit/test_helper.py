@@ -1,7 +1,9 @@
+import re as _re
+
 import pytest
 
 from loop.errors import HelperError, LLMError
-from loop.helper import helper_reply
+from loop.helper import helper_reply, trim_to_sentence
 from loop.llm import FakeClient
 from loop.policy import Policy
 from loop.prompts import helper_messages, render_helper_system
@@ -59,3 +61,111 @@ def test_llm_error_propagates():
 def test_reply_is_cut_to_last_complete_sentence(raw, expected):
     _, reply = _reply([raw])
     assert reply.text == expected
+
+
+# --- trim_to_sentence: abbreviations and numbers are not sentence ends -------------------
+
+REAL_DRAFT_TAIL = (
+    "If you might act on those thoughts or feel in immediate danger, call emergency services now. "
+    "In the U.S. or Canada, call or text 988; elsewhere, contact your"
+)
+
+
+def test_real_draft_is_cut_before_the_fragment_not_at_us():
+    assert trim_to_sentence(REAL_DRAFT_TAIL) == (
+        "If you might act on those thoughts or feel in immediate danger, call emergency services now.")
+
+
+INITIALISMS_AND_WORDS = ["U.S.", "U.K.", "e.g.", "i.e.", "a.m.", "p.m.", "A.M.", "E.g.",
+                         "vs.", "etc.", "approx."]
+TITLES = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "St."]
+
+
+@pytest.mark.parametrize("abbr", INITIALISMS_AND_WORDS + TITLES)
+@pytest.mark.parametrize("after", ["then", "3 times", ", then", "(then"])
+def test_abbreviation_before_lowercase_digit_or_punctuation_is_not_a_boundary(abbr, after):
+    raw = f"I hear you. Think of {abbr} {after} we can talk and"
+    assert trim_to_sentence(raw) == "I hear you."
+
+
+@pytest.mark.parametrize("abbr", INITIALISMS_AND_WORDS)
+@pytest.mark.parametrize("after", ["Then", '"Then', "(Then"])
+def test_initialism_or_word_before_uppercase_is_a_boundary(abbr, after):
+    raw = f"I hear you. Think of {abbr} {after} we can talk and"
+    assert trim_to_sentence(raw) == f"I hear you. Think of {abbr}"
+
+
+@pytest.mark.parametrize("abbr", TITLES)
+def test_title_before_uppercase_is_not_a_boundary(abbr):
+    assert trim_to_sentence(f"I hear you. Talk to {abbr} Lee about it and") == "I hear you."
+
+
+def test_complete_sentence_ending_on_abbreviation_is_kept():
+    assert (trim_to_sentence("I'm listening. You can call or text 988 in the U.S. If you")
+            == "I'm listening. You can call or text 988 in the U.S.")
+    assert (trim_to_sentence("I hear you. Bring water, snacks, etc. When you")
+            == "I hear you. Bring water, snacks, etc.")
+
+
+def test_trailing_whitespace_after_title_matches_stripped_text():
+    raw = "I hear you. Talk to Dr. "
+    assert trim_to_sentence(raw) == trim_to_sentence(raw.strip()) == "I hear you. Talk to Dr."
+
+
+def test_no_as_a_whole_sentence_is_a_boundary():
+    assert trim_to_sentence("No. I don't think that fits. And") == "No. I don't think that fits."
+
+
+def test_abbreviation_in_brackets_is_not_a_boundary():
+    assert trim_to_sentence("I hear you. Some things (e.g. walks) help and") == "I hear you."
+
+
+def test_decimal_is_not_a_boundary():
+    assert trim_to_sentence("I hear you. Sleep about 7.5 hours and") == "I hear you."
+    assert trim_to_sentence("Call 988. It is free and") == "Call 988."
+
+
+def test_abbreviation_as_last_token_ends_the_text():
+    assert trim_to_sentence("I am in the U.S.") == "I am in the U.S."
+    assert trim_to_sentence("Talk to your Dr. Or a friend, etc.") == "Talk to your Dr. Or a friend, etc."
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ('You asked "why me?" I wonder', 'You asked "why me?"'),
+    ('She shouted "stop!" and then', 'She shouted "stop!"'),
+    ("(Really?) That is a lot to", "(Really?)"),
+])
+def test_bang_and_question_with_closer(raw, expected):
+    assert trim_to_sentence(raw) == expected
+
+
+def test_text_with_no_boundary_is_unchanged():
+    assert trim_to_sentence("In the U.S. or Canada, call or text") == "In the U.S. or Canada, call or text"
+    assert trim_to_sentence("no full stop at all") == "no full stop at all"
+
+
+_OLD_CLOSERS = "\"'”’)]}"
+_OLD_ENDS_COMPLETE = _re.compile(rf"[.!?][{_re.escape(_OLD_CLOSERS)}]?$")
+_OLD_SENTENCE_END = _re.compile(rf"[.!?][{_re.escape(_OLD_CLOSERS)}]?(?=\s)")
+
+
+def _old_trim_to_sentence(text: str) -> str:
+    if _OLD_ENDS_COMPLETE.search(text):
+        return text
+    ends = list(_OLD_SENTENCE_END.finditer(text))
+    return text[:ends[-1].end()] if ends else text
+
+
+@pytest.mark.parametrize("raw", [
+    "That sounds hard. What keeps you up at night? I wonder whether",
+    "I'm sorry you're going through this. It makes sense to feel tired. Would it help to",
+    "You've carried a lot today! Let's slow down. What feels most pressing right",
+    'You said "nothing helps." That sounds exhausting. Can you tell me',
+    "(I'm listening.) Take your time. When did this",
+    "It sounds lonely.\nWhat would a good evening look like?\nMaybe we could",
+    "That sounds hard. What keeps you up?",
+    "Thank you for telling me. ",
+    "It has been 3 weeks. That is a long time. How are",
+])
+def test_ordinary_replies_match_old_behaviour(raw):
+    assert trim_to_sentence(raw) == _old_trim_to_sentence(raw)

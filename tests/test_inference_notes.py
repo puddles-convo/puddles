@@ -1044,3 +1044,93 @@ def test_a_bad_environment_value_is_refused_naming_the_variable(mem: FakeUserMem
 def test_a_bad_setting_is_refused(mem: FakeUserMemory, tmp_path: Path, no_timeout_env, name: str, bad) -> None:
     with pytest.raises(ValueError, match=name):
         NoteStore(mem, tmp_path, **{name: bad})
+
+
+# ---------- why a proposed note was not stored (not_written_reasons) ----------
+
+def _sums(result: notes.NotesResult) -> None:
+    assert sum(result.not_written_reasons.values()) == result.not_written
+
+
+def test_reasons_an_ordinary_session_has_none(store: NoteStore) -> None:
+    result = session(store, "user-01", [add("goals", "A."), add("people", "B.")])
+    assert result.not_written == 0 and result.not_written_reasons == {}
+    assert notes.NotesResult().not_written_reasons == {}
+
+
+def test_reasons_consent_when_remember_me_is_off(store: NoteStore) -> None:
+    [work] = seed(store, "user-01", ("goals", "Back to work."))
+    result = session(store, "user-01", [
+        {"action": "replace", "note_id": work, "kind": "goals", "fact": "Not back to work."},
+        add("situation", "Does not want to be remembered."),
+    ], remember_me=False)
+    assert result.not_written == 2 and result.not_written_reasons == {"consent": 2}
+    _sums(result)
+
+
+def test_reasons_forget_everything_with_an_add_in_the_same_answer(store: NoteStore) -> None:
+    seed(store, "user-01", ("people", "Has a sister."))
+    result = session(store, "user-01", [add("situation", "Asked to be forgotten.")], forget_everything=True)
+    assert result.not_written == 1 and result.not_written_reasons == {"forget_everything": 1}
+    _sums(result)
+
+
+def test_reasons_forget_everything_wins_over_consent(store: NoteStore) -> None:
+    result = session(store, "user-01", [add("situation", "A."), add("goals", "B.")], remember_me=False,
+                     forget_everything=True)
+    assert result.not_written_reasons == {"forget_everything": 2}
+    _sums(result)
+
+
+def test_reasons_limit(store: NoteStore) -> None:
+    seed(store, "user-01", *[("goals", f"G{i}.") for i in range(3)])
+    result = session(store, "user-01", [add("goals", "G3."), add("goals", "G4."), add("goals", "G5."),
+                                        add("goals", "G6.")])
+    assert result.not_written == 1 and result.not_written_reasons == {"limit": 1}
+    _sums(result)
+
+
+def test_reasons_a_write_that_raises_gives_the_type_name_and_never_the_message(store: NoteStore,
+                                                                              mem: FakeUserMemory) -> None:
+    phrase = "my sister Hana said she would leave"
+    real_ingest = mem.ingest
+
+    def flaky(entry):
+        if entry.content.endswith("Bad."):
+            raise PastError(f"400: rejected content {phrase}")
+        return real_ingest(entry)
+
+    mem.ingest = flaky
+    result = session(store, "user-01", [add("goals", "Bad."), add("goals", "Good."), add("people", "Bad.")])
+    # NoteStore.write wraps every failure, an ingest that raised or a wait that ran out, in PastError.
+    assert result.not_written == 2 and result.not_written_reasons == {"write_failed:PastError": 2}
+    assert result.added == ["note-user-01-002"]
+    _sums(result)
+    assert phrase not in repr(result) and "rejected" not in repr(result)
+    assert all(phrase not in k for k in result.not_written_reasons)
+
+
+def test_reasons_a_wait_that_runs_out(store: NoteStore, mem: FakeUserMemory) -> None:
+    mem.wait = lambda ingestion_id, timeout_s=None: False
+    result = session(store, "user-01", [add("goals", "A.")])
+    assert result.not_written == 1 and result.not_written_reasons == {"write_failed:PastError": 1}
+    _sums(result)
+
+
+def test_reasons_several_causes_in_one_session_sum(store: NoteStore, mem: FakeUserMemory) -> None:
+    seed(store, "user-01", *[("goals", f"G{i}.") for i in range(3)])
+    real_ingest = mem.ingest
+    mem.ingest = lambda entry: (_ for _ in ()).throw(PastError("down")) if entry.content.endswith("P.") \
+        else real_ingest(entry)
+    result = session(store, "user-01", [add("goals", "G3."), add("goals", "G4."), add("goals", "G5."),
+                                        add("goals", "G6."), add("people", "P.")])
+    assert result.not_written_reasons == {"limit": 1, "write_failed:PastError": 1}
+    _sums(result)
+
+
+def test_reasons_a_failed_model_answer_counts_nothing(store: NoteStore) -> None:
+    llm = ScriptedLLM()
+    llm.add(NoteTakerOutput, {"actions": [{"action": "delete", "note_id": "nope"}]},
+            {"actions": [{"action": "delete", "note_id": "nope"}]})
+    result = take_notes(store, llm, user_id="user-01", session_id="s", turns=TURNS, remember_me=True, today=TODAY)
+    assert result.failed and result.not_written == 0 and result.not_written_reasons == {}
