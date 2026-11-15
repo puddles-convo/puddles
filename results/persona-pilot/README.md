@@ -130,7 +130,7 @@ The replies below are copied exactly from the session files. Where only part of 
 - notes_on (full reply): "Those first tomatoes arriving on Sunday must have brought your dad close—and made his absence feel sharper, too. You’ve been caring for his plants through all this, and that’s a tender way of keeping a connection with him. What was it like picking them?"
 - notes_off (full reply): "The first tomatoes came in on the day Dad used to call. I can hear how that might make Sunday feel especially tender. I’m glad you told me. What was it like picking them?"
 
-The notes_on reply is consistent with the stored note "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more." Both the caring and the close and sharper pairing match it. But the opener ("the tomatoes from Dad's plants came in", "I picked the first ones") also permits the inference that the person had been caring for the plants, and the text alone cannot prove the helper relied on the note.
+The notes_on reply is consistent with the stored note "The user is grieving their father's death, misses his Sunday calls, and has started caring for his tomato plants, which brings them closer to him and makes them miss him more." Both the caring and the close and sharper pairing match it. But the opener ("The tomatoes from Dad's plants came in", "I picked the first ones") also permits the inference that the person had been caring for the plants, and the text alone cannot prove the helper relied on the note.
 
 **examprep, reply 2.** The person says: "I think so. I just want something concrete to do if my mind goes blank."
 
