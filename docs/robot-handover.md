@@ -45,7 +45,7 @@ The brain needs the same token, from its own secret store.
 
 Options: `--notes-root DIR` (default: the `--root` value), `--host` (default `127.0.0.1`), `--port` (default `8765`), `--mlflow URI` (used only for sessions with training consent; see below), `--sweep-every SECONDS` (default 30). It binds to `127.0.0.1` unless you pass `--host`; opening it beyond the machine is your decision.
 
-**Where training-consent traces go.** For sessions with training consent the service records MLflow traces, and those hold the person's words. Without `--mlflow` (and without `MLFLOW_TRACKING_URI`), MLflow writes `runs/mlflow.db` and `mlruns/` in the service's working directory, outside `--root`. Pass `--mlflow sqlite:///<root>/mlflow.db` (for example `--mlflow sqlite:///runs/serve/mlflow.db`) so the store lands under the root. Trace files still land in `./mlruns` of the working directory even then (a known open defect), so the working directory is part of what must be protected, and deleted with a person's data, along with `--root`.
+**Where training-consent traces go.** For sessions with training consent the service records MLflow traces, and those hold the person's words. Without `--mlflow` (and without `MLFLOW_TRACKING_URI`), MLflow writes `runs/mlflow.db` and `mlruns/` in the service's working directory, outside `--root`. Pass `--mlflow sqlite:///<root>/mlflow.db` (for example `--mlflow sqlite:///runs/serve/mlflow.db`) so the store lands under the root. That moves only the tracking metadata: the trace artifacts still land in `./mlruns` of the working directory (a known open defect). Protect both places, and when a person's data must go, delete their records and artifacts from both; do not delete the working directory itself.
 
 Real mode reads these environment variables. Names and non-secret values are the ones the team runs with; the keys are yours to fill in.
 
@@ -74,7 +74,7 @@ Real mode reads these environment variables. Names and non-secret values are the
 |---|---|---|
 | `OPENAI_BASE_URL` | OpenAI | the note-taker, with and without training consent |
 | `PAST_BASE_URL` | `https://api.past.dev/api/v1` | past.dev |
-| `PUDDLES_AGENT_MAX_TOKENS_PARAM` | `max_completion_tokens` | the note-taker's output-limit field; set `max_tokens` for servers that want the older name; empty is the same as unset |
+| `PUDDLES_AGENT_MAX_TOKENS_PARAM` | `max_completion_tokens` | the output-limit field of the note-taker for sessions without training consent only; set `max_tokens` for servers that want the older name; empty is the same as unset; the note-taker for sessions with training consent always uses `max_completion_tokens` |
 
 `PUDDLES_AGENT_TOOL_REASONING_EFFORT`, which the training scripts set, applies only to requests with tools and does not affect the note-taker.
 
@@ -325,7 +325,7 @@ Store it on the device, because with no connection nothing can be fetched.
 ## 7. Timing
 
 - **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn. The crisis checker's deadline is 5 s. Normal turns take 1 to 2 s on `gpt-6-luna` (section 8a has today's measurements).
-- **Do not block on the end call.** Ending runs the note-taker, and the note store waits up to 300 s for past.dev to confirm each note. In this morning's real runs an end call took between 2 s and 50 s (50 s for a session that wrote four notes); it can take longer. Run the end call in the background with no short timeout, as the client in section 4 does.
+- **Do not block on the end call.** Ending runs the note-taker, and the note store waits up to 300 s for past.dev to confirm each note. In this morning's real runs the end calls took 50.3 s for a session that wrote four notes, 3.6 s and 2.3 s for two others, 1.4 to 3.3 s for the pilot sessions, and 64 ms for a session with no turns; allow longer. Run the end call in the background with no short timeout, as the client in section 4 does.
 - **Next session for the same person only after the end returns.** Until then a new start for that `user_id` gets `409 user_busy`. A different person can start at once.
 - **Idle sessions** become eligible to be ended after 900 s (15 minutes) without activity, and are ended, notes and all, when the next sweep reaches them (`scripts.serve` sweeps every 30 s; endings are run one after another, so a sweep can take a while). A session with a turn running is not idle. A turn after the end gets `404 session_not_found`. A session that is already ending holds its person until the end finishes; there is no guaranteed release at 15 minutes.
 
@@ -344,12 +344,12 @@ Store it on the device, because with no connection nothing can be fetched.
 
 ## 8a. Things the robot will do that may surprise you
 
-Each of these was seen in real runs on 15 November 2026 and is how today's build behaves. None comes with a promise of a fix.
+Each of these was seen in saved real runs on 15 November 2026 or follows from the current code, and is how today's build behaves. The denial example was seen in the persona pilot that morning (`results/persona-pilot/` on the `persona-pilot` branch; the laid-off persona with notes on, session 2, turn 6): "No. I'm not thinking about ending my life." got the fixed response because the keyword `ending my life` matched while the checker said `none`. None comes with a promise of a fix.
 
 - **A crisis disclosure can follow the person into the next session.** With "remember me" on, after a session in which the person disclosed a crisis, the note-taker may keep a note of it ("They disclosed suicidal thoughts and a plan for this weekend." in the real run). The helper may raise it at the start of the next session, and the checker may then send the person's following turns down the crisis path too, so they get the fixed crisis response even for ordinary messages, including a request to forget something.
 - **"No, I'm not thinking about ending my life" gets the fixed crisis response.** The keyword check matches the phrase, and a keyword match forces the crisis response whatever the checker says.
-- **Replies can end abruptly.** Replies are capped at about 80 tokens and trimmed to whole sentences.
-- **Latency per turn, measured over HTTP:** median about 1.2 s, maximum about 1.7 s; the HTTP part is about 2 ms of that.
+- **Replies can end abruptly.** The helper's draft asks for at most 80 tokens (the default in `loop/helper.py`) and is trimmed to whole sentences; if it holds no complete sentence, the incomplete reply is kept as it is. Fixed responses go through neither step.
+- **Latency per turn, measured over HTTP:** client wall time had a median of 1203.5 ms and a maximum of 1748 ms. Wall time minus the service's own `total` had a median of 2 ms, but that difference does not isolate the HTTP overhead.
 
 ## 9. A two-minute check before the robot is plugged in
 
