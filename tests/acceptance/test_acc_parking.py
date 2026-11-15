@@ -66,7 +66,7 @@ def test_acc_off_is_identical_to_parent_prompts_and_checks(tmp_path, monkeypatch
     parents = []
     for module in (critic, proposer):
         source = subprocess.check_output(
-            ["git", "show", f"HEAD^:puddles/agents/{module.__name__.split('.')[-1]}.py"], text=True)
+            ["git", "show", f"4daf83a:puddles/agents/{module.__name__.split('.')[-1]}.py"], text=True)
         old = types.ModuleType("acceptance_parent")
         exec(compile(source, "<parent commit>", "exec"), old.__dict__)
         parents.append(old)

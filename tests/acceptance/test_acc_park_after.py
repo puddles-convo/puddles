@@ -48,7 +48,7 @@ def history(path, *events):
 
 def test_acc_unset_and_two_preserve_parent_behavior(work, monkeypatch):
     source = subprocess.check_output(
-        ["git", "show", "HEAD^:puddles/parking.py"], cwd=REPO, text=True)
+        ["git", "show", "653cb4e:puddles/parking.py"], cwd=REPO, text=True)
     parent = types.ModuleType("acceptance_parent_parking")
     monkeypatch.setitem(sys.modules, parent.__name__, parent)
     exec(compile(source, "<parent parking>", "exec"), parent.__dict__)
