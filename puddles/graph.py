@@ -16,6 +16,8 @@ from loop.errors import PolicyError
 from loop.llm import ChatClient
 from loop.policy import Policy, load_policy
 from loop.runner import Failure, run_batch
+from puddles import exa
+from puddles.config import load_config
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, AgentFailed
 from puddles.memory import Memory
@@ -28,7 +30,8 @@ from puddles.round import (
     run_researcher,
     stand_in_gate,
 )
-from puddles.tracing import TracedClient
+from puddles.tracing import TracedClient, TracedLLM
+from puddles.usage import Meter, metering, model_name
 from schemas import ConversationRecord, GateOutcome, RoundEvent, Scenario, ScoredConversation
 
 NO_CONVERSATION_REASON = "No conversation finished."
@@ -64,6 +67,7 @@ class RoundDeps:
     root: Path
     judge: Callable[[list[ConversationRecord]], list[ScoredConversation]] = stub_judge
     gate: Callable[[RoundResult], GateOutcome] = stand_in_reverted
+    usage: Optional[Meter] = None  # None: a meter on `root`, with the prices in the run's config file
 
 
 class RoundState(TypedDict, total=False):
@@ -84,23 +88,40 @@ def _failed(agent: str, exc: AgentFailed) -> str:
     return f"{agent} failed: {exc}"
 
 
+def round_meter(deps: RoundDeps) -> Meter:
+    """The round's meter. Made once and kept on `deps`, so the graph and `run_round` share it."""
+    if deps.usage is None:
+        deps.usage = Meter(deps.root, load_config().prices)
+    return deps.usage
+
+
 def build_round_graph(deps: RoundDeps):
-    """The compiled graph, with no checkpointer."""
+    """The compiled graph, with no checkpointer.
+
+    Each node runs inside `metering(meter, <agent>)`, so every model call and Exa search made in
+    it is written to `<root>/log/usage.jsonl` and added to the round's tally.
+    """
     root = Path(deps.root)
+    meter = round_meter(deps)
+    # A scripted model does not report its calls, so it is wrapped. OpenAILLM reports its own.
+    llm: LLM = deps.llm if getattr(deps.llm, "reports_usage", False) else TracedLLM(deps.llm)
 
     def converse(state: RoundState) -> dict:
         policy = check_policy_file(state["policy_path"])
         round_ = state["round"]
-        batch = run_batch(TracedClient(deps.helper_client, "helper"),
-                          TracedClient(deps.user_client, "simulated_user"),
-                          policy, state["scenarios"], round=round_,
-                          max_turns=state.get("max_turns", 10), seed=state.get("seed"),
-                          out_path=root / "conversations" / f"round-{round_:02d}-train.jsonl")
+        meter.start_round(round_)
+        with metering(meter):
+            batch = run_batch(TracedClient(deps.helper_client, "helper"),
+                              TracedClient(deps.user_client, "simulated_user"),
+                              policy, state["scenarios"], round=round_,
+                              max_turns=state.get("max_turns", 10), seed=state.get("seed"),
+                              out_path=root / "conversations" / f"round-{round_:02d}-train.jsonl")
         return {"records": batch.records, "failures": batch.failures}
 
     def judge(state: RoundState) -> dict:
         records = state.get("records", [])
-        scored = deps.judge(records)
+        with metering(meter, "judge"):
+            scored = deps.judge(records)
         update: dict = {"scored": scored}
         if not scored:
             update["result"] = RoundResult(
@@ -110,8 +131,9 @@ def build_round_graph(deps: RoundDeps):
 
     def critic(state: RoundState) -> dict:
         try:
-            result = run_critic(state["round"], state["scored"], state["policy_path"], deps.log,
-                                deps.memory, deps.llm, root)
+            with metering(meter, "critic"):
+                result = run_critic(state["round"], state["scored"], state["policy_path"], deps.log,
+                                    deps.memory, llm, root)
         except AgentFailed as exc:
             result = RoundResult(round=state["round"], outcome="no_pattern",
                                  base_policy_path=state["policy_path"], reason=_failed("critic", exc))
@@ -120,7 +142,8 @@ def build_round_graph(deps: RoundDeps):
     def researcher(state: RoundState) -> dict:
         result = state["result"]
         try:
-            run_researcher(result, deps.log, deps.memory, deps.llm, deps.search, root)
+            with metering(meter, "researcher"):
+                run_researcher(result, deps.log, deps.memory, llm, deps.search, root)
         except AgentFailed as exc:
             result.research = None
             result.refs.pop("research", None)
@@ -130,7 +153,8 @@ def build_round_graph(deps: RoundDeps):
     def proposer(state: RoundState) -> dict:
         result = state["result"]
         try:
-            run_proposer(result, deps.log, deps.memory, deps.llm, root)
+            with metering(meter, "proposer"):
+                run_proposer(result, deps.log, deps.memory, llm, root)
         except AgentFailed as exc:
             result.edit, result.candidate_path = None, None
             result.refs.pop("edit", None)
@@ -138,7 +162,8 @@ def build_round_graph(deps: RoundDeps):
         return {"result": result}
 
     def gate(state: RoundState) -> dict:
-        return {"gate": deps.gate(state["result"])}
+        with metering(meter, "gatekeeper"):
+            return {"gate": deps.gate(state["result"])}
 
     def finish(state: RoundState) -> dict:
         event = finish_round(state["result"], state.get("gate"), deps.log, deps.memory, root)
@@ -175,6 +200,10 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
               max_turns: int = 10, seed: int | None = None) -> RoundState:
     """Run one round inside one MLflow run. The caller sets tracing up first."""
     policy = check_policy_file(policy_path)  # first: a bad file must leave memory and the log untouched
+    meter = round_meter(deps)
+    # Before any call: a model with no price, or an unpriced Exa search, stops the run here.
+    meter.prices.check([model_name(c) for c in (deps.helper_client, deps.user_client, deps.llm)],
+                       search=deps.search is exa.search)
     deps.memory.ensure_training_audience()
     retry_pending(deps.log, deps.memory, deps.root)
     round_ = deps.log.next_round()
@@ -186,5 +215,6 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
                                           "seed": seed, "gate": None})
         mlflow.set_tag("outcome", state["event"].outcome)
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
-                            "conversations_failed": len(state.get("failures", []))})
+                            "conversations_failed": len(state.get("failures", [])),
+                            **meter.metrics()})
     return state

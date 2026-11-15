@@ -145,8 +145,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     tracing.setup(tracking_uri=args.mlflow)
     deps = RoundDeps(helper_client=helper_client, user_client=user_client, llm=llm, search=search,
                      memory=memory, log=DecisionLog(root), root=root, gate=gate)
-    state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
-                      seed=args.seed)
+    try:
+        state = run_round(deps, policy_path=policy_path, scenarios=scenarios, max_turns=args.max_turns,
+                          seed=args.seed)
+    except ConfigError as exc:  # a model or the Exa search has no price in the run's config file
+        _print_error(f"{type(exc).__name__}: {exc}")
+        return 2
     event = state["event"]
     print(f"round {event.round}: {event.outcome}. {event.reason}")
     return 0

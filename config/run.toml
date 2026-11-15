@@ -1,0 +1,37 @@
+# The run's config file. Read by puddles/config.py.
+# Another file can be used by setting the environment variable PUDDLES_CONFIG to its path.
+
+# ---------------------------------------------------------------------------------------------
+# Prices. EMPTY ON PURPOSE.
+#
+# Whoever holds each account fills these in from the provider's own price page. Do not guess,
+# and do not copy a figure from memory. A run stops before its first call if a model it uses
+# has no row here, or if it searches Exa and exa_search_usd is not set.
+#
+# The model name must be exactly the one in HELPER_MODEL, SIMUSER_MODEL or PUDDLES_AGENT_MODEL.
+# A model that is free to call still needs a row, with both prices written as 0.
+# ---------------------------------------------------------------------------------------------
+
+[prices]
+# Dollars for one Exa search request.
+# exa_search_usd =
+
+[prices.models]
+# Dollars per million tokens.
+# "the-model-name" = { input_usd_per_million = , output_usd_per_million = }
+
+# ---------------------------------------------------------------------------------------------
+# Output limits: the most tokens one answer may have, for the agents that call the OpenAI API
+# (puddles.llm.OpenAILLM). The limit is sent as max_completion_tokens, so on a reasoning model
+# it covers the reasoning as well as the answer. An answer cut off at the limit fails the agent.
+# `default` is required and is used by any agent with no line of its own.
+#
+# These are starting values that nobody has measured. Set them in stage 3 from real calls.
+# The helper and the simulated user have their limits in loop/helper.py and loop/simulated_user.py.
+# ---------------------------------------------------------------------------------------------
+
+[output_limits]
+default = 4000
+critic = 4000
+researcher = 4000
+proposer = 4000
