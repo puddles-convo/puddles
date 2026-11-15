@@ -57,6 +57,7 @@ class RoundResult:
     safety: Optional[LogSafety] = None
     candidate_sha256: Optional[str] = None  # the candidate text the gate tested; finish_round promotes only that
     base_sha256: Optional[str] = None  # the base policy text the before-scores were measured on
+    unscored: list[str] = field(default_factory=list)  # conversation IDs the round's judge left unscored
 
 
 class PolicyChanged(RuntimeError):
@@ -80,6 +81,12 @@ def policy_in_force(root: Path, fallback: Path) -> Path:
 
 
 NO_EVIDENCE_REASON = "No trustworthy source was found for this pattern."
+
+
+def unscored_sentence(ids: list[str]) -> str:
+    """The sentence finish_round adds to the reason, so an unscored conversation is never silent."""
+    noun = "conversation" if len(ids) == 1 else "conversations"
+    return f"The judge left {len(ids)} {noun} unscored: {', '.join(ids)}."
 
 
 def run_critic(round_: int, conversations: list[ScoredConversation], policy_path: Path,
@@ -288,6 +295,8 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
             policy.new, policy.new_sha256, policy.in_force = candidate.version, sha256_text(text), candidate.version
         else:
             policy.new, policy.new_sha256 = candidate.version, sha256_text(candidate_text)
+    if result.unscored:
+        reason = f"{reason or outcome} {unscored_sentence(result.unscored)}"
     p = result.pattern
     event = RoundEvent(
         round=result.round, outcome=outcome, records=refs, policy=policy, reason=reason or outcome,
