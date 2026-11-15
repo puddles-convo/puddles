@@ -1,7 +1,7 @@
 """Acceptance tests from docs/specs/judging.md, written without its implementation.
 
 Deliberately unspecified: duplicate IDs, malformed judge results/configs, exact
-mismatch reasons, and usage recovery from a judge that raises without a result.
+mismatch reasons. A judge that raises returns no usage: a stated accounting limit.
 """
 
 from collections import Counter
@@ -266,6 +266,46 @@ def test_wrong_conversation_id_is_unscored_and_never_reassigned(wrong_id):
     assert isinstance(run.reasons["a"], str) and run.reasons["a"].strip()
 
 
+@pytest.mark.parametrize("wrong_id", ["b", "not-in-this-batch"])
+def test_wrong_id_results_still_record_all_reported_usage_and_continue(tmp_path, wrong_id):
+    """Catches discarding spent tokens along with a mismatched score, or recording them twice."""
+    records = [record("a"), record("b"), record("c")]
+    wrong = answer(wrong_id, entries=[usage(), usage(MODEL_NAMES[1], 0, 3)])
+    good_b = answer("b", 5, 4, [usage(MODEL_NAMES[2], 17, 0)])
+    good_c = answer("c", 3, 2)
+    judge = ScriptedJudge({"a": wrong, "b": good_b, "c": good_c})
+    with metering(Meter(tmp_path, prices()), "judge"):
+        run = score_conversations(judge, records)
+    assert judge.calls == records
+    assert run.unscored == ["a"] and run.scores == [good_b.score, good_c.score]
+    assert reported_rows(usage_rows(tmp_path)) == Counter([
+        ("judge", MODEL_NAMES[0], 101, 7, False), ("judge", MODEL_NAMES[1], 0, 3, False),
+        ("judge", MODEL_NAMES[2], 17, 0, False),
+    ])
+
+
+@pytest.mark.parametrize("wrong_id", [False, True])
+@pytest.mark.parametrize("exception_type", [MissingPrice, RuntimeError])
+def test_score_conversations_propagates_record_usage_errors(monkeypatch, wrong_id, exception_type):
+    """Catches treating a metering error as an unscored conversation and quietly continuing."""
+    records = [record("a"), record("b")]
+    result = answer("some-other-id" if wrong_id else "a", entries=[usage()])
+    judge = ScriptedJudge({"a": result, "b": answer("b")})
+    error = exception_type("the returned usage cannot be counted")
+    observed = []
+
+    def fail_usage(entries):
+        observed.append(list(entries))
+        raise error
+
+    monkeypatch.setattr(judging, "record_usage", fail_usage)
+    with pytest.raises(exception_type) as caught:
+        score_conversations(judge, records)
+    assert caught.value is error
+    assert observed == [result.usage]
+    assert judge.calls == records[:1]
+
+
 def test_successes_pass_each_usage_list_to_record_usage_once_in_record_order(monkeypatch):
     """Catches omitting usage, forwarding only the last result, or recording an entry twice."""
     records = [record("second"), record("first")]
@@ -379,6 +419,19 @@ def test_save_empty_scores_creates_empty_file(tmp_path):
     path = tmp_path / "new/nested/empty.jsonl"
     save_scores([], path)
     assert path.is_file() and path.read_bytes() == b""
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_save_scores_replaces_existing_file_including_with_empty_list(tmp_path, empty):
+    """Catches appending, retaining trailing old rows, or skipping an empty replacement."""
+    path = tmp_path / "scores.jsonl"
+    old = [score("old-one"), score("old-two")]
+    path.write_text("".join(item.model_dump_json() + "\n" for item in old), encoding="utf-8")
+    replacement = [] if empty else [score("replacement", 5, 1)]
+    save_scores(replacement, path)
+    assert [ScoreRecord.model_validate_json(line) for line in path.read_text().splitlines()] == replacement
+    if empty:
+        assert path.read_bytes() == b""
 
 
 @pytest.mark.parametrize("kind", ["panel", "fallback", "unconfigured"])
@@ -679,6 +732,32 @@ def test_fake_script_uses_panel_adapter_writes_scores_and_never_constructs_real_
     assert tuple(getattr(first.score, f) for f in fields) == tuple(getattr(second.score, f) for f in fields)
 
 
+def test_fake_real_gate_saves_training_scores_without_inventing_judge_tokens(
+    tmp_path, monkeypatch, local_mlflow, script_args,
+):
+    """Catches bypassing the adapter or estimating tokens for the usage-free scripted judge."""
+    def real_factory():
+        pytest.fail("--fake --gate real constructed the real judge")
+
+    monkeypatch.setattr(judge_api, "judge_from_env", real_factory)
+    root = tmp_path / "script-root"
+    assert not root.exists()
+    assert script.main(["--fake", "--gate", "real", *script_args]) == 0
+    records = [ConversationRecord.model_validate_json(line) for line in (
+        root / "conversations/round-01-train.jsonl").read_text().splitlines()]
+    scores = [ScoreRecord.model_validate_json(line) for line in (
+        root / "scores/round-01-train.jsonl").read_text().splitlines()]
+    assert records and [item.conversation_id for item in scores] == [item.id for item in records]
+    assert all(item.judge_version == "judge-fake" for item in scores)
+    assert (root / "scores/round-01-gate.json").is_file()
+    assert DecisionLog(root).rounds()[0].outcome == "reverted"
+    usage_path = root / "log/usage.jsonl"
+    assert usage_path.is_file()
+    for row in read_usage(usage_path):
+        if row.get("agent") in {"judge", "gatekeeper"}:
+            assert row.get("tokens_in", 0) == row.get("tokens_out", 0) == 0
+
+
 @pytest.mark.parametrize("missing_config", [False, True])
 def test_real_script_constructs_judge_from_env_and_handles_its_valueerror_as_configuration(
     tmp_path, monkeypatch, local_mlflow, script_args, capsys, missing_config,
@@ -700,11 +779,12 @@ def test_real_script_constructs_judge_from_env_and_handles_its_valueerror_as_con
 
     # This placeholder only satisfies the script's presence check; no API client is built.
     monkeypatch.setenv("EXA_API_KEY", "offline-test-placeholder")
+    # The amended contract requires the factory to be looked up here when main runs.
+    monkeypatch.setattr(judge_api, "judge_from_env", factory)
     with patch_public(monkeypatch, chat_api, "client_from_env", lambda prefix: FakeClient([]), script), \
          patch_public(monkeypatch, agent_api, "OpenAILLM", lambda: RoundLLM(), script), \
          patch_public(monkeypatch, memory_api, "PastClient", FakeMemory, script), \
          patch_public(monkeypatch, exa, "search", lambda query: [], script), \
-         patch_public(monkeypatch, judge_api, "judge_from_env", factory, script), \
          patch_public(monkeypatch, graph, "run_round", run, script):
         capsys.readouterr()
         code = script.main(script_args)
