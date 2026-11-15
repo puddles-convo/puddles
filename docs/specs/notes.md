@@ -85,10 +85,12 @@ class NoteStore:
 |---|---|
 | `index.json` | The `LiveNoteIndex`. Only notes listed here reach the helper. |
 | `notes.json` | `{note_id: UserNote}` for the notes on the index. Between a `write` and the `save_index` that follows it, it also holds the new note that is not yet on the index. |
-| `counter.json` | `{"next": N}`: the next note number. A number is never used twice, even after a delete. |
+| `counter.json` | `{"next": N}`: the next note number. A number is never used twice, even after a delete. While a write is on its way it also holds `"writing": [{"note_id", "owner"}]`: the notes that have been or are about to be sent to past.dev and are not yet on the index. With no write on its way the file is exactly `{"next": N}`. |
 | `pending_deletes.json` | A list of note IDs that are off the index and that past.dev has not yet confirmed deleted |
 
 Every file is written to a temporary file in the same folder and then renamed over the old one.
+
+**A change that is cut off is finished by the next call.** A change that touches more than one of the four files and past.dev is written down before its first step: `pending_deletes.json` is the intent "these notes are coming off", and `writing` is the intent "this note is being sent". Every method that changes anything, and `live_notes` and `helper_notes`, first finishes what an interrupted call left: every ID in `pending_deletes.json` is taken off the index and out of `notes.json` before anything else happens and before any remote delete is asked for, and a `writing` entry left by a store that is gone, for a note that never reached the index, is queued for deletion. A note's ID is in `writing` before the note is sent, so "forget everything" after a kill at any point still finds it. The rule errs towards forgetting: a note in flight may be lost; a forgotten note never comes back, and `save_index` refuses an index that names a note waiting to be deleted. `index`, `stored` and `pending_deletes` only read. Two sessions of one person at the same time are outside this contract.
 
 - `index` returns an empty index for a person with no file.
 - `save_index` writes `index.json`, and removes from `notes.json` every note that is not on the index it was given. **Every note it removes this way is added to `pending_deletes.json`,** so a note that was written but never reached the index (a crash between the two) is still deleted from past.dev. A `LiveNoteIndex` over a limit cannot be built, so it cannot be saved.
