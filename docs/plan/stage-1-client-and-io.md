@@ -25,7 +25,8 @@ The critic, researcher and proposer already follow both rules: each has a `rende
 - [ ] Every attempt counts: a retry after a failed check, and a schema fallback, each add their own tokens.
 - [ ] A `Usage` tally keyed by agent name: tokens in and out, calls, estimated calls, and for the researcher the number of Exa searches.
 - [ ] A prices table in the run's config file: dollars per million input and output tokens for each model, and dollars per Exa search. **Whoever holds each account fills it in from the provider's price page.** No price is assumed in code; a model with no price stops the run.
-- [ ] **As each node finishes**, the graph appends one line to `<root>/log/usage.jsonl`: the round, the node, its tokens, searches and cost, and the agent's name if it failed twice. Writing per node, not per round, keeps the spend of a round that was interrupted. Stage 6 reads that file to know what has been spent after a restart.
+- [ ] **Every model call and every Exa search writes to `<root>/log/usage.jsonl` twice.** Before the request goes out: a `sent` line with a call ID, the round, the agent, the model, and the most the call can cost (the prompt's estimated tokens plus the output limit). When the answer arrives: a `done` line with the same call ID and the real tokens and cost. Spend is the sum of the `done` lines, plus the `sent` estimate for any call that has no `done` line, because a request cut off by a crash may still be billed.
+- [ ] When an agent fails twice, a `failed` line names the round and the agent. Stage 6 reads this file after a restart to know what has been spent and which rounds failed.
 - [ ] At the end of a round the graph logs the totals to MLflow (`tokens_in.<agent>`, `tokens_out.<agent>`, `cost_usd`).
 
 **Schema output on an OpenAI-compatible endpoint**
@@ -59,7 +60,8 @@ All offline.
 6. After one fake round, the MLflow run has token metrics for every agent that ran, and each model-call span carries its own counts, the researcher's search calls included.
 7. Separately, with a fake HTTP server: a `complete_json` call through `TracedClient` leaves one span per attempt, each with its own counts. The fake round does not call `complete_json`, so it cannot test this.
 8. A model with no entry in the prices table stops the run before the first call.
-9. The round's lines in `<root>/log/usage.jsonl` add up to the spans. A round stopped after the judge leaves the lines for `converse` and `judge` in the file.
+9. The `done` lines for a round in `<root>/log/usage.jsonl` add up to the spans.
+10. A batch killed in the middle of `converse` leaves a `done` line for every call that had finished. A `sent` line with no `done` line is counted at its estimate.
 
 ## Unknowns to settle with one real call each
 

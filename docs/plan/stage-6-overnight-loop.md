@@ -39,14 +39,14 @@ The code as it stands does not restart safely. Three things need building.
 
 **Spend**
 
-- [ ] Spend so far is the sum of `<root>/log/usage.jsonl` (stage 1), so it survives a restart. It includes failed attempts, the gate's conversations, Exa searches and the nodes of a round that was interrupted.
+- [ ] Spend so far is the sum of `<root>/log/usage.jsonl` (stage 1), so it survives a restart. It includes failed attempts, the gate's conversations, Exa searches, and the calls of a round that was interrupted: finished calls at their real cost, and calls that were sent but never answered at their estimate.
 - [ ] Before each round: stop if spend so far plus the most a round has cost so far, times 1.5, is over the limit. Before round 1, use the cost per round measured in stage 3, scaled to the overnight settings.
 - [ ] **This is a stop rule, not a guarantee.** It is based on what rounds have cost so far, and some token counts are estimates, so one round can overshoot. Put a hard spending limit on each provider account as well, where the provider offers one.
 - [ ] past.dev credits are not counted. Check the dashboard before leaving.
 
 **Stopping on repeated failure**
 
-- [ ] Three rounds in a row that fail on the same agent stop the loop with that agent's name. The failing agent is read from the round's line in `usage.jsonl`.
+- [ ] Three rounds in a row that fail on the same agent stop the loop with that agent's name. A round has failed on an agent if `usage.jsonl` has a `failed` line for that round and agent. Group the lines by round first, then count rounds in a row; a round has many lines.
 
 **The end-of-round check**
 
@@ -84,7 +84,8 @@ A different judge gives different numbers, so its scores cannot be compared with
 ## Tests that must pass
 
 1. A fake loop of five rounds stops at `max_rounds`.
-2. A fake loop with a low spend limit stops before the round that would pass it. Restarted, it still knows what was spent, including the part of a round that was interrupted.
+2. A fake loop with a low spend limit stops before the round that would pass it. Restarted, it still knows what was spent, including the calls of a round that was interrupted part-way through its conversations.
+14. Three rounds in a row with a `failed` line for the same agent stop the loop. Two such rounds, a clean round, then a third do not. Several `failed` lines in one round count as one round.
 3. Kill the process during round 3's conversations and start it again: the log has rounds 1, 2, 3 once each.
 4. Kill it after the promoted policy is written and before the log entry: on restart the stray policy file is gone and the round runs again.
 5. A log whose last line is cut off half-way is reported, not read as a round.
