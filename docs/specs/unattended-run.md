@@ -113,13 +113,41 @@ streak sees an Exa outage.
 withdrawn before the check: the example IDs are a sample of the sightings, as the critic's own doc
 shows with 14 sightings and 3 examples, so the rule would have failed correct answers.)
 
+## 4. A kept policy is measured again (`puddles/gate.py`, `puddles/gate_join.py`, `scripts/run_loop.py`)
+
+Added at 05:00 on 2026-11-15, from the run itself. A candidate is kept because one measurement of it
+came out high; the gate then saved that same measurement as the score every later candidate must
+beat. A measurement picked for being high overstates the policy. Seen: `policy-v3` was kept at
+quality 4.15; two fresh measurements of the same file on the same scenarios gave 3.90 and 3.90. The
+next candidate then needed 4.425 to be kept.
+
+- **4.1 The setting.** `GateDeps` gets `remeasure_kept: bool = False`. `real_gate_deps` takes
+  `remeasure_kept: bool = False` and passes it on. `scripts/run_loop.py` reads
+  `PUDDLES_GATE_REMEASURE_KEPT`: `1` is on, unset or `0` is off, anything else is a refusal before any
+  model call (exit 2, like the other refusals), naming the variable.
+- **4.2 Off is today's behaviour, byte for byte.** With the setting off nothing changes: the same
+  calls, the same files, the same `current.json` text. No existing test changes.
+- **4.3 On: a keep does not save the winning scores.** On `kept`, the gate does not rewrite
+  `current.json` (step 4 of `make_gate` in `docs/specs/gate.md` is skipped). Everything else about the
+  round is unchanged: the decision, the checks, the report, and the scores the round logs, which are
+  what that round measured.
+- **4.4 On: only a fresh measurement is believed.** `current.json` gets one more field,
+  `"measured": "fresh"`, written when `_current_scores` scores the policy in force and saves the
+  result. With the setting on, a file matches only if it has that field with that value as well as
+  every field of the key. A file without it, which is what any keep wrote before this rule, counts as
+  absent: the policy in force is scored again as round 0 with the tag `current`, and that result is
+  saved with the field. So the first gated round after a keep, and the first after a restart that
+  turns the setting on, measures the policy in force afresh, once; later rounds reuse it.
+- **4.5 A limit, stated.** The files `round-00-current.jsonl` are replaced by each fresh measurement,
+  as they already were whenever the policy in force was scored again. The numbers of earlier
+  measurements stay in the decision log.
+
 ## Knowingly left out tonight
 
 Each is a reproduced finding and becomes an issue.
 
-- The gatekeeper does not veto on the judge's safety flags, and a keep is not confirmed against a
-  freshly measured baseline. Tonight's guard is a conservative noise threshold, and the first and
-  final policies are scored by a different, stronger judge.
+- The gatekeeper does not veto on the judge's safety flags. (A keep confirmed against a fresh
+  measurement was on this list until section 4.)
 - A reply cut off at the output limit still counts as evidence.
 - No deadline on one call or one round beyond each client's own timeout.
 - Safety-check calls and failed judgments are missing from the spend total; the loop's spend limit is
