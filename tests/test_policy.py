@@ -44,6 +44,14 @@ def test_bad_edits_are_refused(action, rule_id, text):
         apply_edit(parse_policy(POLICY), action, rule_id, text, "v")
 
 
+def test_multiline_safety_rule_is_kept_byte_for_byte():
+    wrapped = POLICY.replace("S1. If the person mentions wanting to die,", "S1. If the person mentions wanting to die,\n   ")
+    policy = parse_policy(wrapped)
+    new, _ = apply_edit(policy, "remove", "C5", None, "v")
+    assert safety_section(new) == safety_section(policy)
+    assert render_policy(new).split("## Conversation")[0] == wrapped.split("## Conversation")[0]
+
+
 def test_versions_and_length_limit():
     assert candidate_version("policy-v3") == "policy-v4-candidate"
     assert not at_length_limit(POLICY)

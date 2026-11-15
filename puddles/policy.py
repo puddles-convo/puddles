@@ -23,6 +23,7 @@ class Policy:
     safety: dict[str, str] = field(default_factory=dict)
     conversation_header: str = "## Conversation"
     conversation: dict[str, str] = field(default_factory=dict)
+    safety_lines: list[str] = field(default_factory=list)  # the section exactly as written
 
     def rule_ids(self) -> set[str]:
         return set(self.safety) | set(self.conversation)
@@ -36,6 +37,8 @@ def parse_policy(text: str) -> Policy:
     section: dict[str, str] | None = None
     last_id = None
     for line in lines[1:]:
+        if section is policy.safety and not CONVERSATION_HEADER_RE.match(line):
+            policy.safety_lines.append(line)
         if SAFETY_HEADER_RE.match(line):
             policy.safety_header, section = line, policy.safety
         elif CONVERSATION_HEADER_RE.match(line):
@@ -47,19 +50,26 @@ def parse_policy(text: str) -> Policy:
             section[last_id] += " " + line.strip()
     if not policy.safety_header:
         raise PolicyEditError("policy has no '## Safety' section")
+    while policy.safety_lines and not policy.safety_lines[-1].strip():
+        policy.safety_lines.pop()
     return policy
 
 
+def _safety_block(policy: Policy) -> list[str]:
+    if policy.safety_lines:
+        return [policy.safety_header] + policy.safety_lines
+    return [policy.safety_header] + [f"{rid}. {text}" for rid, text in policy.safety.items()]
+
+
 def render_policy(policy: Policy) -> str:
-    out = [f"# {policy.version}", "", policy.safety_header]
-    out += [f"{rid}. {text}" for rid, text in policy.safety.items()]
+    out = [f"# {policy.version}", ""] + _safety_block(policy)
     out += ["", policy.conversation_header]
     out += [f"{rid}. {text}" for rid, text in policy.conversation.items()]
     return "\n".join(out) + "\n"
 
 
 def safety_section(policy: Policy) -> str:
-    return "\n".join([policy.safety_header] + [f"{r}. {t}" for r, t in policy.safety.items()])
+    return "\n".join(_safety_block(policy))
 
 
 def estimate_tokens(text: str) -> int:
@@ -106,7 +116,7 @@ def apply_edit(policy: Policy, action: str, rule_id: str | None, rule_text: str 
         raise PolicyEditError(f"unknown action {action!r}")
     candidate = Policy(version=new_version, safety_header=policy.safety_header,
                        safety=dict(policy.safety), conversation_header=policy.conversation_header,
-                       conversation=conversation)
+                       conversation=conversation, safety_lines=list(policy.safety_lines))
     return candidate, rule_id
 
 
