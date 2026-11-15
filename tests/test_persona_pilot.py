@@ -324,3 +324,72 @@ def test_report_numbers_from_dict_only(tmp_path, monkeypatch):
     assert "| Notes kept after session 3 | 1 | 0 | |" in report
     assert "| 3 | goals | a \\| b |  |" in report
     assert "| 1 | on one | a |" in report and "| 2 | - | b |" in report
+
+
+# ---------- repair round 1: --workers (amendment 8) and rounding (amendment 6) ----------
+
+def _fake_main(out, *extra):
+    return S.main(["--personas", str(PERSONAS), "--policy", str(POLICY), "--out", str(out), "--fake",
+                   "--turns", "3", "--start", START.isoformat(), *extra])
+
+
+def test_workers_three_gives_the_same_files_as_one(tmp_path, monkeypatch):
+    # The records carry `timings_ms`, measured by the live turn code with time.monotonic, which differ
+    # between any two runs, even two with --workers 1. The turn module's clock is frozen so that the
+    # files can be compared whole; nothing else is set aside.
+    from puddles.inference import turn as turn_module
+    monkeypatch.setattr(turn_module, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+    one, three = tmp_path / "one", tmp_path / "three"
+    assert _fake_main(one, "--workers", "1") == 0
+    assert _fake_main(three, "--workers", "3") == 0
+    assert json.loads((one / "pilot.json").read_text()) == json.loads((three / "pilot.json").read_text())
+    assert (one / "pilot.json").read_text() == (three / "pilot.json").read_text()
+    assert (one / "report.md").read_text() == (three / "report.md").read_text()
+    names = sorted(p.relative_to(one).as_posix() for p in (one / "sessions").rglob("*.json"))
+    assert names == sorted(p.relative_to(three).as_posix() for p in (three / "sessions").rglob("*.json"))
+    for name in names:
+        assert (one / name).read_text() == (three / name).read_text()
+
+
+def test_a_failing_chain_does_not_stop_the_others(env):
+    def make(persona, n, arm):
+        if persona.persona_id == "examprep" and arm == "notes_off":
+            raise RuntimeError("scripted client failure")
+        return S.fake_clients(persona, n, arm, env.path)
+
+    store = NoteStore(S.LockedMemory(FakeUserMemory()), env.root)
+    seen = []
+    pilot = P.run_pilot(list(env.personas.values()), make_clients=make, policy=env.policy, store=store,
+                        note_llm=env.llm, judge=S.FakeJudge(), root=env.root, turns=2, start=START,
+                        fake=True, workers=3, on_session=seen.append)
+    assert len(seen) == 18
+    for p in pilot["personas"]:
+        for arm, sessions in p["sessions"].items():
+            assert [s["session"] for s in sessions] == [1, 2, 3]
+            broken = p["persona_id"] == "examprep" and arm == "notes_off"
+            assert all(s["failed"] == broken for s in sessions)
+            if broken:
+                assert all("scripted client failure" in s["reason"] for s in sessions)
+            else:
+                assert all(s["score"]["status"] == "scored" for s in sessions)
+    with pytest.raises(ValueError):
+        P.run_pilot([], make_clients=make, policy=env.policy, store=store, note_llm=env.llm,
+                    judge=S.FakeJudge(), root=env.root, start=START, workers=0)
+
+
+def test_workers_zero_exits_2(tmp_path):
+    out = tmp_path / "zero"
+    assert _fake_main(out, "--workers", "0") == 2
+    assert not out.exists()
+
+
+def test_difference_of_means_uses_unrounded_means():
+    # notes_on 1, 1, 2 (mean 1.333...) and notes_off 1, 2, 2 (mean 1.666...): rounded first, the
+    # difference would be 1.33 - 1.67 = -0.34; from the unrounded means it is -0.33.
+    on = [_session("notes_on", n, value=v) for n, v in zip((1, 2, 3), (1, 1, 2))]
+    off = [_session("notes_off", n, value=v) for n, v in zip((1, 2, 3), (1, 2, 2))]
+    report = P.render_report(_pilot(on, off))
+    assert "| Mean empathy, all sessions | 1.33 | 1.67 | -0.33 |" in report
+    assert P.mean_or_not_measured([1, 1, 2]) == 1.33
+    same = P.render_report(_pilot([_session("notes_on", 1, value=3)], [_session("notes_off", 1, value=3)]))
+    assert "| 1 | 3 | 3 | 0 |" in same and "| Mean empathy, all sessions | 3.00 | 3.00 | 0.00 |" in same

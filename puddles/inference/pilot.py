@@ -7,7 +7,9 @@ ID, `remember_me`, and whether the helper is given notes. Contract: docs/specs/p
 from __future__ import annotations
 
 import json
+import queue
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -273,30 +275,89 @@ def session_dict(result: SessionResult, score: SessionScore) -> dict:
     }
 
 
+def _broken_session(persona: Persona, n: int, arm: str, exc: BaseException) -> SessionResult:
+    """A session that could not even start (clients, notes or the store raised): failed, nothing in it."""
+    user_id = arm_user_id(persona.persona_id, arm)
+    return SessionResult(persona_id=persona.persona_id, session=n, arm=arm, user_id=user_id,
+                         session_id=f"{user_id}-s{n}", notes_given=[], record=None, notes_before=[],
+                         notes_after=[], changes=NoteChanges(failed=True), failed=True,
+                         reason=f"{type(exc).__name__}: {exc}")
+
+
 def run_pilot(personas: list[Persona], *, make_clients: Callable[[Persona, int, str], Clients],
               policy: Policy, store: NoteStore, note_llm: LLM, judge: Judge, root: Path,
               turns: int = DEFAULT_TURNS, start: date, fake: bool = False, policy_path: str = "",
-              on_session: Optional[Callable[[dict], None]] = None) -> dict:
+              on_session: Optional[Callable[[dict], None]] = None, workers: int = 1) -> dict:
     """Every persona, both arms, sessions 1 to 3; a failed session is recorded and the pilot goes on.
 
-    Returns the `pilot.json` object and writes nothing. `policy_path` and `on_session` (called with
-    each session's dict as it finishes) are additions the command uses.
+    Returns the `pilot.json` object and writes none of the pilot's own files. Each (persona, arm) chain
+    runs its three sessions in order on one thread; up to `workers` chains run at once. The result is in
+    persona and arm order whatever finishes first. `on_session` is called under one lock, so its files
+    and lines never interleave. Chains touch different user IDs, so no two threads share a person's notes.
     """
-    out_personas = []
-    for persona in personas:
-        arms: dict[str, list[dict]] = {}
-        for arm in ARMS:
-            arms[arm] = []
-            for n in range(1, SESSIONS_PER_PERSONA + 1):
-                clients = make_clients(persona, n, arm)
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, got {workers}")
+    chains = [(persona, arm) for persona in personas for arm in ARMS]
+    results: dict[tuple[str, str], list[dict]] = {}
+    callback_lock = threading.Lock()
+    stop = threading.Event()
+
+    def run_chain(persona: Persona, arm: str) -> list[dict]:
+        entries = []
+        for n in range(1, SESSIONS_PER_PERSONA + 1):
+            if stop.is_set():
+                break
+            try:
+                clients = make_clients(persona, n, arm)  # built per session, never shared between chains
                 result = run_session(persona, n, arm, clients=clients, policy=policy, store=store,
                                      note_llm=note_llm, root=root, turns=turns, start=start, fake=fake)
-                entry = session_dict(result, score_session(judge, result))
-                arms[arm].append(entry)
-                if on_session is not None:
+            except Exception as exc:  # the chain goes on, and so do the others
+                result = _broken_session(persona, n, arm, exc)
+            entry = session_dict(result, score_session(judge, result))
+            entries.append(entry)
+            if on_session is not None:
+                with callback_lock:
                     on_session(entry)
-        out_personas.append({"persona_id": persona.persona_id, "description": persona.description,
-                             "sessions": arms})
+        return entries
+
+    if workers == 1 or len(chains) <= 1:
+        for persona, arm in chains:
+            results[(persona.persona_id, arm)] = run_chain(persona, arm)
+    else:
+        todo: queue.Queue = queue.Queue()
+        for chain in chains:
+            todo.put(chain)
+        errors: list[BaseException] = []
+
+        def worker() -> None:
+            while not stop.is_set():
+                try:
+                    persona, arm = todo.get_nowait()
+                except queue.Empty:
+                    return
+                try:
+                    results[(persona.persona_id, arm)] = run_chain(persona, arm)
+                except BaseException as exc:  # only a bug gets here; it is raised in the main thread
+                    errors.append(exc)
+                    stop.set()
+
+        threads = [threading.Thread(target=worker, daemon=True, name=f"pilot-{i}")
+                   for i in range(min(workers, len(chains)))]
+        for t in threads:
+            t.start()
+        try:
+            for t in threads:
+                while t.is_alive():
+                    t.join(0.2)  # a short wait, so KeyboardInterrupt reaches the main thread
+        except KeyboardInterrupt:
+            stop.set()  # no new session starts; the daemon threads die with the process
+            raise
+        if errors:
+            raise errors[0]
+
+    out_personas = [{"persona_id": persona.persona_id, "description": persona.description,
+                     "sessions": {arm: results[(persona.persona_id, arm)] for arm in ARMS}}
+                    for persona in personas]
     return {"policy_version": policy.version, "policy_path": policy_path, "turns": turns, "fake": fake,
             "start": start.isoformat(), "judge_version": judge.version,
             "policy_sentence": POLICY_SENTENCE, "limits_sentence": LIMITS_SENTENCE,
@@ -306,9 +367,16 @@ def run_pilot(personas: list[Persona], *, make_clients: Callable[[Persona, int, 
 # ---------- the report ----------
 
 def mean_or_not_measured(values: list[float]) -> float | str:
+    """Rounded to 2 decimals, as the contract states; the report computes differences from `_mean`."""
+    m = _mean(values)
+    return m if isinstance(m, str) else round(m, 2)
+
+
+def _mean(values: list[float]) -> float | str:
+    """The unrounded mean, or NOT_MEASURED over no values."""
     if not values:
         return NOT_MEASURED
-    return round(sum(values) / len(values), 2)
+    return sum(values) / len(values)
 
 
 def _cell(text: Any) -> str:
@@ -330,7 +398,7 @@ def _int_diff(a: str, b: str) -> str:
 
 
 def _fmt_mean(v: float | str) -> str:
-    return v if isinstance(v, str) else f"{v:.2f}"
+    return v if isinstance(v, str) else f"{round(v, 2):.2f}"
 
 
 def _mean_diff(a: float | str, b: float | str) -> str:
@@ -403,8 +471,8 @@ def render_report(pilot: dict) -> str:
                               ("Mean relevance, session 3", True, "relevance"),
                               ("Mean empathy, all sessions", False, "empathy"),
                               ("Mean relevance, all sessions", False, "relevance")):
-        a = mean_or_not_measured(_scored(arm_sessions("notes_on", only3), key))
-        b = mean_or_not_measured(_scored(arm_sessions("notes_off", only3), key))
+        a = _mean(_scored(arm_sessions("notes_on", only3), key))  # unrounded: rounded for display only
+        b = _mean(_scored(arm_sessions("notes_off", only3), key))
         lines.append(f"| {label} | {_fmt_mean(a)} | {_fmt_mean(b)} | {_mean_diff(a, b)} |")
     counts = {}
     for arm in ARMS:

@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,6 +59,7 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--turns", type=int, default=DEFAULT_TURNS)
     p.add_argument("--fake", action="store_true")
     p.add_argument("--only", default=None)
+    p.add_argument("--workers", type=int, default=1, help="chains (persona, arm) run at once; at least 1")
     p.add_argument("--start", default=None, help="the day of session 1, YYYY-MM-DD; default today")
     return p.parse_args(argv)
 
@@ -89,6 +91,30 @@ def fake_clients(persona: Persona, session: int, arm: str, path: CrisisPath) -> 
         user_id = arm_user_id(persona.persona_id, "notes_on")
         first += " " + " ".join(m.replace("{user_id}", user_id) for m in plan.fake_markers)
     return Clients(helper=_fake_helper(), checker=fake_checker(path), user=_fake_user(first), path=path)
+
+
+class LockedMemory:
+    """One lock around every call to a memory that is not safe across threads.
+
+    `FakeUserMemory` keeps plain dicts and lists (`entries`, `audiences`, `recalls`, `delete_calls`,
+    `fail_deletes`), and `recall` iterates `entries` while another chain may be adding to it. Its calls
+    return at once, so serialising them costs nothing. The real `PastUserMemory` is not wrapped: its
+    only state is an httpx client, which is thread-safe, and its `wait` takes a minute per note.
+    """
+
+    def __init__(self, memory: Any) -> None:
+        self._memory = memory
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._memory, name)
+        if not callable(attr):
+            return attr
+
+        def locked(*args: Any, **kwargs: Any) -> Any:
+            with self._lock:
+                return attr(*args, **kwargs)
+        return locked
 
 
 class FakeJudge:
@@ -125,6 +151,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
     out = Path(args.out)
     try:
+        if args.workers < 1:
+            raise ValueError(f"--workers must be at least 1, got {args.workers}")
         if args.turns < 1:
             raise ValueError(f"--turns must be at least 1, got {args.turns}")
         start = date.fromisoformat(args.start) if args.start else date.today()
@@ -138,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(f"{out} already holds files; give an --out that does not exist or is empty")
         path = crisis.load_path()
         if args.fake:
-            memory: Any = FakeUserMemory()
+            memory: Any = LockedMemory(FakeUserMemory())
             note_llm: Any = FakeNoteTaker()
             judge: Any = FakeJudge()
 
@@ -182,7 +210,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     pilot = run_pilot(personas, make_clients=make_clients, policy=policy, store=store, note_llm=note_llm,
                       judge=judge, root=root, turns=args.turns, start=start, fake=args.fake,
-                      policy_path=args.policy, on_session=on_session)
+                      policy_path=args.policy, on_session=on_session,
+                      workers=args.workers)
     (out / "pilot.json").write_text(json.dumps(pilot, indent=2) + "\n", encoding="utf-8")
     (out / "report.md").write_text(render_report(pilot), encoding="utf-8")
     print(f"report: {out / 'report.md'}")
