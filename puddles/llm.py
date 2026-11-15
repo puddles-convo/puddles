@@ -55,26 +55,41 @@ class OpenAILLM:
         self.client = OpenAI()
         temperature = os.environ.get("PUDDLES_AGENT_TEMPERATURE")
         self.extra = {"temperature": float(temperature)} if temperature else {}
+        # Only on the requests that carry the search tool; see docs/specs/provider-settings.md.
+        effort = os.environ.get("PUDDLES_AGENT_TOOL_REASONING_EFFORT")
+        self.tool_extra = {"reasoning_effort": effort} if effort else {}
 
     def _request(self, send: Callable[..., Any], messages: list[dict], **options: Any) -> Any:
         """One API request, with the agent's output limit. Returns the response.
 
         The agent is the one named by `puddles.usage.metering`. With a meter active the request
         gets a `sent` and a `done` line in the usage log and its own span with its token counts.
+        An `openai.OpenAIError` other than `LengthFinishReasonError` becomes `AgentFailed`.
         """
-        from openai import LengthFinishReasonError
+        from openai import LengthFinishReasonError, OpenAIError
 
         meter, agent = usage.current()
         limit = output_limit(self.output_limits, agent)
         options = {**self.extra, **options, "max_completion_tokens": limit}
+
+        def sent() -> Any:
+            try:
+                return send(model=self.model, messages=messages, **options)
+            except LengthFinishReasonError:
+                raise
+            except OpenAIError as exc:
+                reason = f"the request to {self.model} failed: {type(exc).__name__}: {str(exc)[:300]}"
+                usage.note_failed(agent or "agent", reason)
+                raise AgentFailed(reason) from exc
+
         if meter is None:
-            return send(model=self.model, messages=messages, **options)
+            return sent()
         from puddles.tracing import model_call  # here, so that importing this module does not import MLflow
 
         with model_call(agent or "agent", self.model, {"messages": messages},
                         prompt_tokens=estimate_tokens(json.dumps(messages)), max_tokens=limit, meter=meter) as call:
             try:
-                resp = send(model=self.model, messages=messages, **options)
+                resp = sent()
             except LengthFinishReasonError as exc:
                 call.finish("(cut off at the output limit)", _usage(exc.completion, messages))
                 raise
@@ -107,7 +122,8 @@ class OpenAILLM:
                                 {"role": "user", "content": user}]
         searches = 0
         while searches < max_searches:
-            resp = self._request(self.client.chat.completions.create, messages, tools=[SEARCH_TOOL])
+            resp = self._request(self.client.chat.completions.create, messages, tools=[SEARCH_TOOL],
+                                 **self.tool_extra)
             msg = resp.choices[0].message
             if not msg.tool_calls:
                 break
