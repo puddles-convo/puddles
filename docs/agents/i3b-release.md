@@ -21,7 +21,7 @@ Code, so it has no prompt. Its rule:
 ```
 keyword match, or the checker says crisis        -> discard the draft, speak the fixed response for that category
 the checker says none or concern                 -> speak the helper's draft
-the checker failed, took over 3 seconds,
+the checker failed, took over 5 seconds,
   or gave an answer that cannot be parsed        -> discard the draft, speak the holding line
 two failed checks in a row                       -> speak the stored offline line
 ```

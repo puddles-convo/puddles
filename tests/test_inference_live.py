@@ -505,6 +505,76 @@ def test_plain_llm_validates_the_answer_and_retries_once(monkeypatch):
         llm.structured("system", "user", NoteTakerOutput)
 
 
+def plain_env(monkeypatch, **values: str) -> Opener:
+    """The environment `PlainLLM.from_env` reads, with only `values` among the optional variables set."""
+    import urllib.request
+
+    monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "stand-in")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://stand-in.invalid/v1")
+    for name in ("PUDDLES_AGENT_TEMPERATURE", "PUDDLES_AGENT_MAX_TOKENS_PARAM", "PUDDLES_AGENT_TOOL_REASONING_EFFORT"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    opener = Opener()
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    return opener
+
+
+def test_plain_llm_sends_what_current_openai_models_accept_by_default(monkeypatch):
+    """No temperature, the limit as `max_completion_tokens` only, as `OpenAILLM.structured` sends it."""
+    from loop.llm import OpenAICompatClient
+    from puddles.inference.live import PlainLLM
+
+    opener = plain_env(monkeypatch)
+    llm = PlainLLM.from_env()
+    assert type(llm.client) is OpenAICompatClient
+    assert llm.structured("system", "user", NoteTakerOutput) == NoteTakerOutput()
+    [body] = [json.loads(b) for b in opener.bodies]
+    assert "temperature" not in body
+    assert body["max_completion_tokens"] == llm.max_tokens and "max_tokens" not in body
+    assert "reasoning_effort" not in body and body["response_format"]["type"] == "json_schema"
+
+
+def test_plain_llm_sends_the_same_body_as_openai_llm_structured(monkeypatch):
+    """The same environment, both models: the same fields apart from how each sends the schema and the
+    SDK's own `stream: false`, which is the server's default."""
+    from puddles.inference.live import PlainLLM
+
+    opener = plain_env(monkeypatch, PUDDLES_AGENT_TOOL_REASONING_EFFORT="none")
+    StandIn, sdk_bodies = stand_in_openai()
+    StandIn().structured("system", "user", NoteTakerOutput)
+    PlainLLM(PlainLLM.from_env().client, max_tokens=100).structured("system", "user", NoteTakerOutput)
+    [plain] = [json.loads(b) for b in opener.bodies]
+    [sdk] = [json.loads(b) for b in sdk_bodies]
+    for body in (plain, sdk):
+        body.pop("response_format")
+    assert sdk.pop("stream") is False
+    assert plain == sdk
+
+
+def test_plain_llm_temperature_and_limit_name_when_set(monkeypatch):
+    from puddles.inference.live import PlainLLM
+
+    opener = plain_env(monkeypatch, PUDDLES_AGENT_TEMPERATURE="0.3", PUDDLES_AGENT_MAX_TOKENS_PARAM="max_tokens")
+    llm = PlainLLM.from_env()
+    llm.structured("system", "user", NoteTakerOutput)
+    [body] = [json.loads(b) for b in opener.bodies]
+    assert body["temperature"] == 0.3
+    assert body["max_tokens"] == llm.max_tokens and "max_completion_tokens" not in body
+
+
+def test_plain_llm_refuses_another_limit_name(monkeypatch):
+    from loop.errors import ConfigError
+
+    from puddles.inference.live import PlainLLM
+
+    opener = plain_env(monkeypatch, PUDDLES_AGENT_MAX_TOKENS_PARAM="max_output_tokens")
+    with pytest.raises(ConfigError, match="PUDDLES_AGENT_MAX_TOKENS_PARAM"):
+        PlainLLM.from_env()
+    assert opener.bodies == []
+
+
 # ---------- 6. training on, then off, in the same process ----------
 
 def test_tracing_off_does_not_import_mlflow():
