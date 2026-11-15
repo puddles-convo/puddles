@@ -288,18 +288,58 @@ def is_gated(root: Path, round_: int) -> bool:
     return (str(Path(root).resolve()), int(round_)) in _GATED
 
 
+CANNOT_TELL = "cannot be looked at"
+
+
+def _named(exc: OSError) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _absent(path: Path) -> Optional[str]:
+    """None when `path` is confirmed not there (`os.lstat` raises FileNotFoundError); "" when it is
+    there; otherwise why it cannot be told. Not being able to look is not the same as not being there."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"{path} {CANNOT_TELL} ({_named(exc)}), so it cannot be told that the gate left nothing there"
+    return ""
+
+
+def _folder_sign(path: Path) -> Optional[str]:
+    """None when `path` is confirmed absent, or a folder whose entries can all be listed; else the sign."""
+    why = _absent(path)
+    if not why:
+        if why is None:
+            return None
+        try:
+            with os.scandir(path) as entries:
+                for _ in entries:
+                    pass
+            return None
+        except (NotADirectoryError, FileNotFoundError):  # a file, or a link to nothing
+            return f"{path} is there and is not a folder, so nothing can be known about what the gate left"
+        except OSError as exc:
+            return (f"{path} is there but its entries {CANNOT_TELL} ({_named(exc)}), so nothing can be known "
+                    "about what the gate left")
+    return why
+
+
 def gated_signs(result: RoundResult, root: Path) -> list[str]:
-    """Every sign that the round is the real gate's (gate.md section 9); empty when there is none."""
+    """Every sign that the round is the real gate's, or that it cannot be told it is not (gate.md
+    section 9); empty only when the absence of every sign is confirmed."""
     signs = []
     if any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256)):
         signs.append("the result carries the gate's measurements or hashes, so it went through the gate")
     if is_gated(root, result.round):
         signs.append("make_gate's gate was called for this root and round in this process")
-    signs += [f"{path} is there, written by the real gate"
-              for path in gate_files(root, result.round) if os.path.lexists(path)]
-    scores_dir = Path(root) / "scores"
-    if os.path.lexists(scores_dir) and not scores_dir.is_dir():
-        signs.append(f"{scores_dir} is there and is not a folder, so nothing can be known about what the gate left")
+    root = Path(root)
+    signs += [s for s in (_folder_sign(p) for p in (root, root / "scores", root / "conversations")) if s]
+    for path in gate_files(root, result.round):
+        why = _absent(path)
+        if why is not None:
+            signs.append(why or f"{path} is there, written by the real gate")
     return signs
 
 
@@ -328,8 +368,11 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     (`gated_signs`): one of `result.scores`, `result.safety`, `result.base_sha256`,
     `result.candidate_sha256` set; the gate called for this root and round in this process
     (`is_gated`); any file the gate writes for the round there, a dangling link included; or
-    `<root>/scores` there and not a folder. A gate outcome belongs to one round and one edit: one
-    whose round or edit ID is not the result's is refused with ValueError, whatever else is passed.
+    `<root>/scores` there and not a folder. Not being able to look is not the same as not being
+    there: they are taken only when the absence of every sign is confirmed (`os.lstat` raising
+    FileNotFoundError; `<root>`, `scores` and `conversations` each absent or a folder that can be
+    listed; the decision log absent or there), and refused when it cannot be told. A gate outcome
+    belongs to one round and one edit: one whose round or edit ID is not the result's is refused with ValueError, whatever else is passed.
     Left outside: another process's gate killed before it wrote any file for the round; a caller
     that deletes the gate's files; a real gate's outcome carried to another root in the same
     process (an outcome does not say which root it was measured on); and, each only when no gate
@@ -344,9 +387,16 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
     if scores is not None or safety is not None:
         signs = gated_signs(result, root)
+        # Whether the round is logged already is told from the log; a log that cannot be looked at tells nothing.
+        why = _absent(log.path)
+        if why:
+            signs.append(f"the decision log {why}")
         if signs:
-            raise ValueError(f"round {result.round} is the real gate's ({'; '.join(signs)}); its measurements "
-                             "cannot be replaced by the caller's scores or safety; nothing was written")
+            known = [s for s in signs if CANNOT_TELL not in s]
+            head = (f"round {result.round} is the real gate's" if known else
+                    f"it cannot be told that round {result.round} is not the real gate's")
+            raise ValueError(f"{head} ({'; '.join(signs)}); its measurements cannot be replaced by the "
+                             "caller's scores or safety; nothing was written")
     # ---- read each file once, as its bytes, and check what was measured against those bytes ----
     base_text = read_policy_text(
         result.base_policy_path, result.base_sha256 if gate is not None else None,
