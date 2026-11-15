@@ -1,12 +1,6 @@
 {
-  "harness": {
-    "version": "harness-v3",
-    "policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
-    "at_length_limit": false,
-    "skill_cards": [],
-    "example_situations": [],
-    "adapter": null
-  },
+  "policy_text": "(the full text of policy-v3: policy-v4 above without rule C2)",
+  "at_length_limit": false,
   "pattern": {
     "id": "pattern-r03",
     "name": "advice-before-understanding",
@@ -16,51 +10,25 @@
   "sources": [
     {
       "url": "(url 1 from Exa)",
-      "title": "(title 1)",
-      "quote": "(supporting passage)",
       "technique": "Ask one open question and reflect the answer before any suggestion."
     }
   ],
-  "scoreboard": [
-    {
-      "action": "edit_rule",
-      "tried": 2,
-      "kept": 2,
-      "average_gain": 0.2,
-      "average_cost": "6 min"
-    }
-  ],
-  "earlier_actions": [
+  "earlier_edits": [
     {
       "id": "edit-r01",
-      "action": "edit_rule",
-      "target": "C4",
+      "pattern_id": "pattern-r01",
+      "action": "reword",
+      "rule_id": "C4",
       "outcome": "kept",
-      "prediction": "",
-      "observed": "",
       "summary": "Limit replies to one or two sentences."
     },
     {
       "id": "edit-r02",
-      "action": "edit_rule",
-      "target": "C5",
+      "pattern_id": "pattern-r02",
+      "action": "add",
+      "rule_id": "C5",
       "outcome": "kept",
-      "prediction": "",
-      "observed": "",
       "summary": "Offer one small suggestion and ask whether it fits."
     }
-  ],
-  "budget": {
-    "rounds_left": 20,
-    "training_runs_left": 3,
-    "exploration_round": false
-  },
-  "tools": [
-    "set_examples",
-    "edit_rule",
-    "no_change",
-    "add_skill_card",
-    "merge_adapters",
-    "train_adapter"
   ]
 }

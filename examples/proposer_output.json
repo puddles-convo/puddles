@@ -1,21 +1,6 @@
 {
-  "considered": [
-    {
-      "action": "set_examples",
-      "rejected_because": "No kept conversation yet shows exploring before advising, so there is no good example to use."
-    },
-    {
-      "action": "add_skill_card",
-      "rejected_because": "The fix is one behaviour at one point in the conversation; a rule states it more directly than a card."
-    }
-  ],
-  "action": "edit_rule",
-  "args": {
-    "op": "add",
-    "rule_id": null,
-    "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."
-  },
-  "hypothesis": "The helper offers suggestions before it knows the situation; a rule that delays suggestions for two replies addresses the exact point where it fails.",
-  "prediction": "relevance +0.3 on validation; the pattern falls below 1 in 10 of the lowest-scoring conversations",
-  "addresses": "pattern-r03"
+  "action": "add",
+  "rule_id": null,
+  "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits.",
+  "summary": "Add a rule to ask one open question and hold suggestions for the first two replies."
 }

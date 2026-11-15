@@ -9,6 +9,8 @@ One file per agent. Every file has the same six parts:
 5. **Memory**: what it reads and what it writes, with the entry as it is stored.
 6. **When it goes wrong.**
 
+For anything about the memory as a whole (the levels, when each is updated, the formats, what is still undecided), go to [memory.md](../memory.md). Part 5 of each agent file is that agent's share of it.
+
 ## Training
 
 | Step | Agent | What it does | Has a prompt |
@@ -18,7 +20,7 @@ One file per agent. Every file has the same six parts:
 | 3 | [Judge](t3-judge.md) | Rates the finished conversation | Yes |
 | 4 | [Critic](t4-critic.md) | Names the main failure of the round | Yes |
 | 5 | [Researcher](t5-researcher.md) | Finds how counsellors handle it, through Exa | Yes |
-| 6 | [Proposer](t6-proposer.md) | Picks one action from its toolbox and predicts its effect | Yes |
+| 6 | [Proposer](t6-proposer.md) | Writes one change to the policy (version 2, proposed: picks one action from a toolbox) | Yes |
 | 7 | [Gatekeeper](t7-gatekeeper.md) | Tests the change; keeps it or reverts it | No: code. One small yes-or-no prompt for safety checks |
 
 ## Inference
@@ -38,7 +40,7 @@ One file per agent. Every file has the same six parts:
 |---|---|---|---|
 | Final | [Held-out jury](e1-held-out-jury.md) | Four jurors rate the final test conversations | Yes, one per juror |
 
-The prompts in these files are version 2. All of them side by side, with the rules they share: [agent-prompts.md](../agent-prompts.md).
+Each file's `### System message` is the prompt the code uses today. Each file also has a **Proposed version 2 (not live yet)** section at the end; all version 2 prompts side by side, with the rules they share: [agent-prompts.md](../agent-prompts.md).
 
 ## An output format, or just the memory?
 

@@ -1,34 +1,44 @@
 """Record formats for puddles: one Pydantic model per handoff, log event and file.
 
 Version 3. A proposal for the team to settle under issue #1: change a model here
-and every agent that imports it changes with it.
+and every agent that imports it changes with it. Version 3 gave user notes a kind,
+a cap and a last-confirmed date, gave each sighting of a failure pattern its own
+ID, and put a budget on the history lists that go into prompts.
 
-Version 3 matches the version 2 prompts (docs/agent-prompts.md): evidence fields
-written before scores, the judge's safety flags, the critic's comparison with
-high-scoring conversations, a supporting quote per source, the proposer's toolbox
-(Intervention), the gate's assertion check, calibration example files and the
-held-out jury.
+Version 4 adds what the proposed version 2 prompts need (docs/agent-prompts.md),
+without changing anything the current code uses: evidence fields written before
+scores, the judge's safety flags, the critic's comparison with high-scoring
+conversations, a supporting quote per source, scenario fields for a gradual
+simulated user, skills and examples for the helper, the proposer's toolbox
+(ProposerInputV2, ProposerOutputV2, Intervention), the gate's assertion check,
+calibration example files and the held-out jury. New fields have defaults, and
+the proposer's new formats have their own names, so version 3 records still load.
 
 Sections: shared pieces, training records, what each model returns, the decision
-log, policy and safety files, inference records, user memory, the shape of a
-past.dev memory entry, example files and the held-out jury. docs/agents.md
-explains how they fit together.
+log, policy and safety files, inference records, user memory, and the shape of a
+past.dev memory entry. docs/agents.md explains how they fit together.
 """
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 Score = int  # 1 to 5, the scale ESConv users rated on
 Split = Literal["train", "validation", "test", "live"]
 
-# What the judge flags as unsafe in a conversation. Reported to the gate on its own,
-# never folded into the quality scores.
+# How much history from earlier rounds a prompt may carry. The decision log keeps
+# everything; these limit only what code copies into a prompt.
+HISTORY_RECENT = 10  # most recent patterns, queries or edits shown beyond the relevant ones
+FROM_MEMORY_LIMIT = 5  # records loaded after a recall
+
+# Version 4: what the judge flags as unsafe in a conversation. Reported to the gate
+# on its own, never folded into the quality scores.
 SafetyFlag = Literal["missed_risk", "diagnosis_or_medical", "role_break", "harmful_validation"]
 
-# The proposer's toolbox, version 1, plus the option to change nothing.
+# Version 4: the proposer's toolbox (version 1 of it), plus the option to change nothing.
 ToolAction = Literal[
     "edit_rule", "add_skill_card", "set_examples", "train_adapter", "merge_adapters", "no_change"
 ]
@@ -68,7 +78,7 @@ class Scenario(Strict):
     initial_intensity: Score = Field(ge=1, le=5)
     openness: Literal["open", "guarded", "resistant"] = "open"
     from_session: Optional[str] = None  # set when made from a live session
-    # version 3: what makes the simulated user open up gradually
+    # version 4: what makes the simulated user open up gradually
     opener: Optional[str] = None  # the real seeker's first message in ESConv
     reveal_facts: list[str] = []  # 2 to 4 facts, in the order the real seeker revealed them
     min_turns: int = Field(default=4, ge=1)  # fewest turns before the simulated user may end
@@ -100,12 +110,17 @@ class ScoreRecord(Record):
     emotion_after: Score = Field(ge=1, le=5)
     strategies: list[str]  # one per helper turn, ESConv strategy names
     note: str
-    evidence: str = ""  # version 3: the judge's reasoning, written before its scores
-    safety_flags: list[SafetyFlag] = []  # version 3: goes to the gate separately
+    evidence: str = ""  # version 4: the judge's reasoning, written before its scores
+    safety_flags: list[SafetyFlag] = []  # version 4: goes to the gate separately
 
 
 class FailurePattern(Record):
-    """Critic -> researcher."""
+    """Critic -> researcher. One sighting of a pattern, in one round.
+
+    Every sighting has its own id, so no record is ever overwritten. A pattern's
+    identity is the id of its first sighting, which later sightings carry in
+    same_as_pattern_id.
+    """
 
     round: int
     name: str
@@ -113,14 +128,19 @@ class FailurePattern(Record):
     seen_in: int
     out_of: int  # the conversations the critic was given
     example_conversation_ids: list[str]
-    same_as_pattern_id: Optional[str] = None  # set on a recurrence
-    seen_in_high: Optional[int] = None  # version 3: how many high-scoring ones show it too
+    same_as_pattern_id: Optional[str] = None  # the first sighting's id; None on a first sighting
+    seen_in_high: Optional[int] = None  # version 4: how many high-scoring ones show it too
+
+    @property
+    def pattern_id(self) -> str:
+        """The pattern's identity. Status, research and edits are keyed by this."""
+        return self.same_as_pattern_id or self.id
 
 
 class Source(BaseModel):
     url: str
     title: str = ""
-    quote: str = ""  # version 3: the passage on the page that supports the technique
+    quote: str = ""  # version 4: the passage on the page that supports the technique
     technique: str  # one line
 
 
@@ -138,8 +158,7 @@ EditAction = Literal["add", "reword", "remove"]
 
 
 class PolicyEdit(Record):
-    """Version 2 record for an edit_rule action. Version 3 records every action as an
-    Intervention (below); this model stays so existing records still load."""
+    """Proposer -> gatekeeper. Exactly one rule added, reworded or removed."""
 
     round: int
     pattern_id: str
@@ -164,14 +183,14 @@ class GateOutcome(Record):
     """Gatekeeper -> next round."""
 
     round: int
-    edit_id: str  # the PolicyEdit or Intervention ID
+    edit_id: str
     decision: Literal["kept", "reverted"]
     before: Scores
     after: Scores
     safety_passed: bool
     policy_in_force: str
     reason: str = ""
-    prediction_met: Optional[bool] = None  # version 3: did the proposer's prediction come true
+    prediction_met: Optional[bool] = None  # version 4: did the proposer's prediction come true
 
 
 class GateInput(Strict):
@@ -199,8 +218,8 @@ class HelperInput(Strict):
     policy_version: str
     user_notes: list[str] = []  # empty in training
     turns: list[Turn]
-    # version 3: rendered text, one item each. Empty on the robot for now (open issue:
-    # how skills and examples are shipped to the cloud brain); the prompt then says "none".
+    # version 4: rendered text, one item each. Empty on the robot for now (open issue:
+    # how skills and examples reach the cloud brain); the prompt then says "none".
     skills: list[str] = Field(default=[], max_length=3)
     examples: list[str] = []
 
@@ -214,26 +233,138 @@ class ScoredConversation(Strict):
 
 
 class PatternBrief(Strict):
-    id: str
+    """One pattern, however many times it has been seen."""
+
+    id: str  # the pattern's identity: the id of its first sighting
     name: str
     description: Optional[str] = None
     status: Optional[Literal["open", "fixed", "recurring"]] = None
     rule_id: Optional[str] = None  # the rule that fixed it, if any
+    sightings: int = Field(default=1, ge=1)  # rounds in which the critic named it
 
 
 class CriticInput(Strict):
     round: int
     policy_text: str
-    earlier_patterns: list[PatternBrief] = []  # complete list, built from the log
-    from_memory: list[str] = []  # detail found by recall, loaded from record files
+    # Built from the log, one per pattern: every fixed or recurring pattern (each
+    # has a rule, so the policy's token cap limits how many there are), every open
+    # pattern the recall found, and the HISTORY_RECENT most recently seen open ones.
+    earlier_patterns: list[PatternBrief] = []
+    older_patterns_summary: str = ""  # one line counting the patterns not shown
+    from_memory: list[str] = []  # detail found by recall, loaded from record files; at most FROM_MEMORY_LIMIT
     conversations: list[ScoredConversation]  # the lowest-scoring ones, in full (<low_scoring>)
-    high_scoring: list[ScoredConversation] = []  # version 3: a few of the best, for comparison
+    high_scoring: list[ScoredConversation] = []  # version 4: a few of the best, for comparison
 
 
 class ResearcherInput(Strict):
     pattern: PatternBrief
-    earlier_queries: list[str] = []  # complete list, built from the log
+    # Built from the log: every query run for this pattern, and the HISTORY_RECENT
+    # most recent queries for other patterns.
+    earlier_queries: list[str] = []
+    older_queries_summary: str = ""  # one line counting the queries not shown
 
+
+class EditSummary(Strict):
+    id: str
+    pattern_id: Optional[str] = None  # the identity of the pattern it was written for
+    action: EditAction
+    rule_id: str
+    outcome: Literal["kept", "reverted"]
+    summary: str
+
+
+class ProposerInput(Strict):
+    policy_text: str
+    at_length_limit: bool
+    pattern: PatternBrief
+    sources: list[Source]
+    # Built from the log: every edit tried for this pattern, and the
+    # HISTORY_RECENT most recent edits for other patterns.
+    earlier_edits: list[EditSummary] = []
+    older_edits_summary: str = ""  # one line counting the edits not shown
+
+
+class CrisisCheckerInput(Strict):
+    session_id: str
+    turn: int
+    recent_turns: list[Turn] = []
+    text: str
+
+
+NoteKind = Literal["situation", "people", "what_helps", "goals", "follow_up", "preferences"]
+
+# The most live notes one person may have of each kind: 23 in all. Code enforces it.
+NOTE_CAPS: dict[str, int] = {
+    "situation": 3,  # what they are dealing with now
+    "people": 6,  # someone in their life and how they are related, one note per person
+    "what_helps": 5,  # what they said helps or does not help
+    "goals": 3,  # plans they stated themselves
+    "follow_up": 3,  # something to ask about next time
+    "preferences": 3,  # how they like to be talked to
+}
+FOLLOW_UP_EXPIRY_DAYS = 14  # a follow-up is dropped this long after its due date
+
+
+class ExistingNote(Strict):
+    note_id: str
+    kind: NoteKind
+    fact: str
+    last_confirmed: date
+    due_date: Optional[date] = None  # follow_up only
+
+
+class NoteTakerInput(Strict):
+    today: str  # ISO date, supplied by code
+    may_add_notes: bool  # false when the person declined to be remembered: only deletes are kept
+    existing_notes: list[ExistingNote] = []
+    turns: list[Turn]
+
+
+# ---------- what each model returns (code adds IDs, dates and versions) ----------
+
+class JudgeInput(Strict):
+    """Turns only, so the judge cannot tell which policy produced them."""
+
+    turns: list[Turn]
+
+
+class JudgeOutput(Strict):
+    evidence: str = ""  # version 4: first, so the judge reasons before it scores
+    empathy: Score = Field(ge=1, le=5)
+    relevance: Score = Field(ge=1, le=5)
+    emotion_before: Score = Field(ge=1, le=5)
+    emotion_after: Score = Field(ge=1, le=5)
+    strategies: list[str]
+    safety_flags: list[SafetyFlag] = []  # version 4
+    note: str
+
+
+class CriticOutput(Strict):
+    evidence: str = ""  # version 4: first
+    found: bool
+    name: Optional[str] = None
+    description: Optional[str] = None
+    seen_in: int = 0
+    out_of: int = 0
+    seen_in_high: int = 0  # version 4: if about as common as in the low-scoring set, not the cause
+    example_conversation_ids: list[str] = []
+    same_as_pattern_id: Optional[str] = None
+    reason: str = ""  # why nothing was found, when found is false
+
+
+class ResearcherOutput(Strict):
+    queries: list[str]
+    sources: list[Source]  # empty means the round ends as no_evidence
+
+
+class ProposerOutput(Strict):
+    action: EditAction
+    rule_id: Optional[str] = None  # existing ID for reword or remove; None for add
+    rule_text: Optional[str] = None  # None for remove
+    summary: str
+
+
+# ---------- version 4: the proposer's toolbox (proposed, not used by the code yet) ----------
 
 class HarnessBrief(Strict):
     """What the proposer is shown of the harness version in force."""
@@ -261,6 +392,7 @@ class ActionSummary(Strict):
 
     id: str
     action: ToolAction
+    pattern_id: Optional[str] = None  # the identity of the pattern it was for
     target: str = ""  # e.g. rule C2, card reflect-before-advice, adapter-01
     outcome: Literal["kept", "reverted", "no_change"]
     prediction: str = ""
@@ -274,70 +406,19 @@ class Budget(Strict):
     exploration_round: bool = False
 
 
-class ProposerInput(Strict):
+class ProposerInputV2(Strict):
+    """Version 4: the proposed proposer's input, with the toolbox. Not used by the code yet."""
+
     harness: HarnessBrief
     pattern: PatternBrief
     sources: list[Source]
     scoreboard: list[LeverStats] = []
-    earlier_actions: list[ActionSummary] = []  # complete list, built from the log
+    # Built from the log, budgeted like earlier_edits: every action tried for this
+    # pattern, and the HISTORY_RECENT most recent actions for other patterns.
+    earlier_actions: list[ActionSummary] = []
+    older_actions_summary: str = ""  # one line counting the actions not shown
     budget: Budget
     tools: list[ToolAction]  # shuffled by code each round
-
-
-class CrisisCheckerInput(Strict):
-    session_id: str
-    turn: int
-    recent_turns: list[Turn] = []
-    text: str
-
-
-class ExistingNote(Strict):
-    note_id: str
-    fact: str
-
-
-class NoteTakerInput(Strict):
-    today: str  # ISO date, supplied by code
-    may_add_notes: bool  # false when the person declined to be remembered
-    existing_notes: list[ExistingNote] = []
-    turns: list[Turn]
-
-
-# ---------- what each model returns (code adds IDs, dates and versions) ----------
-
-class JudgeInput(Strict):
-    """Turns only, so the judge cannot tell which policy produced them."""
-
-    turns: list[Turn]
-
-
-class JudgeOutput(Strict):
-    evidence: str  # first, so the judge reasons before it scores
-    empathy: Score = Field(ge=1, le=5)
-    relevance: Score = Field(ge=1, le=5)
-    emotion_before: Score = Field(ge=1, le=5)
-    emotion_after: Score = Field(ge=1, le=5)
-    strategies: list[str]
-    safety_flags: list[SafetyFlag] = []
-    note: str
-
-
-class CriticOutput(Strict):
-    evidence: str  # first
-    found: bool
-    name: Optional[str] = None
-    description: Optional[str] = None
-    seen_in: int = 0
-    out_of: int = 0
-    seen_in_high: int = 0  # if about as common as in the low-scoring set, not the cause
-    example_conversation_ids: list[str] = []
-    same_as_pattern_id: Optional[str] = None
-    reason: str = ""  # why nothing was found, when found is false
-
-
-class ResearcherOutput(Strict):
-    queries: list[str]
-    sources: list[Source]  # empty means the round ends as no_evidence
 
 
 class Considered(Strict):
@@ -392,8 +473,8 @@ ARGS_FOR = {
 }
 
 
-class ProposerOutput(Strict):
-    """Version 3: one action from the toolbox, with what it expects to happen.
+class ProposerOutputV2(Strict):
+    """Version 4: one action from the toolbox, with what it expects to happen.
     Code checks the arguments match the action and its limits before applying it."""
 
     considered: list[Considered] = Field(min_length=2)
@@ -442,11 +523,17 @@ class RecordRef(Strict):
 
 
 class LogPattern(Strict):
-    id: str
+    id: str  # this sighting's own id
+    same_as_pattern_id: Optional[str] = None  # the first sighting's id, on a recurrence
     name: str
     seen_in: int
     out_of: int
     status_before: Literal["open", "fixed", "recurring"]
+
+    @property
+    def pattern_id(self) -> str:
+        """The pattern's identity: the first sighting's id."""
+        return self.same_as_pattern_id or self.id
 
 
 class LogEdit(Strict):
@@ -585,22 +672,48 @@ class UserNote(Record):
 
     user_id: str
     session_id: str
+    kind: NoteKind
     fact: str
+    last_confirmed: date  # the day it was written, or last confirmed as still true
+    due_date: Optional[date] = None  # follow_up only
 
 
 class NoteAction(Strict):
     """What the note-taker returns for each change."""
 
-    action: Literal["add", "replace", "delete"]
-    note_id: Optional[str] = None  # for replace and delete
+    action: Literal["add", "replace", "delete", "confirm"]
+    note_id: Optional[str] = None  # for replace, delete and confirm
+    kind: Optional[NoteKind] = None  # for add and replace
     fact: Optional[str] = None  # for add and replace
+    due_date: Optional[date] = None  # for a follow_up that has a date
+
+
+class LiveNote(Strict):
+    """What the brain keeps about one live note, so caps and expiry need no search."""
+
+    note_id: str
+    kind: NoteKind
+    last_confirmed: date
+    due_date: Optional[date] = None
 
 
 class LiveNoteIndex(Strict):
-    """Kept by the brain. Only notes listed here reach the helper's prompt."""
+    """Kept by the brain. Only notes listed here reach the helper's prompt.
+
+    An index with more notes of a kind than NOTE_CAPS allows does not validate,
+    so an over-limit index can be neither saved nor loaded.
+    """
 
     user_id: str
-    note_ids: list[str]
+    notes: list[LiveNote] = []
+
+    @model_validator(mode="after")
+    def _within_caps(self) -> "LiveNoteIndex":
+        counts = Counter(note.kind for note in self.notes)
+        over = {kind: n for kind, n in counts.items() if n > NOTE_CAPS[kind]}
+        if over:
+            raise ValueError(f"more notes than the limit allows: {over}")
+        return self
 
 
 # ---------- past.dev ----------

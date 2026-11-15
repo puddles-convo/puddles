@@ -4,12 +4,13 @@ A support-conversation helper that improves its own behaviour, built at the SF A
 
 The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.
 
-**Status:** this README is the agreed design. No pipeline code is in this repo yet. Scores, counts and sources in the examples are illustrative.
+**Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The rest of the pipeline is not built yet. Scores, counts and sources in the examples are illustrative.
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
-- The design behind memory, policy and the crisis path: [docs/agents.md](docs/agents.md)
-- Proposed version 2 prompts for every agent, including the held-out jury: [docs/agent-prompts.md](docs/agent-prompts.md)
-- Record formats: `schemas.py` (version 2), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+- The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
+- The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
+- Proposed version 2 prompts for every agent, including the held-out jury (not live yet): [docs/agent-prompts.md](docs/agent-prompts.md)
+- Record formats: `schemas.py` (version 4: version 3 plus what the proposed version 2 prompts need), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
 ## Contents
@@ -18,6 +19,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 2. [Training agents](#2-training-agents)
 3. [Inference steps](#3-inference-steps)
 4. [Inference agents](#4-inference-agents)
+   - [Models](#models): which model plays each agent
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
 7. [The proposer's toolbox](#7-the-proposers-toolbox)
@@ -28,6 +30,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 12. [Robot side](#12-robot-side)
 13. [Related work](#13-related-work)
 14. [Improvements from the literature](#14-improvements-from-the-literature)
+- [Running the training agents](#running-the-training-agents)
 
 ## 1. Training steps
 
@@ -152,7 +155,40 @@ INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
 | [**3. Helper**](docs/agents/t2-i3-helper.md) | • Drafts the reply, following the policy file<br>• Same model, prompt and code as in training | Notes about this person, once at the start of the session | Nothing | `policy-v4`, the notes ("on short-term disability and worried about losing their job") and the turns so far | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
 | [**Release**](docs/agents/i3b-release.md) (code, no model) | • Holds all audio until the crisis checker answers<br>• Crisis: fixed response. Checker failed: holding line. Otherwise: the draft. | Nothing | Nothing | The risk level and the helper's draft | The draft, or a fixed response such as "I'm really glad you told me that. Are you thinking about ending your life? ... You can call or text 988 ..." |
 | [**4. Speaker**](docs/agents/i4-speaker.md) (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
-| [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced or deleted | The finished session and the existing notes | `[{"action": "add", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
+| [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced, confirmed or deleted | The finished session and the existing notes | `[{"action": "add", "kind": "what_helps", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
+
+## Models
+
+Which model plays each agent. These are starting choices and none has been benchmarked yet. No model name is hard-coded: each one is set in configuration, so changing a model does not change the code.
+
+### Training
+
+| Agent | Model | Runs on |
+|---|---|---|
+| [1. Simulated user](docs/agents/t1-simulated-user.md) | Qwen3.6-35B-A3B. A different model from the helper, so the helper is not talking to itself | Tinker |
+| [2. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, thinking mode off | Modal |
+| [3. Judge](docs/agents/t3-judge.md) | The strongest OpenAI model the credits allow, version pinned, temperature 0 | OpenAI API |
+| [4. Critic](docs/agents/t4-critic.md) | The same OpenAI model as the judge | OpenAI API |
+| [5. Researcher](docs/agents/t5-researcher.md) | The same OpenAI model, with Exa search as its one tool | OpenAI API and Exa |
+| [6. Proposer](docs/agents/t6-proposer.md) | The same OpenAI model as the judge | OpenAI API |
+| [7. Gatekeeper](docs/agents/t7-gatekeeper.md) | Code, not a model. It asks the judge model one yes-or-no question per judged safety check | |
+
+### Inference
+
+| Agent | Model | Runs on |
+|---|---|---|
+| [1. Listener](docs/agents/i1-listener.md) | faster-whisper, large-v3-turbo (speech to text) | Modal, the same GPU as the helper |
+| [2. Crisis checker](docs/agents/i2-crisis-checker.md) | A keyword list in code first, then the helper model with its own prompt | Modal |
+| [3. Helper](docs/agents/t2-i3-helper.md) | Qwen3.5-9B, the same model and prompt as in training | Modal |
+| [Release](docs/agents/i3b-release.md) | Code, not a model | |
+| [4. Speaker](docs/agents/i4-speaker.md) | Kokoro (text to speech) | Modal |
+| [5. Note-taker](docs/agents/i5-note-taker.md) | A small OpenAI model, run after the session ends | OpenAI API |
+
+### Still to decide
+
+- **The exact OpenAI model** for the judge, critic, researcher and proposer. It must be pinned before the judge is calibrated ([#3](https://github.com/puddles-convo/puddles/issues/3)), because changing it afterwards invalidates the scores. A fallback judge on Tinker is [#23](https://github.com/puddles-convo/puddles/issues/23).
+- **The crisis checker's model.** The helper model adds no delay. A stronger model would miss less, if it can answer inside the 3-second limit.
+- **The helper's size.** 4B, 9B or larger is settled by the comparison in [#24](https://github.com/puddles-convo/puddles/issues/24).
 
 ## 5. The memory
 
@@ -172,7 +208,7 @@ INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
 | Research note | Training | Researcher | Researcher | What has been searched, and the techniques found |
 | Policy edit | Training | Proposer | Proposer | Every change that was proposed |
 | Gate outcome | Training | Gatekeeper | Critic, Proposer | Which edits were kept or reverted, with the scores and the reason |
-| User note | User | Note-taker | Helper, Note-taker | One fact about one person, to carry into the next conversation |
+| User note | User | Note-taker | Helper, Note-taker | One fact about one person, to carry into the next conversation. Each note has one of six kinds, and one person has 23 notes at most. |
 
 Examples of each:
 
@@ -212,6 +248,28 @@ Every entry, in either past.dev memory, has the same shape:
 | `audience` | Who may read it: `training-agents`, or one person's private audience. |
 | `metadata` | The item type, the round, and a pointer to the full record file with its hash. |
 
+### What past.dev holds and what the repo holds
+
+| Kept in the repo (the authority) | Copied into past.dev, audience `training-agents` |
+|---|---|
+| `log/decisions.jsonl`: one `round` event per round, plus a `memory_copy` event per copy | Nothing from the log itself, only the records it points to |
+| `records/round-NN/pattern-rNN.json`, written by the critic | One sentence per failure pattern, identity `critic` |
+| `records/round-NN/research-rNN.json`, written by the researcher, plus the raw Exa results beside it | One sentence per research note: technique and source URL, identity `researcher` |
+| `records/round-NN/edit-rNN.json` and `policies/policy-vN-candidate.md`, written by the proposer | One sentence per edit: action, rule ID and summary, identity `proposer` |
+| `records/round-NN/gate-rNN.json` and the promoted `policies/policy-vN.md` | One sentence per outcome: kept or reverted and why, identity `gatekeeper` |
+| `log/memory_reads.jsonl`: which agent recalled which record IDs | Nothing |
+| Conversations, scores, the simulated user's scenarios and the policy text | Nothing |
+
+Each copy goes in only after the round is in the log, and is polled until past.dev reports it `completed`; a copy still processing after 60 s is logged `pending` and resent at the start of the next round. A recall only tells an agent which record IDs are relevant: the agent loads those records from their files and drops any whose hash does not match the log. The simulated user, the helper and the judge never get a past.dev client.
+
+Who reads what, in [`puddles/agents/`](puddles/agents/):
+
+| Agent | Reads from memory | Written by |
+|---|---|---|
+| Critic | Earlier patterns and their outcomes | Critic, gatekeeper |
+| Researcher | Earlier research notes and their queries | Researcher |
+| Proposer | Why earlier edits were kept or reverted | Gatekeeper |
+
 ### Who is in control
 
 - **No agent is in charge of the memory.** The orchestrator is: the plain code that runs a round. An agent returns its result, and the orchestrator saves it as a record file, appends to the decision log, then copies it into memory under that agent's identity.
@@ -222,11 +280,13 @@ Every entry, in either past.dev memory, has the same shape:
 ### How the agents manage it together
 
 1. **Within a round, agents hand results straight to each other.** Memory is for learning from earlier rounds, because past.dev writes are queued and its reads are searches.
-2. **In training memory, agents only add.** A later fact, such as a rule being removed, is a new entry that names what it replaces. Older entries stay as history. In user memory, a corrected or forgotten note is deleted.
+2. **In training memory, agents only add.** A later fact, such as a rule being removed, is a new entry that names what it replaces. Older entries stay as history. In user memory, a corrected or forgotten note is deleted, and each kind of note has a limit, so one person's notes stay the same size however many sessions there are.
 3. **A search finds; the record files supply.** A recall is used only to find which records are relevant. What the agent is then shown is loaded from the record files and checked against the hash in the log, so a stale entry cannot mislead it.
-4. **Lists that must be complete come from the log.** The edits already tried, and the status of each pattern, are built by code and handed to the critic and the proposer.
+4. **History lists come from the log, within a budget.** The edits already tried, the searches already run and the status of each pattern are built by code. The researcher and the proposer are shown everything about the pattern in hand and the 10 most recent others, with a count of the rest. The critic is shown every pattern that has a rule, and the unsolved ones most like this round's failures. So a prompt does not grow with every round. The checks for a repeated edit or search run against the whole log.
 5. **Every copy is confirmed.** After a write, code checks that past.dev has finished taking it in, and records that in the log. A copy that does not arrive is retried.
 6. **The two memories never mix.** Training agents cannot read notes about a person, and the helper on the robot cannot read training records.
+
+The reasons for the limits on notes and history lists, and what other systems do, are in [docs/research/memory/00-summary.md](docs/research/memory/00-summary.md).
 
 This meets the past.dev challenge rules: the critic, researcher, proposer and gatekeeper all write; the critic, researcher and proposer all read; and the critic and the proposer both use outcomes the gatekeeper wrote.
 
@@ -326,7 +386,7 @@ Nothing is promoted until the noise has been measured and the safety case file e
 | The critic finds a new pattern | Pattern recorded, status `open` | Nothing yet |
 | An edit for it passes the gate | Outcome `kept`; pattern becomes `fixed` | New version with the rule |
 | An edit for it fails the gate | Outcome `reverted`, listed as a failed attempt | Previous version restored |
-| The pattern shows up again | Pattern becomes `recurring` | The proposer rewords or removes the rule; it does not add another |
+| The pattern shows up again | A new record for this sighting, pointing to the first one; the pattern becomes `recurring` | The proposer rewords or removes the rule; it does not add another |
 | A rule is removed | Outcome `kept` for the removal; its pattern goes back to `open` | New version without the rule |
 
 ### The check that proves they agree
@@ -601,6 +661,34 @@ What published work suggests adding to the loop, ranked by value per hour for th
 | 20 | Hypernetwork LoRA, TIES/DARE, ROME/MEMIT, DGM-style self-rewrite | None (skip) | [Text-to-LoRA](https://github.com/SakanaAI/text-to-lora), [TIES](https://arxiv.org/abs/2306.01708), [ROME](https://arxiv.org/abs/2202.05262), [DGM](https://arxiv.org/abs/2505.22954) | n/a | Low | No Qwen3.5 checkpoint, no reliable gain, or far beyond budget |
 
 **What this means for us.** Spend most of the time on harness levers (rows 5 to 7, 9, 10): they have the strongest evidence at this model size and can be reverted in seconds. Use adapter runs as a gated escalation, DPO first, with safety data mixed in and Safe LoRA applied (rows 8, 12). GRPO, merging and steering (rows 15, 18, 19) are rated medium or below here because nothing has tested them on this task; we include them as exploratory actions in [section 7](#7-the-proposers-toolbox) so the loop measures their value instead of us guessing it. No source chooses between kinds of change based on evidence, so the lever scoreboard (row 11) is our clearest new contribution, and it is meaningful only next to the gap between the loop's judge and the held-out jury (row 4).
+
+## Running the training agents
+
+Python 3.10 or later. Keys come from the environment and are never committed.
+
+```bash
+pip install -r requirements.txt
+python -m pytest                                   # offline: scripted model, Exa and memory
+PAST_API_KEY=past_sk_... python -m scripts.pastdev_smoke   # task B1: write one record and read it back
+```
+
+A live round needs `PAST_API_KEY`, `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL` and `EXA_API_KEY`. Until the gatekeeper (J7) exists, `--gate` picks a stand-in outcome, which the log and memory label as a stand-in. Use a separate past.dev project for these runs so they stay out of the team's memory.
+
+```bash
+python -m scripts.run_round --root runs/demo --gate reverted   # round 1, on fixtures/bad_conversations.json
+python -m scripts.run_round --root runs/demo --gate kept       # round 2 recalls round 1
+```
+
+Each run ends by printing, for every record, the agent that wrote it and the agents that later read it from memory. [`tests/test_memory_wiring.py`](tests/test_memory_wiring.py) checks the same thing over two rounds offline.
+
+| Module | What it does |
+|---|---|
+| `puddles/memory.py` | past.dev client (ingest, poll, recall, audience setup), memory sentences, recall to verified records |
+| `puddles/agents/critic.py`, `researcher.py`, `proposer.py` | Build each input from the log and memory, call the model, check the output, retry once, make the record |
+| `puddles/policy.py` | Parse the policy and apply one edit in code; the Safety section is never touched |
+| `puddles/decision_log.py` | Reader and appender for the log; builds the budgeted history lists and pattern status |
+| `puddles/replay.py` | The replay check: the log, the policy in force, its Safety section and `.meta.json` must agree |
+| `puddles/round.py` | Steps 4 to 6 with direct handoffs, then the log entry and the copies into memory |
 
 ## Limits
 
