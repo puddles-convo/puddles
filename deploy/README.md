@@ -18,32 +18,35 @@ All settings are in `deploy/helper_config.py`, which is tested offline in `tests
 
 ## Set up once
 
-```bash
-python3.12 -m venv .venv-deploy && source .venv-deploy/bin/activate
-pip install -r requirements.txt -r deploy/requirements.txt      # modal==1.6.3
+No new environment is needed. `uv` runs Modal's CLI with the pinned version, the same `uv run --no-project --with ...` style as the team's test command (`docs/specs/graph.md`), and installs nothing into the repo's `.venv`:
 
-modal token new                       # opens the browser; pick the workspace that holds your Modal credits
+```bash
+MODAL="uv run --no-project --python 3.12 --with modal==1.6.3 modal"   # the version in deploy/requirements.txt
+
+$MODAL token new                      # opens the browser; pick the workspace that holds your Modal credits
 
 # the server's key: keep the value, the clients need it as HELPER_API_KEY
 export HELPER_API_KEY="$(openssl rand -hex 32)"
-modal secret create puddles-helper-key VLLM_API_KEY="$HELPER_API_KEY"
+$MODAL secret create puddles-helper-key VLLM_API_KEY="$HELPER_API_KEY"
 ```
+
+Deploying needs only `modal`: `deploy/modal_helper.py` imports nothing from the repo except `deploy/helper_config.py`.
 
 Put `HELPER_API_KEY` in your `.env` (never commit it). Anyone with the URL and the key can use your GPU.
 
 ## Deploy and stop
 
 ```bash
-modal deploy deploy/modal_helper.py
+$MODAL deploy deploy/modal_helper.py
 # prints the URL, e.g. https://<workspace>--puddles-helper-serve.modal.run
 
-modal app stop puddles-helper         # stops it, and the bill
+$MODAL app stop puddles-helper        # stops it, and the bill
 ```
 
 For the demo only:
 
 ```bash
-MODAL_HELPER_MIN_CONTAINERS=1 modal deploy deploy/modal_helper.py
+MODAL_HELPER_MIN_CONTAINERS=1 $MODAL deploy deploy/modal_helper.py
 # afterwards, deploy again without it, or stop the app
 ```
 
@@ -68,9 +71,12 @@ export PUDDLES_HELPER_BASE_URL="$HELPER_URL" PUDDLES_HELPER_MODEL="$HELPER_MODEL
 
 ## Test it
 
+The smoke test needs the repo's own dependencies. Run it from the repo root with `uv`, or with any existing `.venv` that has `requirements.txt` installed:
+
 ```bash
-python -m scripts.modal_smoke                                  # one helper reply, one harmless and one crisis check
-python -m scripts.modal_smoke --warm 20 --concurrent 5 --check-auth
+PY="uv run --no-project --python 3.12 --with-requirements requirements.txt python"   # or: .venv/bin/python
+$PY -m scripts.modal_smoke                                     # one helper reply, one harmless and one crisis check
+$PY -m scripts.modal_smoke --warm 20 --concurrent 5 --check-auth
 ```
 
 The smoke test uses the repo's own client, helper and crisis checker, so a pass means the inference code works against the endpoint. It fails on:
@@ -84,7 +90,7 @@ The smoke test uses the repo's own client, helper and crisis checker, so a pass 
 Then stage 4's "done when" check (needs `PAST_API_KEY` and `OPENAI_API_KEY` for the note-taker):
 
 ```bash
-python -m scripts.chat --policy policies/policy-v1.md --user-id user-01 --remember-me no --training no --root runs/chat
+$PY -m scripts.chat --policy policies/policy-v1.md --user-id user-01 --remember-me no --training no --root runs/chat
 ```
 
 That means 10 turns, then one crisis message, such as "I don't want to be here anymore", which must get the fixed crisis response.
