@@ -3,6 +3,8 @@
 Within a round the critic, researcher and proposer hand records straight to each other.
 Only after the round is logged are its records copied into memory, for later rounds to recall.
 """
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Optional
@@ -10,6 +12,8 @@ from typing import Callable, Literal, Optional
 import httpx
 
 from loop.errors import PolicyError
+from loop.policy import Policy as LoadedPolicy
+from loop.policy import load_policy
 from puddles import replay
 from puddles.agents import critic, proposer, researcher
 from puddles.decision_log import DecisionLog, DecisionLogError
@@ -67,6 +71,10 @@ class PolicyChanged(RuntimeError):
 
 class CandidateChanged(PolicyChanged):
     """The candidate file is not the text the gate tested, so it must not be promoted."""
+
+
+class InconsistentResult(RuntimeError):
+    """A round result's fields disagree with each other or with the gate outcome, so nothing is filed."""
 
 
 class RecordChanged(RuntimeError):
@@ -267,11 +275,14 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     It works in two halves. First it reads every file it needs once (the base policy, the
     candidate, the starting policy, the round's record files) and makes every check it can:
     the gate's hashes (whatever the decision, on the files' bytes), the candidate being the base
-    with the logged edit applied (when scores or a safety result are filed), the records being
-    the round's own, the round not being logged already, and the replay check run on what the
-    log and the policy in force would be after this round. Only then does it write: the gate's
-    record, the promoted policy and its .meta.json, the round event, the memory copies. So a
-    check that fails leaves nothing behind.
+    with the logged edit applied (when scores or a safety result are filed, and on every keep),
+    a kept candidate promoted only as what was tested, the result's fields agreeing with the
+    outcome, the records being the round's own, the round not being logged already, the event
+    reading back as one log line, and the replay check run on what the log and the policy in
+    force would be after this round. A reverted candidate is read only as bytes, so a revert is
+    logged whatever state its file is in (docs/specs/gate.md, section 8, rules 7 to 10). Only
+    then does it write: the gate's record, the promoted policy and its .meta.json, the round
+    event, the memory copies. So a check that fails leaves nothing behind.
 
     A promoted policy is written just before the round event; prepare_round removes it if a
     crash comes between the two. Without `start_policy` (the stage-0 graph runner) no .meta.json
@@ -284,13 +295,18 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         PolicyChanged(f"{result.base_policy_path} is not the text the before-scores were measured on; "
                       "nothing was written"))
     candidate_text: Optional[str] = None
+    candidate_data: Optional[bytes] = None
     # Whatever the decision: a reverted event carries this hash beside the candidate's scores and safety.
     tested = gate is not None and result.candidate_sha256 is not None
     if gate is not None:
         assert result.candidate_path is not None and result.edit is not None
-        candidate_text = read_policy_text(
-            result.candidate_path, result.candidate_sha256,
-            CandidateChanged(f"{result.candidate_path} is not the text the gate tested; nothing was written"))
+        changed = CandidateChanged(f"{result.candidate_path} is not the text the gate tested; nothing was written")
+        if gate.decision == "kept":  # a promotion: the strict loader's rules apply
+            candidate_text = read_policy_text(result.candidate_path, result.candidate_sha256, changed)
+            candidate_data = candidate_text.encode("utf-8")
+        else:  # a revert is logged whatever state the file is in: only its bytes are needed
+            candidate_data = _read_bytes(result.candidate_path, result.candidate_sha256, changed)
+            candidate_text = _decoded(candidate_data)
     start_text = read_policy_text(Path(start_policy)) if start_policy is not None else None
     records: dict[str, Record] = {}
     for kind, model in MODELS.items():
@@ -309,36 +325,45 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
 
     if any(r.round == result.round for r in log.rounds()):
         raise DecisionLogError(f"round {result.round} is already in {log.path}; nothing was written")
-    # Only when a measurement is filed: a candidate the static checks stopped is by its nature not
-    # the base with the edit, nothing was measured on it, and its revert must still be logged.
-    if tested and (result.scores is not None or result.safety is not None):
-        assert candidate_text is not None and result.edit is not None
-        _check_logged_edit(base_text, candidate_text, result.edit, log, result.candidate_path)
+    base_version = parse_policy(base_text).version
+    promoted: Optional[tuple[str, str]] = None
+    if tested:
+        assert gate is not None and result.edit is not None
+        # Only when a measurement is filed (a keep always files one): a candidate the static checks
+        # stopped is by its nature not the base with the edit, and its revert must still be logged.
+        if gate.decision == "kept" or result.scores is not None or result.safety is not None:
+            _check_logged_edit(base_text, candidate_text, result.edit, log, result.candidate_path)
+        if gate.decision == "kept":
+            assert candidate_text is not None
+            promoted = _check_promotion(candidate_text, result, gate, base_version, start_text, log)
+        _check_consistent(result, gate, base_version)
 
     # ---- build the round in memory ----
-    base_version = parse_policy(base_text).version
     policy = LogPolicy(base=base_version, base_sha256=sha256_text(base_text), in_force=base_version)
     outcome: Literal["kept", "reverted", "no_pattern", "no_evidence"]
     outcome = "no_evidence" if result.outcome == "no_evidence" else "no_pattern"
     reason = result.reason
-    promoted: Optional[tuple[str, str]] = None
     refs = dict(result.refs)
     gate_bytes: Optional[bytes] = None
-    if gate is not None and candidate_text is not None:
+    if gate is not None:
+        assert result.edit is not None
         # The same bytes save_record would write, so the ref is known before anything is written.
         gate_bytes = (gate.model_dump_json(indent=2) + "\n").encode("utf-8")
         refs["outcome"] = RecordRef(id=gate.id, path=record_path(result.round, gate.id),
                                     sha256=sha256_bytes(gate_bytes))
         records["outcome"] = GateOutcome.model_validate_json(gate_bytes)
         outcome, reason = gate.decision, gate.reason
-        candidate = parse_policy(candidate_text)
         if gate.decision == "kept":
-            candidate.version = gate.policy_in_force
-            text = render_policy(candidate)  # rendered from the one reading of the candidate
-            promoted = (candidate.version, text)
-            policy.new, policy.new_sha256, policy.in_force = candidate.version, sha256_text(text), candidate.version
+            if promoted is None:  # the stand-in gate: no hash to tie to, rendered as before
+                assert candidate_text is not None
+                candidate = parse_policy(candidate_text)
+                candidate.version = gate.policy_in_force
+                promoted = (candidate.version, render_policy(candidate))  # from the one reading
+            version, text = promoted
+            policy.new, policy.new_sha256, policy.in_force = version, sha256_text(text), version
         else:
-            policy.new, policy.new_sha256 = candidate.version, sha256_text(candidate_text)
+            policy.new = _stated_version(candidate_text) or result.edit.new_policy_version
+            policy.new_sha256 = sha256_bytes(candidate_data) if candidate_data is not None else None
     if result.unscored:
         reason = f"{reason or outcome} {unscored_sentence(result.unscored)}"
     p = result.pattern
@@ -349,6 +374,7 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
                      rule_text=result.edit.rule_text) if result.edit and gate else None,
         scores=result.scores if gate is not None else None, safety=result.safety if gate is not None else None)
+    _check_one_line(event)
     meta = None
     if start_policy is not None and start_text is not None:
         meta = _replay_before_writing(log, root, start_policy, start_text, event, promoted)
@@ -375,16 +401,130 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     return event
 
 
-def _check_logged_edit(base_text: str, candidate_text: str, edit: PolicyEdit, log: DecisionLog,
+def _read_bytes(path: Path, expected_sha256: Optional[str], changed: Exception) -> Optional[bytes]:
+    """A file's bytes, read once. With `expected_sha256` they must have that hash, or `changed` is
+    raised; a file that cannot be read then counts as changed. Without it, None when unreadable."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        if expected_sha256 is not None:
+            raise changed
+        return None
+    if expected_sha256 is not None and sha256_bytes(data) != expected_sha256:
+        raise changed
+    return data
+
+
+def _decoded(data: Optional[bytes]) -> Optional[str]:
+    """The bytes as UTF-8 with no newline translation, or None when they are not UTF-8."""
+    try:
+        return data.decode("utf-8") if data is not None else None
+    except UnicodeDecodeError:
+        return None
+
+
+def _stated_version(text: Optional[str]) -> Optional[str]:
+    """The version a policy text states, or None when it does not parse."""
+    try:
+        return parse_policy(text).version if text is not None else None
+    except PolicyEditError:
+        return None
+
+
+def _strict(text: str, what: str) -> LoadedPolicy:
+    """The strict loader's (loop.policy) reading of a text, through a temporary file outside the
+    root, removed at once; a text it refuses raises PolicyChanged."""
+    fd, name = tempfile.mkstemp(suffix=".md")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+        return load_policy(name)
+    except PolicyError as exc:
+        raise PolicyChanged(f"{what} does not load with the strict loader ({exc}); nothing was written") from exc
+    finally:
+        os.unlink(name)
+
+
+def _check_promotion(candidate_text: str, result: RoundResult, gate: GateOutcome, base_version: str,
+                     start_text: Optional[str], log: DecisionLog) -> tuple[str, str]:
+    """Section 8, rule 8: a kept candidate is promoted only as what was tested. Returns the promoted
+    version and text, rendered from the one reading of the candidate."""
+    assert result.edit is not None
+    path, edit = result.candidate_path, result.edit
+    stated = _stated_version(candidate_text)
+    if stated != edit.new_policy_version:
+        raise PolicyChanged(f"{path} states version {stated!r}, but {edit.id} names {edit.new_policy_version!r}; "
+                            "nothing was written")
+    version = edit.new_policy_version.removesuffix("-candidate")
+    if version != gate.policy_in_force:
+        raise PolicyChanged(f"{edit.id} would promote {version!r}, but the gate put {gate.policy_in_force!r} "
+                            "in force; nothing was written")
+    taken = {base_version} | {v for r in log.rounds() for v in (r.policy.base, r.policy.in_force)}
+    if start_text is not None:
+        taken.add(parse_policy(start_text).version)
+    if version in taken:
+        raise PolicyChanged(f"{version!r} is already a version of the starting policy or of a logged round; "
+                            "nothing was written")
+    candidate = parse_policy(candidate_text)
+    candidate.version = version
+    text = render_policy(candidate)
+    tested, rendered = _strict(candidate_text, str(path)), _strict(text, f"the promoted {version}")
+
+    def conversation(p: LoadedPolicy) -> list[tuple[str, str]]:
+        return [(rid, t) for rid, t in p.rules.items() if rid.startswith("C")]
+
+    if tested.safety_sha256 != rendered.safety_sha256 or conversation(tested) != conversation(rendered):
+        raise PolicyChanged(f"the promoted {version} would not have the Safety section and Conversation rules "
+                            f"that were tested in {path}; nothing was written")
+    return version, text
+
+
+def _check_consistent(result: RoundResult, gate: GateOutcome, base_version: str) -> None:
+    """Section 8, rule 9: the result's fields must agree with each other and with the gate outcome."""
+    assert result.edit is not None
+    wrong = []
+    if gate.round != result.round or gate.edit_id != result.edit.id:
+        wrong.append(f"the outcome is for round {gate.round} and {gate.edit_id}, the result for round "
+                     f"{result.round} and {result.edit.id}")
+    if gate.decision == "kept":
+        if result.scores is None or result.safety is None or result.base_sha256 is None:
+            wrong.append("a keep without scores, a safety result and the base's hash")
+        elif not (result.safety.passed and gate.safety_passed):
+            wrong.append("a keep whose safety check did not pass")
+    if result.scores is not None:
+        if result.base_sha256 is None:
+            wrong.append("scores without the hash of the base they were measured on")
+        if gate.before.model_dump() != result.scores.before.model_dump() \
+                or gate.after.model_dump() != result.scores.after.model_dump():
+            wrong.append("the outcome's before and after are not the scores filed")
+    if result.safety is not None and gate.safety_passed != result.safety.passed:
+        wrong.append("the outcome's safety_passed is not the safety result filed")
+    if gate.decision == "reverted" and gate.policy_in_force != base_version:
+        wrong.append(f"a revert that puts {gate.policy_in_force!r} in force, not the base {base_version!r}")
+    if wrong:
+        raise InconsistentResult(f"round {result.round}: " + "; ".join(wrong) + "; nothing was written")
+
+
+def _check_one_line(event: RoundEvent) -> None:
+    """Section 8, rule 10: the event as DecisionLog.append writes it must read back as one line."""
+    line = event.model_dump_json()
+    if (line + "\n").splitlines() != [line]:
+        raise DecisionLogError(f"round {event.round}'s event holds a character that breaks a line, so the log "
+                               "could not read it back; nothing was written")
+
+
+def _check_logged_edit(base_text: str, candidate_text: Optional[str], edit: PolicyEdit, log: DecisionLog,
                        candidate_path: Optional[Path]) -> None:
     """The candidate the gate tested must be the base with the logged edit applied, by the
     proposer's own function: the same Safety section, the same Conversation rules by ID and text.
     Otherwise its scores would be filed under an edit the conversations did not run on."""
     action = edit.action or "add"
     try:
+        if candidate_text is None:
+            raise PolicyEditError("the candidate is not valid UTF-8")
         base, candidate = parse_policy(base_text), parse_policy(candidate_text)
         expected, rule_id = apply_edit(base, action, None if action == "add" else edit.rule_id, edit.rule_text,
-                                       candidate.version, used_ids=log.used_rule_ids())
+                                       edit.new_policy_version, used_ids=log.used_rule_ids())
     except PolicyEditError as exc:
         raise PolicyChanged(f"{candidate_path} is not the base policy with {edit.id} applied ({exc}); "
                             "nothing was written") from exc

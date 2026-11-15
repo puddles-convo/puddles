@@ -69,8 +69,8 @@ def expected_meta(rounds: list[RoundEvent], start: Policy, policy: Policy, text:
 
 def write_meta(root: Path, rounds: list[RoundEvent], start_path: Path, version: str) -> Path:
     """Write <version>.meta.json beside a promoted policy, from the log plus the round being finished."""
-    text = policy_path(root, version).read_text()
-    meta = expected_meta(rounds, parse_policy(start_path.read_text()), parse_policy(text), text)
+    text = policy_path(root, version).read_bytes().decode("utf-8")
+    meta = expected_meta(rounds, parse_policy(start_path.read_bytes().decode("utf-8")), parse_policy(text), text)
     path = meta_path(root, version)
     path.write_text(meta.model_dump_json(indent=2) + "\n")
     return path
@@ -79,7 +79,7 @@ def write_meta(root: Path, rounds: list[RoundEvent], start_path: Path, version: 
 def in_force(log: DecisionLog, root: Path, start_path: Path) -> tuple[str, Path, Optional[str]]:
     """The version in force per the last round event, its file, and the hash the log gave it."""
     rounds = log.rounds()
-    start_text = start_path.read_text()
+    start_text = start_path.read_bytes().decode("utf-8")
     if not rounds:
         return parse_policy(start_text).version, start_path, sha256_text(start_text)
     version = rounds[-1].policy.in_force
@@ -94,7 +94,7 @@ def policy_in_force(log: DecisionLog, root: Path, start_path: Path) -> Path:
     version, path, digest = in_force(log, root, start_path)
     if not path.exists():
         raise ReplayError(f"{version} is in force per the log, but {path} does not exist")
-    if digest is None or sha256_text(path.read_text()) != digest:
+    if digest is None or sha256_text(path.read_bytes().decode("utf-8")) != digest:
         raise ReplayError(f"{path} does not have the hash the log recorded for {version}")
     return path
 
@@ -102,7 +102,7 @@ def policy_in_force(log: DecisionLog, root: Path, start_path: Path) -> Path:
 def check(log: DecisionLog, root: Path, start_path: Path) -> Path:
     """Replay the log and compare it with the policy in force. Returns the policy file in force."""
     rounds = log.rounds()
-    start_text = start_path.read_text()
+    start_text = start_path.read_bytes().decode("utf-8")
     start = parse_policy(start_text)
     previous, previous_sha = start.version, sha256_text(start_text)
     for r in rounds:
@@ -116,7 +116,7 @@ def check(log: DecisionLog, root: Path, start_path: Path) -> Path:
             raise ReplayError(f"round {r.round} was {r.outcome} but changed the policy in force")
 
     path = policy_in_force(log, root, start_path)
-    text = path.read_text()
+    text = path.read_bytes().decode("utf-8")
     policy = parse_policy(text)
     expected = expected_rules(rounds, start)
     if set(policy.conversation) != set(expected):

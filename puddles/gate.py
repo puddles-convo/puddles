@@ -11,6 +11,7 @@ that goes wrong while testing reverts: nothing is kept on incomplete evidence.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
@@ -98,6 +99,7 @@ class Evidence:
     scores: Optional[Scores] = None  # set only when every scenario came back with a score
     failed: list[str] = field(default_factory=list)  # scenario IDs whose conversation failed
     unscored: list[str] = field(default_factory=list)  # conversation IDs the judge did not score
+    problems: list[str] = field(default_factory=list)  # anything else that leaves the scores unset
 
     @property
     def complete(self) -> bool:
@@ -110,7 +112,28 @@ class Evidence:
         if self.unscored:
             parts.append(f"{len(self.unscored)} of {self.expected} were not scored by the judge "
                          f"({', '.join(self.unscored)})")
+        parts += self.problems
         return "; ".join(parts) or "the scores are missing"
+
+
+@dataclass(frozen=True)
+class _Context:
+    """What a scoring run depends on, taken once before it starts (section 8, rules 2 and 5).
+    The run uses these values, and current.json is written with these values, never re-read from deps."""
+
+    scenario_ids: tuple[str, ...]
+    scenarios: tuple[Scenario, ...]  # own copies, in the order of scenario_ids
+    judge_version: Any
+    max_turns: Any
+    seed: Any
+
+    def key(self, policy_version: str, policy_sha256: str) -> dict[str, Any]:
+        """Everything the kept scores depend on that the gate can see. The chat models are not in
+        it: a root is for one pair of models."""
+        return {"policy_version": policy_version, "policy_sha256": policy_sha256,
+                "scenario_ids": list(self.scenario_ids), "judge_version": self.judge_version,
+                "scenarios_sha256": sha256_text("\n".join(s.model_dump_json() for s in self.scenarios)),
+                "max_turns": self.max_turns, "seed": self.seed}
 
 
 @dataclass
@@ -129,29 +152,23 @@ class _Changed(GateError):
     """A policy file's text differs from the text the checks were made on."""
 
 
-def _read_text(path: Path | str) -> str:
-    """A policy file's text exactly as `loop.policy.load_policy` reads it, so the hashes compare."""
-    return Path(path).read_bytes().decode("utf-8")
-
-
 def _sha256_file(path: Path | str) -> str:
-    """The hash of a file's bytes: for valid UTF-8, the same as sha256_text of `_read_text`."""
+    """The hash of a file's bytes: for valid UTF-8, the same as sha256_text of its text read with
+    no newline translation. It is taken before anything decodes or loads the file."""
     return sha256_bytes(Path(path).read_bytes())
 
 
-def _load_tied(path: Path | str, what: str, expected: Optional[str] = None) -> Policy:
+def _load_tied(path: Path | str, what: str, expected: str) -> Policy:
     """Load a policy, hashing the file before and after the load.
 
-    The two hashes and the hash of the loaded text must agree, and equal `expected` when given:
-    otherwise the file changed under the gate, and the evidence would be about other bytes.
+    `expected` is the hash of the bytes the gate first read. The two hashes and the hash of the
+    loaded text must equal it: otherwise the file changed under the gate, and the evidence would
+    be about other bytes.
     """
-    before = _sha256_file(path)
-    first = expected if expected is not None else before
-    if before != first:  # before loading: a file that no longer decodes is a change, not a crash
+    if _sha256_file(path) != expected:  # before loading: a file that no longer decodes is a change, not a crash
         raise _Changed(f"the {what} changed while it was being tested")
     policy = check_policy_file(Path(path))
-    after = _sha256_file(path)
-    if not before == sha256_text(policy.text) == after == first:
+    if not sha256_text(policy.text) == _sha256_file(path) == expected:
         raise _Changed(f"the {what} changed while it was being tested")
     return policy
 
@@ -184,11 +201,23 @@ def _pick(pool: list[Scenario], scenario_ids: list[str]) -> list[Scenario]:
         raise GateError("no scenarios to score on")
     if len(set(scenario_ids)) != len(scenario_ids):
         raise GateError("a scenario ID is listed twice")
-    by_id = {s.scenario_id: s for s in pool}
-    missing = [i for i in scenario_ids if i not in by_id]
+    picked = [[s for s in pool if s.scenario_id == i] for i in scenario_ids]
+    missing = [i for i, found in zip(scenario_ids, picked) if not found]
     if missing:
         raise GateError(f"scenarios not found: {', '.join(missing)}")
-    return [by_id[i] for i in scenario_ids]
+    ambiguous = [i for i, found in zip(scenario_ids, picked) if len(found) > 1]
+    if ambiguous:
+        raise GateError(f"scenario IDs that name more than one scenario: {', '.join(ambiguous)}")
+    return [found[0] for found in picked]
+
+
+def _context(deps: GateDeps, scenario_ids: list[str]) -> _Context:
+    """Take, once, everything a scoring run depends on. The judge's version is read here, before
+    the first call, and is the version of everything the run produces."""
+    ids = tuple(scenario_ids)
+    scenarios = tuple(s.model_copy(deep=True) for s in _pick(deps.scenarios, list(ids)))
+    return _Context(scenario_ids=ids, scenarios=scenarios, judge_version=deps.judge.version,
+                    max_turns=deps.max_turns, seed=deps.seed)
 
 
 def score_policy(deps: GateDeps, policy_path: Path, scenario_ids: list[str], round_: int, tag: str) -> Evidence:
@@ -197,34 +226,46 @@ def score_policy(deps: GateDeps, policy_path: Path, scenario_ids: list[str], rou
     Both files are saved, the scores even when some or all are missing. Scores are averaged only
     when every conversation finished and was scored: averaging the survivors can look like a gain.
     """
-    return _score(deps, check_policy_file(Path(policy_path)), scenario_ids, round_, tag)
+    return _score(deps, check_policy_file(Path(policy_path)), _context(deps, scenario_ids), round_, tag)
 
 
-def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int, tag: str) -> Evidence:
+def _score(deps: GateDeps, policy: Policy, ctx: _Context, round_: int, tag: str) -> Evidence:
     """score_policy on a policy already loaded, so the caller can tie the conversations to the
-    exact text its checks were made on."""
-    scenarios = _pick(deps.scenarios, scenario_ids)
+    exact text its checks were made on, and on a context taken before the run.
+
+    The judge is code from another piece, so nothing it is handed or hands back is trusted by
+    reference: it is given its own copy of each record, and each result is rebuilt at once as a
+    fresh ScoreRecord (section 8, rule 2)."""
     name = f"round-{round_:02d}-{_batch_name(tag)}.jsonl"
     root = Path(deps.root)
-    batch = run_batch(deps.helper_client, deps.user_client, policy, scenarios, round=round_,
-                      max_turns=deps.max_turns, seed=deps.seed, tag=tag,
+    batch = run_batch(deps.helper_client, deps.user_client, policy, list(ctx.scenarios), round=round_,
+                      max_turns=ctx.max_turns, seed=ctx.seed, tag=tag,
                       out_path=root / "conversations" / name)
     scores: list[ScoreRecord] = []
     unscored: list[str] = []
     for record in batch.records:
+        record_id = record.id  # what the result is checked against: the record as it was before the call
         try:
-            score = deps.judge.score(record).score
-            if not isinstance(score, ScoreRecord) or score.conversation_id != record.id:
-                raise GateError(f"the judge gave no score for {record.id}")
+            result = deps.judge.score(record.model_copy(deep=True))
+            score = ScoreRecord.model_validate(result.score.model_dump())  # the gate keeps only this copy
+            if score.conversation_id != record_id or score.judge_version != ctx.judge_version:
+                raise GateError(f"the judge gave no score for {record_id}")
             scores.append(score)
         except Exception:  # noqa: BLE001  that conversation is unscored; the rest are still scored
-            unscored.append(record.id)
+            unscored.append(record_id)
+    problems = []
+    if deps.judge.version != ctx.judge_version:
+        problems.append(f"the judge's version changed during the run, from {ctx.judge_version!r} to "
+                        f"{deps.judge.version!r}")
+    failed = [f.scenario_id for f in batch.failures]
+    expected_ids = sorted(conversation_id(round_, sid, tag) for sid in ctx.scenario_ids)
+    if not failed and not unscored and sorted(s.conversation_id for s in scores) != expected_ids:
+        problems.append("the scores are not exactly one for each expected conversation")  # none missing, none twice
     scores_path = root / "scores" / name
     scores_path.parent.mkdir(parents=True, exist_ok=True)
     scores_path.write_text("".join(s.model_dump_json() + "\n" for s in scores), encoding="utf-8")
-    evidence = Evidence(expected=len(scenarios), failed=[f.scenario_id for f in batch.failures],
-                        unscored=unscored)
-    if not evidence.failed and not evidence.unscored and len(scores) == len(scenarios):
+    evidence = Evidence(expected=len(ctx.scenarios), failed=failed, unscored=unscored, problems=problems)
+    if not failed and not unscored and not problems:
         evidence.scores = average(scores)
     return evidence
 
@@ -240,12 +281,28 @@ def scenarios_sha256(deps: GateDeps, scenario_ids: list[str]) -> str:
     return sha256_text("\n".join(s.model_dump_json() for s in _pick(deps.scenarios, scenario_ids)))
 
 
-def _cache_key(deps: GateDeps, policy_version: str, policy_sha256: str, scenario_ids: list[str]) -> dict[str, Any]:
-    """Everything the kept scores depend on that the gate can see. The chat models are not in it:
-    a root is for one pair of models."""
-    return {"policy_version": policy_version, "policy_sha256": policy_sha256, "scenario_ids": list(scenario_ids),
-            "judge_version": deps.judge.version, "scenarios_sha256": scenarios_sha256(deps, scenario_ids),
-            "max_turns": deps.max_turns, "seed": deps.seed}
+def _same(a: Any, b: Any) -> bool:
+    """The same value of the same type: a boolean is not an integer, an integer is not a float,
+    and None matches only None. Lists are compared element by element (section 8, rule 4)."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
+def _measured(scores: Any) -> bool:
+    """Saved scores that can only have come from a measurement: empathy, relevance and quality all
+    present, numbers (not booleans), finite, and between 1 and 5."""
+    if not isinstance(scores, dict):
+        return False
+    for name in ("empathy", "relevance", "quality"):
+        value = scores.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if not (math.isfinite(value) and 1 <= value <= 5):
+            return False
+    return True
 
 
 def _write_current(root: Path, key: dict[str, Any], scores: Scores) -> None:
@@ -267,7 +324,9 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
         data = json.loads(path.read_bytes().decode("utf-8"))
         if not isinstance(data, dict) or "scores" not in data or any(name not in data for name in key):
             return None
-        if any(data[name] != value for name, value in key.items()):
+        if not all(_same(data[name], value) for name, value in key.items()):
+            return None
+        if not _measured(data["scores"]):  # NOT_MEASURED, or anything a judge could not have given
             return None
         return Scores.model_validate(data["scores"])
     except Exception:  # noqa: BLE001
@@ -289,13 +348,14 @@ def _current_scores(deps: GateDeps, policy_path: Path, scenario_ids: list[str]) 
     The policy is loaded once and that one reading is both scored and hashed into the key, so the
     hash in current.json is always of the text that was actually scored.
     """
-    policy = _load_tied(policy_path, "policy in force")
-    sha = sha256_text(policy.text)
-    key = _cache_key(deps, policy.version, sha, scenario_ids)
+    sha = _sha256_file(policy_path)  # the hash of the bytes, taken before they are decoded or loaded
+    policy = _load_tied(policy_path, "policy in force", expected=sha)
+    ctx = _context(deps, scenario_ids)  # the key is written with these values, never re-read from deps
+    key = ctx.key(policy.version, sha)
     saved = _saved_current(deps.root, key)
     if saved is not None:
         return saved, sha
-    evidence = _score(deps, policy, scenario_ids, BASELINE_ROUND, CURRENT_TAG)
+    evidence = _score(deps, policy, ctx, BASELINE_ROUND, CURRENT_TAG)
     if not evidence.complete or evidence.scores is None:
         raise GateError(f"the policy in force could not be scored: {evidence.describe()}")
     _write_current(deps.root, key, evidence.scores)
@@ -366,6 +426,7 @@ class _Run:
     candidate_sha256: Optional[str] = None  # the candidate text every check and measurement is about
     current_sha256: Optional[str] = None  # the same for the policy in force
     expected_current: Optional[str] = None  # the hash of the text the baseline scores are about, if known
+    context: Optional[_Context] = None  # what the validation run depended on, taken before it started
 
     def fail(self, name: str, detail: str) -> None:
         self.checks[name], self.details[name] = "failed", detail
@@ -431,11 +492,16 @@ def _static(run: _Run) -> Optional[tuple[Policy, Policy]]:
     inp = run.inp
     run.running = "candidate_file"
     try:
-        candidate = _load_tied(inp.candidate_policy, "candidate")
-        run.candidate_sha256 = sha256_text(candidate.text)
-        current = _load_tied(inp.current_policy, "policy in force", expected=run.expected_current)
+        # The hash of the bytes first, then decode and load: a candidate that does not load is still
+        # tied to the bytes that were rejected (section 8, rule 1). Unreadable leaves it None.
+        run.candidate_sha256 = _sha256_file(inp.candidate_policy)
+        candidate = _load_tied(inp.candidate_policy, "candidate", expected=run.candidate_sha256)
+        current_sha256 = _sha256_file(inp.current_policy)
+        if run.expected_current is not None and current_sha256 != run.expected_current:
+            raise _Changed("the policy in force changed while it was being tested")
+        run.current_sha256 = current_sha256
+        current = _load_tied(inp.current_policy, "policy in force", expected=current_sha256)
         run.current_version = current.version
-        run.current_sha256 = sha256_text(current.text)
     except _Changed:
         raise  # not a file that does not load: a file that moved, which run_gate reverts
     except Exception as exc:  # noqa: BLE001  a file that does not load is this check failing
@@ -479,11 +545,20 @@ def _safety(run: _Run, candidate: Policy) -> None:
 
     run.running = "safety_cases"
     try:
-        safety = deps.safety(candidate.version, reply)
-        if not isinstance(safety, SafetyResult):
-            raise GateError(f"the safety check returned {type(safety).__name__}, not a SafetyResult")
+        raw = deps.safety(candidate.version, reply)
     except Exception as exc:  # noqa: BLE001
         run.fail("safety_cases", f"the safety check raised {type(exc).__name__}: {exc}")
+        run.running = None
+        return
+    try:
+        # One copy, made at once; every later use is of it (section 8, rule 3).
+        safety = SafetyResult.model_validate(raw.model_dump())
+        if safety.policy_version != candidate.version:
+            raise GateError(f"it is about {safety.policy_version!r}, not the candidate {candidate.version!r}")
+        if safety.passed and any(not c.passed for c in safety.cases):
+            raise GateError("it says passed while a case failed")
+    except Exception as exc:  # noqa: BLE001  treated exactly as a safety check that raised
+        run.fail("safety_cases", f"the safety check gave a result that cannot be used ({type(exc).__name__}: {exc})")
         run.running = None
         return
     run.safety = safety
@@ -522,8 +597,10 @@ def _evaluate(run: _Run) -> GateReport:
     run.running = "complete_evidence"
     ids = list(inp.validation_scenario_ids)
     # score_policy's steps, on a load tied to the hash the static checks were made on.
+    assert run.candidate_sha256 is not None
     policy = _load_tied(inp.candidate_policy, "candidate", expected=run.candidate_sha256)
-    evidence = _score(deps, policy, ids, inp.round, VALIDATION_TAG)
+    run.context = _context(deps, ids)  # also what a kept candidate's current.json is written with
+    evidence = _score(deps, policy, run.context, inp.round, VALIDATION_TAG)
     _recheck(run)  # after the last judge call, before deciding
     clash = _clashes(deps.root, inp.round, ids)
     problems = []
@@ -673,10 +750,10 @@ class _Gate:
         if report.outcome.decision == "kept" and report.log_scores is not None:
             # Read the candidate once more; the promoted scores belong only to the bytes that were tested.
             try:
-                text: Optional[str] = _read_text(result.candidate_path)
+                data: Optional[bytes] = Path(result.candidate_path).read_bytes()
             except Exception:  # noqa: BLE001  a candidate that cannot be read again cannot be promoted
-                text = None
-            if text is None or sha256_text(text) != report.candidate_sha256:
+                data = None
+            if data is None or sha256_bytes(data) != report.candidate_sha256:
                 report = run.changed("the candidate changed after it was tested, so the evidence is not about "
                                      "the text that would be promoted")
                 try:
@@ -685,19 +762,19 @@ class _Gate:
                     pass
             else:
                 try:
-                    self._keep_current(text, report.outcome.policy_in_force, report.log_scores.after)
+                    self._keep_current(data, report.outcome.policy_in_force, report.log_scores.after, run.context)
                 except Exception:  # noqa: BLE001  a stale or missing file cannot match, so the next round scores again
                     pass
         result.scores, result.safety = report.log_scores, report.log_safety
         result.candidate_sha256 = report.candidate_sha256
         return report
 
-    def _keep_current(self, candidate_text: str, version: str, scores: Scores) -> None:
-        """current.json for the promoted policy, hashed on the text finish_round will write for it."""
-        promoted = parse_policy(candidate_text)
+    def _keep_current(self, candidate_bytes: bytes, version: str, scores: Scores, ctx: _Context) -> None:
+        """current.json for the promoted policy, hashed on the text finish_round will write for it,
+        and described by the validation run that measured the scores (section 8, rule 5)."""
+        promoted = parse_policy(candidate_bytes.decode("utf-8"))
         promoted.version = version
-        key = _cache_key(self.deps, version, sha256_text(render_policy(promoted)), self.ids)
-        _write_current(self.deps.root, key, scores)
+        _write_current(self.deps.root, ctx.key(version, sha256_text(render_policy(promoted))), scores)
 
     def _untested(self, result: RoundResult, why: str) -> GateReport:
         """Reverted without testing the candidate, usually because the policy in force could not be scored."""

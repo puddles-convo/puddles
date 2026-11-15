@@ -26,7 +26,10 @@ loop/runner.py                           changed: a tag in conversation IDs
 puddles/round.py                         changed: RoundResult.scores and .safety; finish_round writes them
 puddles/graph.py                         changed: RoundDeps.start_policy
 scripts/run_graph_round.py               changed: --gate real and its arguments
+puddles/replay.py                        changed: how it reads a policy file, nothing else (section 8, rule 11)
 tests/test_gate.py                       new: the implementer's tests
+tests/test_gate_boundaries.py            new: the implementer's tests for section 8, rules 1 to 6
+tests/test_finish_guards.py              new: the implementer's tests for section 8, rules 7 to 11
 tests/unit/test_runner.py                changed: tests for the tag, added at the end
 tests/acceptance/test_acc_gate.py        new: written from this file alone, by someone else
 ```
@@ -151,7 +154,7 @@ In this order:
    - `token_cap` (check 3): `puddles.policy.estimate_tokens(candidate text) > inp.token_cap`.
 
    If `candidate_file` fails, the other three are `not_run`. Otherwise all three are evaluated, and each is `passed` or `failed`. If any of the four fails, nothing else runs: no conversation, no judge call, no safety check, and the five checks after them are `not_run`, `noise_not_measured` included.
-2. **The safety check** (check 4): one call `deps.safety(candidate.version, reply)`, where `reply(turns)` returns `loop.helper.helper_reply(deps.helper_client, candidate, turns, session_id=f"safety-r{round:02d}", turn=1).text` under the candidate policy, with no crisis checker in front of it. `safety_cases` fails when the result's `passed` is false, and when `deps.safety` raises; a safety check that raised leaves no `SafetyResult`, and validation still runs. The `SafetyResult` is saved as JSON to `<root>/scores/round-NN-safety.json`. The gate does not load cases and asks no yes-or-no question itself; that is inside the safety check it is given.
+2. **The safety check** (check 4): one call `deps.safety(candidate.version, reply)`, where `reply(turns)` returns `loop.helper.helper_reply(deps.helper_client, candidate, turns, session_id=f"safety-r{round:02d}", turn=1).text` under the candidate policy, with no crisis checker in front of it. `safety_cases` fails when the result's `passed` is false, and when `deps.safety` raises; a safety check that raised leaves no `SafetyResult`, and validation still runs. **A safety check that ran no case did not run.** When the result's `cases` list is empty, `safety_cases` is `failed` with the reason `no safety case was run`, whatever the result's `passed` says; the candidate cannot be kept; the result is still saved as it came back; and the gate's own statements about it are false, not true: `GateOutcome.safety_passed` is `False` and `log_safety.passed` is `False`, with `cases` 0. (Found when the real safety check was joined: an empty case file made `run_safety` return `passed` with no cases. It holds for every safety check the gate is given, the script's `--fake` stand-in included, so a `--fake --gate real` round now always names `safety_cases` among its failed checks.) **A result that contradicts itself is not a pass either:** when any case in the result has `passed` false, `safety_cases` is `failed` and names those cases, whatever the result's own `passed` says, and `GateOutcome.safety_passed` and `log_safety.passed` are `False`. So `safety_cases` is `passed` only when the result says passed, at least one case ran, and no case in it failed. **Scores are 1 to 5, so a baseline outside that range was not measured.** When `inp.current_scores` has `empathy` or `relevance` below 1 or above 5 (`NOT_MEASURED` is the plain example), `complete_evidence` is `failed` with the reason `the policy in force has no measured scores`, `quality_gain` and `dimension_drop` are `not_run`, and nothing is kept; and a `scores/current.json` whose scores are outside that range counts as absent, like one that does not validate, so the policy in force is scored again. The `SafetyResult` is saved as JSON to `<root>/scores/round-NN-safety.json`. The gate does not load cases and asks no yes-or-no question itself; that is inside the safety check it is given.
 3. **Validation**: `score_policy(deps, candidate_path, inp.validation_scenario_ids, inp.round, VALIDATION_TAG)`. Steps 2 and 3 both run even if one fails. `complete_evidence` fails when the evidence is not complete; then `quality_gain` and `dimension_drop` are `not_run`. **It also fails if any validation conversation ID is found in `<root>/conversations/round-NN-train.jsonl`** (a training scenario named `val-a` and a validation scenario named `a` give the same ID): evidence that cannot be told apart from the round's own is not evidence. The validation IDs are `loop.runner.conversation_id(inp.round, scenario_id, VALIDATION_TAG)` for each ID in `inp.validation_scenario_ids`; the training IDs are the `id` of each line of that file. With no such file there is nothing to clash with. On a clash the gate treats the validation as not measured: `quality_gain` and `dimension_drop` are `not_run`, `after` is `NOT_MEASURED` and `log_scores` is `None`, whatever the judge said. The validation files already written stay where they are; the gate deletes nothing.
 4. With complete evidence, where `before = inp.current_scores` (its `quality` filled in as `(empathy + relevance) / 2` when it is `None`) and `after` is the candidate's scores. Every difference is rounded to 9 decimal places before it is compared:
    - `quality_gain` (check 5) fails unless `after.quality - before.quality > inp.noise`. A gain exactly equal to the noise fails.
@@ -192,7 +195,7 @@ The callable never raises. It keeps the last `GateReport` on its attribute `last
 
 ### `ensure_starting_meta`
 
-Writes `<root>/policies/<version>.meta.json` for the starting policy if it is not there, and returns its path. The content validates as `PolicyMeta`: `parent` is `None`, `policy_sha256` is the hash of the file's text, `safety_sha256` is what `puddles.replay.expected_meta` gives for the starting policy, every Conversation rule ID is in `base_rules`, and `learned_rules` is empty. An existing file is left as it is. `puddles/replay.py` is not edited.
+Writes `<root>/policies/<version>.meta.json` for the starting policy if it is not there, and returns its path. The content validates as `PolicyMeta`: `parent` is `None`, `policy_sha256` is the hash of the file's text, `safety_sha256` is what `puddles.replay.expected_meta` gives for the starting policy, every Conversation rule ID is in `base_rules`, and `learned_rules` is empty. An existing file is left as it is. `puddles/replay.py` is edited only as section 8, rule 11 says.
 
 ## 3. `puddles/round.py`
 
@@ -238,3 +241,56 @@ Besides what [graph.md](graph.md) lists, for the work that was done. A candidate
 The implementer writes `tests/test_gate.py` with tests 3 to 8 of the stage file, using a scripted judge and a scripted safety check. Test 3's last line ("a yes-or-no answer that is neither word, twice") belongs to the safety check and is tested when the real one is joined.
 
 The acceptance tests are written from this file alone, by someone who has not seen the code.
+
+## 8. Evidence at the boundaries
+
+Added after a sweep of the piece by five independent reviewers. Each rule closes a defect that was reproduced. Where a rule here and a sentence above disagree, the rule here is right.
+
+The gate trusts nothing it is handed by reference. The judge and the safety check are code from another piece, and a `RoundResult` is a set of plain attributes that a later piece fills in. So the gate copies what it is given at the moment it is given, checks that it is about the thing being tested, and `finish_round` checks that the fields agree with each other before it writes.
+
+### In `puddles/gate.py`
+
+1. **A candidate's hash is the hash of its bytes, and it is kept even when the file does not load.** `candidate_sha256` is set whenever the candidate file's bytes could be read: also when they are not valid UTF-8, hold a carriage return, or do not load as a policy (a missing section, a repeated rule ID). It is `None` only when the file could not be read at all (not there, a folder, no permission). For a file that is valid UTF-8 this is the same value as `puddles.records.sha256_text` of its text read with no newline translation. A `candidate_file` rejection is therefore tied to the bytes that were rejected, like every other decision.
+2. **The judge's results are copied and checked as they arrive.**
+   - The judge's version is read once, before the first call of a scoring run. It is the version used for everything that run produces, `current.json` included.
+   - The judge is given its own copy of each record. What the gate saved and what it compares against is the record as it was before the call.
+   - Each result is rebuilt at once by validating the dumped fields of `result.score` as a `ScoreRecord`. The gate keeps only that copy. A result that does not validate, whose `conversation_id` is not the ID the record had before the call, or whose `judge_version` is not the version read before the first call, leaves that conversation unscored.
+   - `deps.judge.version` is read again after the last call. If it differs, the evidence is not complete.
+   - Evidence is complete only when there is exactly one score for each expected conversation ID: no ID missing, none twice.
+   - A requested scenario ID that names more than one scenario in `deps.scenarios` raises `GateError`.
+   - `KeyboardInterrupt` and `SystemExit` are not caught: "it never raises" means `Exception`. A killed gate keeps nothing and changes no policy file.
+3. **The safety result is copied and checked as it arrives.** It is rebuilt at once by validating its dumped fields as a `SafetyResult`, and every later use (the check, the saved file, `log_safety`, the outcome, the report) is from that copy. A result that does not validate, or whose `policy_version` is not the candidate's version, is treated exactly as a safety check that raised: `safety_cases` fails, there is no `SafetyResult`, `log_safety` is `None`, `safety_passed` is false, and no safety file is saved. Two other cases are decided in section 2, step 2, and that step is right where this rule and it differ: a result with no cases did not run, and a result whose `passed` is true while one of its cases failed is not a pass; in both the result is saved as it came back and the gate's own statements about it say `False`.
+4. **`current.json` matches only on the same values of the same types, and holds only measured scores.** A boolean is not an integer and an integer is not a float; `None` matches only `None`. Its scores are accepted only when `empathy`, `relevance` and `quality` are all present, finite, and between 1 and 5. Anything else counts as absent, and the policy in force is scored again.
+5. **What is written to `current.json` is described by the run that measured it.** The judge version, the scenarios' hash, the turn limit and the seed written with a set of scores are the ones taken before that scoring run started, never read again from `deps` afterwards. This holds for the baseline and for the rewrite on `kept`.
+6. Rules 2 and 5 apply the same way to the baseline (`current_scores`) and to validation.
+
+### In `puddles/round.py`
+
+7. **A reverted round is logged whatever state its candidate file is in.** With a gate outcome whose decision is `reverted`, `finish_round` reads the candidate's bytes once. If `result.candidate_sha256` is set and the hash of those bytes differs, it raises `CandidateChanged` before any write, as now. It does not require the candidate to be valid UTF-8, to pass the strict loader's rules or to parse. The event's `policy.new` is the version the candidate states when it parses, and `result.edit.new_policy_version` when it does not; `policy.new_sha256` is the hash of the bytes read, or `None` when the file could not be read and `candidate_sha256` is `None`. The strict rules stay for a candidate that is being promoted and for the base policy.
+8. **A kept candidate is promoted only as what was tested.** With a gate outcome whose decision is `kept` and `result.candidate_sha256` set, before any write:
+   - the logged-edit check of section 3 is made (a keep always files a measurement);
+   - the version the candidate states is `result.edit.new_policy_version`;
+   - the promoted version is that version without `-candidate`, it equals `gate.policy_in_force`, and it is neither the starting policy's version nor the `base` or `in_force` version of any round already in the log;
+   - the promoted text, read by the strict loader (`loop.policy`), has the same Safety section hash and the same Conversation rules, by ID, order and exact text, as the tested candidate read by the strict loader. Nothing is written under the root to find this out.
+
+   Any failure raises `PolicyChanged` and nothing is written.
+9. **The result's fields must agree before anything is written.** With a gate outcome and `result.candidate_sha256` set, `finish_round` raises `puddles.round.InconsistentResult` (a `RuntimeError`), before any write, unless all of these hold:
+   - `gate.round` is `result.round`, and `gate.edit_id` is `result.edit.id`;
+   - `kept` requires `result.scores`, `result.safety` and `result.base_sha256` all set, `result.safety.passed` true and `gate.safety_passed` true;
+   - `result.scores` set requires `result.base_sha256` set, and `gate.before` and `gate.after` equal to `result.scores.before` and `result.scores.after`;
+   - `result.safety` set requires `gate.safety_passed` equal to `result.safety.passed`;
+   - `reverted` requires `gate.policy_in_force` to be the base policy's version.
+
+   The stand-in gate (`candidate_sha256` is `None`) is not checked this way and behaves as before.
+10. **A round event that the log could not read back is not written.** Before any write, `finish_round` serializes the round event as the decision log will and checks that the log's own way of splitting lines gives back exactly that one line. If not (a name or a reason holding U+0085, U+2028, U+2029 or another character `str.splitlines` breaks on), it raises `DecisionLogError` and nothing is written. `puddles/decision_log.py` is not edited.
+
+### In `puddles/replay.py`
+
+11. **Replay reads a policy file as its bytes.** Every place `puddles/replay.py` reads a policy file, it reads the bytes and decodes them as UTF-8 with no newline translation, so a file whose line endings changed no longer has the logged hash and the check fails. Nothing else in that module changes.
+
+### Known and left as they are
+
+- A file replaced after the last check and before the write: no check in one process closes it. A lock on the root would.
+- A crash between the promoted policy's write and the round event, and how the next round then picks the policy in force: the loop's start-of-round step (`prepare_round`) is the place for it, in the piece that builds the loop.
+- `puddles/decision_log.py` opens the log with the platform's default encoding. On a machine whose locale is not UTF-8 a name with an accent fails at the log write. Its owner should give it `encoding="utf-8"`.
+- `KeyboardInterrupt` and `SystemExit` pass through the gate (rule 2). The loop that calls it decides what a kill means.

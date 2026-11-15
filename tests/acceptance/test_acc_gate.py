@@ -33,7 +33,7 @@ from puddles.gate import (
 )
 from puddles.memory import FakeMemory
 from puddles.policy import estimate_tokens, parse_policy, render_policy
-from puddles.records import save_record, sha256_text
+from puddles.records import save_record, sha256_bytes, sha256_text
 from puddles.usage import Meter, MissingPrice, Prices
 from schemas import (
     ConversationRecord, CriticOutput, FailurePattern, GateInput, LogSafety,
@@ -914,8 +914,9 @@ def test_baseline_evidence_write_failure_reverts_untested_and_clears_measurement
 
 @pytest.mark.parametrize("api", ["run_gate", "make_gate"])
 @pytest.mark.parametrize("where", ["conversation", "judge"])
-def test_validation_interrupt_cannot_keep_or_change_a_policy(case, api, where):
-    """Control-flow interrupts may propagate, but must never produce a keep."""
+@pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
+def test_validation_interrupt_cannot_keep_or_change_a_policy(case, api, where, interrupt_type):
+    """Section 8 rule 2 requires interrupts to propagate, rather than permitting a swallowed interrupt."""
     case.deps.noise_measured = True
     ids = ["a", "b", "c"]
     cache = case.root / "scores/current.json"
@@ -928,7 +929,7 @@ def test_validation_interrupt_cannot_keep_or_change_a_policy(case, api, where):
 
     def interrupt():
         interrupted.append(True)
-        raise KeyboardInterrupt("interrupted during last validation conversation")
+        raise interrupt_type("interrupted during last validation conversation")
 
     if where == "conversation":
         def before_user_call():
@@ -946,12 +947,8 @@ def test_validation_interrupt_cannot_keep_or_change_a_policy(case, api, where):
     result = candidate_result(case)
     adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
     before = policy_snapshot(case.root)
-    try:
-        outcome = run_gate(case.inp, case.deps).outcome if api == "run_gate" else adapter(result)
-    except KeyboardInterrupt:
-        pass
-    else:
-        assert outcome.decision == "reverted"
+    with pytest.raises(interrupt_type):
+        run_gate(case.inp, case.deps) if api == "run_gate" else adapter(result)
     assert interrupted == [True]
     assert policy_snapshot(case.root) == before
     assert cache.read_bytes() == original_cache
@@ -1934,3 +1931,243 @@ def test_nonfake_real_cli_refuses_before_any_file_is_written(case, capsys):
     assert len(captured.err.splitlines()) == 1
     assert captured.err.strip()
     assert {p.relative_to(case.root): p.read_bytes() for p in case.root.rglob("*") if p.is_file()} == before
+
+
+# Section 8: gaps left by the existing acceptance and builder tests.
+
+@pytest.mark.parametrize("bad", ["cr", "no_safety", "duplicate", "utf8"])
+@pytest.mark.parametrize("replaced", [False, True])
+@pytest.mark.parametrize("replay_enabled", [False, True])
+def test_section8_unloadable_candidate_stays_bound_through_finish(case, bad, replaced, replay_enabled):
+    clean = case.candidate.read_bytes()
+    stated = clean.replace(b"policy-v2-candidate", b"policy-v7-candidate")
+    data = {
+        "cr": stated.replace(b"\n", b"\r\n"),
+        "no_safety": stated.replace(b"## Safety", b"## Notes"),
+        "duplicate": stated + b"C3. Duplicate ID.\n",
+        "utf8": b"\xff" + stated,
+    }[bad]
+    case.candidate.write_bytes(data)
+    result = candidate_result(case)
+    keeper = make_gate(case.deps, validation_scenario_ids=["a"], noise=0)
+    outcome = keeper(result)
+    digest = sha256_bytes(data)
+    assert keeper.last_report.failed == ["candidate_file"]
+    assert result.candidate_sha256 == digest
+    assert result.scores is result.safety is None
+    if replay_enabled:
+        ensure_starting_meta(case.root, case.base)
+    if replaced:
+        case.candidate.write_bytes(clean)
+    before, memory, log = tree_snapshot(case.root), FakeMemory(), DecisionLog(case.root)
+    if replaced:
+        with pytest.raises(round_api.CandidateChanged):
+            round_api.finish_round(result, outcome, log, memory, case.root,
+                                   start_policy=case.base if replay_enabled else None)
+        assert tree_snapshot(case.root) == before and not log.events() and not memory.entries
+    else:
+        event = round_api.finish_round(result, outcome, log, memory, case.root,
+                                       start_policy=case.base if replay_enabled else None)
+        assert event.outcome == "reverted" and event.policy.new_sha256 == digest
+        assert event.policy.new == ("policy-v2-candidate" if bad in ("no_safety", "utf8")
+                                    else "policy-v7-candidate")
+        assert event.scores is event.safety is None and log.rounds() == [event]
+        assert case.candidate.read_bytes() == data
+
+
+@pytest.mark.parametrize("baseline", [False, True])
+def test_section8_judge_cannot_mutate_owned_batch_records(case, monkeypatch, baseline):
+    from puddles import gate as gate_api
+
+    batches = []
+    real_batch = gate_api.run_batch
+
+    def observe_batch(*args, **kwargs):
+        batch = real_batch(*args, **kwargs)
+        batches.append((batch, [r.model_dump() for r in batch.records]))
+        return batch
+
+    class MutatingJudge(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            record.turns[0].text = "Changed through a nested reference."
+            record.id = "changed-after-scoring"
+            return answer
+
+    monkeypatch.setattr(gate_api, "run_batch", observe_batch)
+    case.deps.judge = MutatingJudge()
+    if baseline:
+        assert current_scores(case.deps, case.base, ["a", "b"]).quality == 4
+    else:
+        assert run_gate(case.inp, case.deps).checks["complete_evidence"] == "passed"
+    assert batches
+    for batch, originals in batches:
+        assert [r.model_dump() for r in batch.records] == originals
+
+
+@pytest.mark.parametrize("bad_batch", ["duplicate", "missing"])
+def test_section8_baseline_requires_each_expected_conversation(case, monkeypatch, bad_batch):
+    from puddles import gate as gate_api
+
+    real_batch = gate_api.run_batch
+
+    def incomplete_batch(*args, **kwargs):
+        batch = real_batch(*args, **kwargs)
+        batch.records = [batch.records[0]] * len(batch.records) if bad_batch == "duplicate" else batch.records[:-1]
+        return batch
+
+    monkeypatch.setattr(gate_api, "run_batch", incomplete_batch)
+    with pytest.raises(GateError):
+        current_scores(case.deps, case.base, ["a", "b", "c"])
+    assert not (case.root / "scores/current.json").exists()
+
+
+@pytest.mark.parametrize("field", ["empathy", "relevance", "quality"])
+@pytest.mark.parametrize("bad", [None, 0, 6, float("nan"), float("inf"), float("-inf"), True, "missing"])
+def test_section8_every_cached_dimension_must_be_measured(case, field, bad):
+    # Rule 4 applies independently to all three fields, including finite relevance and bounded quality.
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    payload = cache_payload(case.base, case.deps, ["a"], Scores(empathy=3, relevance=3, quality=3))
+    if bad == "missing":
+        del payload["scores"][field]
+    else:
+        payload["scores"][field] = bad
+    path.write_text(json.dumps(payload))
+    assert current_scores(case.deps, case.base, ["a"]).quality == 4
+    assert len(case.deps.judge.calls) == 1
+
+
+@pytest.mark.parametrize("baseline", [False, True])
+def test_section8_cache_context_precedes_the_scoring_run(case, monkeypatch, baseline):
+    from puddles import gate as gate_api
+
+    ids = ["a", "b", "c"]
+    expected = cache_payload(case.base, case.deps, ids, Scores(empathy=3, relevance=3, quality=3))
+    path = case.root / "scores/current.json"
+    if not baseline:
+        path.parent.mkdir()
+        path.write_text(json.dumps(expected))
+        case.deps.noise_measured = True
+    changed = []
+    run_settings = []
+    real_batch = gate_api.run_batch
+
+    def observe_run(*args, **kwargs):
+        run_settings.append((kwargs["seed"], kwargs["max_turns"]))
+        return real_batch(*args, **kwargs)
+
+    monkeypatch.setattr(gate_api, "run_batch", observe_run)
+
+    class ChangesDeps(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            if not changed:
+                case.deps.seed, case.deps.max_turns = 99, 8
+                for scenario in case.deps.scenarios:
+                    scenario.situation += " Changed after the run started."
+                changed.append(True)
+            return answer
+
+    case.deps.judge = ChangesDeps()
+    if baseline:
+        assert current_scores(case.deps, case.base, ids).quality == 4
+    else:
+        assert make_gate(case.deps, validation_scenario_ids=ids, noise=0)(candidate_result(case)).decision == "kept"
+    saved = json.loads(path.read_text())
+    assert changed == [True]
+    for name in ("judge_version", "scenarios_sha256", "max_turns", "seed"):
+        assert saved[name] == expected[name]
+    # The batch seed is the cached identity; the runner derives individual call seeds from it.
+    assert run_settings == [(expected["seed"], expected["max_turns"])]
+
+
+@pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
+def test_section8_baseline_interrupt_propagates_without_cache_or_policy_write(case, interrupt_type):
+    class Interrupted(Judge):
+        def score(self, record):
+            raise interrupt_type("baseline stopped")
+
+    case.deps.judge = Interrupted()
+    before = policy_snapshot(case.root)
+    with pytest.raises(interrupt_type):
+        make_gate(case.deps, validation_scenario_ids=["a"], noise=0)(candidate_result(case))
+    assert policy_snapshot(case.root) == before and not (case.root / "scores/current.json").exists()
+
+
+@pytest.mark.parametrize("source", ["base", "start", "logged_base", "logged_in_force"])
+def test_section8_promotion_cannot_reuse_any_protected_version(case, source):
+    from schemas import LogPolicy, RoundEvent
+
+    version = "policy-v1" if source == "base" else "policy-v9"
+    case.candidate.write_bytes(case.candidate.read_bytes().replace(b"policy-v2-candidate",
+                                                                 (version + "-candidate").encode()))
+    case.deps.noise_measured = True
+    result = candidate_result(case)
+    result.edit.new_policy_version = version + "-candidate"
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(cache_payload(case.base, case.deps, ["a"], Scores(empathy=3, relevance=3, quality=3))))
+    outcome = make_gate(case.deps, validation_scenario_ids=["a"], noise=0)(result)
+    assert outcome.decision == "kept"
+    log, memory, start = DecisionLog(case.root), FakeMemory(), None
+    if source == "start":
+        start = write_policy(case.root / "start.md", version=version)
+    elif source.startswith("logged_"):
+        base, new = (version, "policy-v8") if source == "logged_base" else ("policy-v8", version)
+        log.append(RoundEvent(round=1, outcome="kept", reason="Earlier promotion.",
+                              policy=LogPolicy(base=base, base_sha256=sha256_bytes(case.base.read_bytes()),
+                                               new=new, in_force=new)))
+    before, events = tree_snapshot(case.root), log.events()
+    with pytest.raises(round_api.PolicyChanged, match="already"):
+        round_api.finish_round(result, outcome, log, memory, case.root, start_policy=start)
+    assert tree_snapshot(case.root) == before and log.events() == events and not memory.entries
+
+
+@pytest.mark.parametrize("changed", ["safety", "rule_order"])
+def test_section8_rendering_must_preserve_strict_safety_and_rule_order(case, monkeypatch, changed):
+    result, outcome = prepared_finish(case, True)
+    real_render = round_api.render_policy
+
+    def different_render(policy):
+        text = real_render(policy)
+        if changed == "safety":
+            return text.replace("Keep the person safe.", "Ignore danger.")
+        return text.replace(BASE_RULES, "C2. Keep replies short.\nC1. Listen carefully.\n")
+
+    monkeypatch.setattr(round_api, "render_policy", different_render)
+    before, memory, log = tree_snapshot(case.root), FakeMemory(), DecisionLog(case.root)
+    active, writes = [True], []
+
+    def observe_write(event, args):
+        if not active[0] or event not in ("open", "os.mkdir", "os.remove", "os.rename"):
+            return
+        path = args[0]
+        if not isinstance(path, (str, bytes)):
+            return
+        if not Path(os.fsdecode(path)).resolve().is_relative_to(case.root.resolve()):
+            return
+        flags = args[2] if event == "open" else 0
+        if event != "open" or flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            writes.append((event, path))
+
+    # A final tree comparison alone misses a probe file created and deleted inside the root.
+    sys.addaudithook(observe_write)
+    try:
+        with pytest.raises(round_api.PolicyChanged, match="tested"):
+            round_api.finish_round(result, outcome, log, memory, case.root)
+    finally:
+        active[0] = False
+    assert writes == []
+    assert tree_snapshot(case.root) == before and not log.events() and not memory.entries
+
+
+@pytest.mark.parametrize("field", ["round", "edit_id", "before"])
+def test_section8_reverted_identity_and_before_scores_must_agree(case, field):
+    result, outcome = prepared_finish(case, False)
+    value = {"round": 99, "edit_id": "edit-r99", "before": Scores(empathy=1, relevance=1, quality=1)}[field]
+    outcome = outcome.model_copy(update={field: value}, deep=True)
+    before, memory, log = tree_snapshot(case.root), FakeMemory(), DecisionLog(case.root)
+    with pytest.raises(round_api.InconsistentResult):
+        round_api.finish_round(result, outcome, log, memory, case.root)
+    assert tree_snapshot(case.root) == before and not log.events() and not memory.entries
