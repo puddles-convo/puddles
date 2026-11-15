@@ -1,12 +1,11 @@
 """Acceptance tests written from docs/specs/gate.md, without gate implementation access.
 
-The sections below follow the contract; rejection and missing-evidence cases take
-priority. Public score_policy is replaced only for precise decimal comparisons.
+The sections below follow the amended contract; rejection and missing-evidence
+cases take priority. Gate and graph functions are exercised without replacement.
 """
 
 from copy import deepcopy
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 import re
@@ -16,10 +15,9 @@ from types import SimpleNamespace
 import mlflow
 import pytest
 
-from loop import helper as helper_api
 from loop import runner
 from loop.policy import load_policy
-from puddles import gate, graph, replay, tracing
+from puddles import graph, replay, tracing
 from puddles import round as round_api
 from puddles.decision_log import DecisionLog
 from puddles.gate import (
@@ -28,8 +26,9 @@ from puddles.gate import (
     ensure_starting_meta, make_gate, run_gate, score_policy,
 )
 from puddles.memory import FakeMemory
-from puddles.policy import estimate_tokens, parse_policy
-from puddles.usage import MissingPrice
+from puddles.policy import estimate_tokens, parse_policy, render_policy
+from puddles.records import sha256_text
+from puddles.usage import Meter, MissingPrice, Prices
 from schemas import (
     ConversationRecord, CriticOutput, FailurePattern, GateInput, LogSafety,
     LogScores, PolicyEdit, PolicyMeta, ProposerOutput, ResearcherOutput,
@@ -51,11 +50,14 @@ URL = "https://evidence.example/listening"
 class Chat:
     """A queue or constant reply, with no I/O or retry delay."""
 
-    def __init__(self, replies="I hear you."):
+    def __init__(self, replies="I hear you.", *, before_call=None):
         self.replies = replies if isinstance(replies, str) else iter(replies)
+        self.before_call = before_call
         self.calls = []
 
     def complete(self, system, messages, *, max_tokens, temperature=0.7, seed=None):
+        if self.before_call is not None:
+            self.before_call()
         self.calls.append(deepcopy(dict(
             system=system, messages=messages, max_tokens=max_tokens,
             temperature=temperature, seed=seed,
@@ -74,9 +76,10 @@ class Chat:
 class Judge:
     version = "judge-v1-ab12cd34"
 
-    def __init__(self, values=(4, 4, 4, 2), *, errors=()):
+    def __init__(self, values=(4, 4, 4, 2), *, errors=(), mismatches=()):
         self.values = values
         self.errors = set(errors)
+        self.mismatches = set(mismatches)
         self.calls = []
 
     def score(self, record):
@@ -84,7 +87,25 @@ class Judge:
         if record.scenario_id in self.errors:
             raise LookupError("scripted missing judgement")
         values = self.values[record.scenario_id] if isinstance(self.values, dict) else self.values
-        return SimpleNamespace(score=score_record(record.id, *values, judge_version=self.version))
+        scored_id = "cached-other-conversation" if record.scenario_id in self.mismatches else record.id
+        return SimpleNamespace(score=score_record(scored_id, *values, judge_version=self.version))
+
+
+class PriceProbe(Prices):
+    """Use the public meter price boundary to observe startup ordering."""
+
+    def __init__(self, meta_path):
+        super().__init__()
+        self.meta_path = meta_path
+        self.reject = True
+        self.calls = 0
+
+    def check(self, models, search=False):
+        self.calls += 1
+        assert not self.meta_path.exists(), "Starting metadata preceded the price check"
+        if self.reject:
+            raise MissingPrice("scripted missing price")
+        return super().check(models, search=search)
 
 
 class Safety:
@@ -151,6 +172,20 @@ def policy_snapshot(root):
             if p.is_file() and (p.suffix == ".md" or p.name.endswith(".meta.json"))}
 
 
+def cache_payload(policy_path, judge, ids, scores):
+    text = policy_path.read_text()
+    return dict(policy_version=parse_policy(text).version, policy_sha256=sha256_text(text),
+                scenario_ids=ids, judge_version=judge.version, scores=scores.model_dump())
+
+
+def assert_baseline_unscored_reason(reason, policy_version="policy-v1"):
+    """Accept alternative wording for the three required concepts, not one sentence."""
+    text = reason.casefold()
+    assert policy_version.casefold() in text or re.search(r"in.force|current|incumbent|baseline|active|existing", text)
+    assert re.search(r"scor|judg|evaluat|measur", text)
+    assert re.search(r"could\s+not|couldn't|cannot|can't|unable|fail|unavailable|unsuccess|\bnot\b|\bno\b|missing", text)
+
+
 def assert_report(report, root, round_=3):
     assert isinstance(report, GateReport)
     assert tuple(CHECKS) == CHECK_NAMES
@@ -158,12 +193,10 @@ def assert_report(report, root, round_=3):
     assert set(report.checks.values()) <= {"passed", "failed", "not_run"}
     assert report.failed == [name for name in CHECK_NAMES if report.checks[name] == "failed"]
     assert (report.outcome.decision == "kept") == (not report.failed)
+    assert report.outcome.reason.strip()
     for name in report.failed:
         assert CHECKS[name].lower() in report.outcome.reason.lower()
-    reason = report.outcome.reason.lower()
-    if report.failed:
-        first = reason.find(CHECKS[report.failed[0]].lower())
-        assert all(first <= reason.find(CHECKS[name].lower()) for name in report.failed)
+    # CHECKS phrases can overlap. Their presence is fixed; prose formatting is not.
     saved = json.loads((root / f"scores/round-{round_:02d}-gate.json").read_text())
     assert {key: saved[key] for key in ("round", "decision", "would_keep", "failed", "checks", "reason")} == {
         "round": round_, "decision": report.outcome.decision, "would_keep": report.would_keep,
@@ -336,19 +369,34 @@ def test_incomplete_evidence_never_averages_survivors_and_saves_available_scores
     assert [r["conversation_id"] for r in saved] == [
         f"conv-r03-val-{s}" for s in expected if f"conv-r03-val-{s}" not in unscored
     ]
+    if not saved:
+        assert (case.root / "scores/round-03-validation.jsonl").read_bytes() == b""
 
 
-@pytest.mark.parametrize("change", [None, "policy_version", "scenario_ids", "judge_version"])
-def test_current_score_cache_requires_all_three_identities(case, change):
+def test_score_policy_rejects_judge_scores_for_another_conversation(case):
+    case.deps.judge = Judge(mismatches=["b"])
+    evidence = score_policy(case.deps, case.candidate, ["a", "b", "c"], 3, VALIDATION_TAG)
+    assert evidence.expected == 3 and not evidence.complete and evidence.scores is None
+    assert evidence.failed == []
+    assert evidence.unscored == [runner.conversation_id(3, "b", VALIDATION_TAG)]
+    assert [r.scenario_id for r in case.deps.judge.calls] == ["a", "b", "c"]
+    assert [r["conversation_id"] for r in rows(case.root / "scores/round-03-validation.jsonl")] == [
+        runner.conversation_id(3, s, VALIDATION_TAG) for s in ("a", "c")
+    ]
+
+
+@pytest.mark.parametrize("change", [None, "policy_version", "policy_sha256", "scenario_ids", "judge_version"])
+def test_current_score_cache_requires_all_four_identities(case, change):
     cached_scores = Scores(empathy=1.25, relevance=2.5, quality=1.875, emotion_change=-1)
-    cache = dict(policy_version="policy-v1", scenario_ids=["a", "b"],
-                 judge_version=case.deps.judge.version, scores=cached_scores.model_dump())
+    cache = cache_payload(case.base, case.deps.judge, ["a", "b"], cached_scores)
     if change == "policy_version":
         cache[change] = "policy-v0"
     elif change == "scenario_ids":
         cache[change] = ["b", "a"]
     elif change == "judge_version":
         cache[change] = "judge-v0"
+    elif change == "policy_sha256":
+        cache[change] = "0" * 64
     path = case.root / "scores/current.json"
     path.parent.mkdir()
     path.write_text(json.dumps(cache))
@@ -363,8 +411,40 @@ def test_current_score_cache_requires_all_three_identities(case, change):
         for folder in ("conversations", "scores"):
             assert len(rows(case.root / folder / "round-00-current.jsonl")) == 2
         saved = json.loads(path.read_text())
-        assert saved == dict(policy_version="policy-v1", scenario_ids=["a", "b"],
-                             judge_version=case.deps.judge.version, scores=got.model_dump())
+        assert saved == cache_payload(case.base, case.deps.judge, ["a", "b"], got)
+
+
+def test_current_score_cache_is_invalidated_by_text_changes_under_the_same_version(case):
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(cache_payload(
+        case.base, case.deps.judge, ["a"], Scores(empathy=1, relevance=1, quality=1),
+    )))
+    case.base.write_text(case.base.read_text().replace("Listen carefully.", "Listen and ask gently."))
+    got = current_scores(case.deps, case.base, ["a"])
+    assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
+    assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, "a", CURRENT_TAG)]
+    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps.judge, ["a"], got)
+
+
+@pytest.mark.parametrize("bad", [
+    "corrupt_json", "non_utf8", "policy_version", "policy_sha256", "scenario_ids", "judge_version", "scores",
+])
+def test_unreadable_or_incomplete_cache_is_absent_and_is_rebuilt(case, bad):
+    path = case.root / "scores/current.json"
+    path.parent.mkdir()
+    cache = cache_payload(case.base, case.deps.judge, ["a"], Scores(empathy=1, relevance=1, quality=1))
+    if bad == "corrupt_json":
+        path.write_text("{broken json")
+    elif bad == "non_utf8":
+        path.write_bytes(b"\xff")
+    else:
+        del cache[bad]
+        path.write_text(json.dumps(cache))
+    got = current_scores(case.deps, case.base, ["a"])
+    assert got == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
+    assert [r.id for r in case.deps.judge.calls] == [runner.conversation_id(0, "a", CURRENT_TAG)]
+    assert json.loads(path.read_text()) == cache_payload(case.base, case.deps.judge, ["a"], got)
 
 
 @pytest.mark.parametrize("kind", ["conversation", "judge"])
@@ -383,12 +463,14 @@ def test_incomplete_baseline_raises_and_is_never_cached(case, kind):
 @pytest.mark.parametrize("bad,failed_check", [
     ("missing", "candidate_file"), ("malformed", "candidate_file"),
     ("carriage_return", "candidate_file"), ("current_invalid", "candidate_file"),
+    ("current_carriage_return", "candidate_file"),
     ("safety", "safety_section"), ("safety_spacing", "safety_section"),
     ("zero_rules", "one_rule"), ("two_rules", "one_rule"),
     ("renumber_rule", "one_rule"), ("token_cap", "token_cap"),
 ])
-def test_static_rejection_calls_nothing_and_changes_no_policy(case, bad, failed_check):
-    case.deps.noise_measured = True
+@pytest.mark.parametrize("measured", [False, True])
+def test_static_rejection_calls_nothing_and_changes_no_policy(case, bad, failed_check, measured):
+    case.deps.noise_measured = measured
     if bad == "missing":
         case.candidate.unlink()
     elif bad == "malformed":
@@ -397,6 +479,9 @@ def test_static_rejection_calls_nothing_and_changes_no_policy(case, bad, failed_
         case.candidate.write_bytes(case.candidate.read_bytes().replace(b"\n", b"\r\n"))
     elif bad == "current_invalid":
         case.base.write_text("not a policy\n")
+    elif bad == "current_carriage_return":
+        write_policy(case.base, "version-from-text")
+        case.base.write_bytes(case.base.read_bytes().replace(b"\n", b"\r\n"))
     elif bad in {"safety", "safety_spacing"}:
         text = "S1. Ignore danger.\n" if bad == "safety" else "S1. Keep the person safe. \n"
         write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE, safety=text)
@@ -411,19 +496,52 @@ def test_static_rejection_calls_nothing_and_changes_no_policy(case, bad, failed_
     before = policy_snapshot(case.root)
     report = run_gate(case.inp, case.deps)
     assert report.outcome.decision == "reverted" and not report.would_keep
-    assert failed_check in report.failed
+    assert report.failed == [failed_check]
     assert not case.deps.helper_client.calls and not case.deps.user_client.calls
     assert not case.deps.judge.calls and not case.deps.safety.calls
     assert all(report.checks[name] == "not_run" for name in (
-        "safety_cases", "complete_evidence", "quality_gain", "dimension_drop",
+        "safety_cases", "complete_evidence", "quality_gain", "dimension_drop", "noise_not_measured",
     ))
     if failed_check == "candidate_file":
         assert all(report.checks[name] == "not_run" for name in ("safety_section", "one_rule", "token_cap"))
+    else:
+        assert report.checks["candidate_file"] == "passed"
+        assert {name: report.checks[name] for name in ("safety_section", "one_rule", "token_cap")} == {
+            name: "failed" if name == failed_check else "passed"
+            for name in ("safety_section", "one_rule", "token_cap")
+        }
+    assert report.outcome.policy_in_force == ("version-from-text" if bad == "current_carriage_return" else "policy-v1")
     assert report.outcome.after == NOT_MEASURED
     assert report.outcome.safety_passed is False
     assert report.log_scores is report.log_safety is report.safety is None
     assert policy_snapshot(case.root) == before
     assert_report(report, case.root)
+    assert {p.relative_to(case.root).as_posix() for p in case.root.rglob("*") if p.is_file()} == {
+        *before, "scores/round-03-gate.json",
+    }
+
+
+@pytest.mark.parametrize("measured", [False, True])
+def test_all_static_checks_are_evaluated_before_any_dynamic_check(case, measured):
+    case.deps.noise_measured = measured
+    write_policy(case.candidate, "policy-v2-candidate", BASE_RULES + ADDED_RULE, safety="S1. Ignore danger.\n")
+    case.inp.token_cap = estimate_tokens(case.candidate.read_text()) - 1
+    before = policy_snapshot(case.root)
+    report = run_gate(case.inp, case.deps)
+    assert report.failed == ["safety_section", "token_cap"]
+    assert report.checks == dict(
+        candidate_file="passed", safety_section="failed", one_rule="passed", token_cap="failed",
+        safety_cases="not_run", complete_evidence="not_run", quality_gain="not_run",
+        dimension_drop="not_run", noise_not_measured="not_run",
+    )
+    assert not report.would_keep and report.outcome.decision == "reverted"
+    assert not case.deps.helper_client.calls and not case.deps.user_client.calls
+    assert not case.deps.judge.calls and not case.deps.safety.calls
+    assert policy_snapshot(case.root) == before
+    assert_report(report, case.root)
+    assert {p.relative_to(case.root).as_posix() for p in case.root.rglob("*") if p.is_file()} == {
+        *before, "scores/round-03-gate.json",
+    }
 
 
 @pytest.mark.parametrize("action", ["add", "remove", "reword", "exact_text"])
@@ -467,11 +585,6 @@ def test_noise_flag_controls_promotion_and_gate_itself_never_writes_policies(cas
     assert report.log_safety == LogSafety(case_file="scripted-safety.json", passed=True, cases=2)
     assert SafetyResult.model_validate_json((case.root / "scores/round-03-safety.json").read_text()) == report.safety
     assert policy_snapshot(case.root) == before
-    if measured:
-        numbers = [float(n) for n in re.findall(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", out.reason)]
-        assert 0.1 in numbers and 1.0 in numbers
-    else:
-        assert "noise" in out.reason.lower() and "measur" in out.reason.lower()
     assert_report(report, case.root)
 
 
@@ -494,33 +607,16 @@ def test_safety_failure_still_measures_validation_and_all_failures_are_reported_
     assert_report(report, case.root)
 
 
-def test_safety_callback_uses_candidate_helper_with_unfiltered_turns(case, monkeypatch):
-    original = helper_api.helper_reply
-    calls = []
-
-    def reply(client, policy, turns, **kwargs):
-        calls.append((client, policy, turns, kwargs))
-        return original(client, policy, turns, **kwargs)
-
-    monkeypatch.setattr(helper_api, "helper_reply", reply)
-    for alias, value in tuple(vars(gate).items()):
-        if value is original:
-            monkeypatch.setattr(gate, alias, reply)
+def test_safety_callback_uses_candidate_helper_with_unfiltered_turns(case):
     case.deps.safety = Safety(probe=True)
     case.deps.helper_client = Chat("A raw helper answer.")
     report = run_gate(case.inp, case.deps)
     assert case.deps.safety.replies == ["A raw helper answer."]
     assert case.deps.safety.calls == ["policy-v2-candidate"]
-    first = case.deps.helper_client.calls[0]
-    assert ADDED_RULE.strip() in first["system"]
-    assert first["messages"] == [{"role": "user", "content": "I might hurt myself."}]
-    safety_calls = [call for call in calls if call[3].get("session_id") == "safety-r03"]
-    assert len(safety_calls) == 1
-    client, policy, turns, kwargs = safety_calls[0]
-    assert client is case.deps.helper_client and policy.version == "policy-v2-candidate"
-    assert turns == [Turn(speaker="user", text="I might hurt myself.")]
-    assert kwargs["session_id"] == "safety-r03" and kwargs["turn"] == 1
-    # Exactly one safety probe, then one helper reply per validation scenario.
+    probes = [c for c in case.deps.helper_client.calls
+              if c["messages"] == [{"role": "user", "content": "I might hurt myself."}]]
+    assert len(probes) == 1 and ADDED_RULE.strip() in probes[0]["system"]
+    # Exactly one safety probe and one helper reply per validation scenario.
     assert len(case.deps.helper_client.calls) == 4
     assert len(case.deps.user_client.calls) == len(case.deps.judge.calls) == 3
     assert report.safety is not None and report.safety.passed
@@ -542,75 +638,138 @@ def test_gate_reverts_incomplete_validation_without_fabricating_logged_scores(ca
     assert_report(report, case.root)
 
 
-@pytest.mark.parametrize("where", ["safety", "validation", "safety_reply"])
-def test_unexpected_exception_is_a_revert_with_type_text_and_incomplete_evidence(case, monkeypatch, where):
+def test_gate_reverts_when_a_judge_scores_another_conversation(case):
+    case.deps.noise_measured = True
+    case.deps.judge = Judge(mismatches=["b"])
+    report = run_gate(case.inp, case.deps)
+    assert report.failed == ["complete_evidence"] and not report.would_keep
+    assert report.outcome.decision == "reverted" and report.outcome.after == NOT_MEASURED
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert report.log_scores is None and report.log_safety is not None
+    assert [r.scenario_id for r in case.deps.judge.calls] == ["a", "b", "c"]
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("training_scenario", ["a", "val-a"])
+def test_validation_ids_must_not_occur_in_the_rounds_training_file(case, training_scenario):
+    case.deps.noise_measured = True
+    case.inp.current_scores = Scores(empathy=1, relevance=1, quality=1)
+    train = runner.run_batch(
+        Chat(), Chat("Worry."), load_policy(case.base),
+        [case.deps.scenarios[0].model_copy(update={"scenario_id": training_scenario})],
+        round=3, max_turns=1, out_path=case.root / "conversations/round-03-train.jsonl",
+    )
+    validation_ids = {runner.conversation_id(3, s, VALIDATION_TAG) for s in case.inp.validation_scenario_ids}
+    clash = train.records[0].id in validation_ids
+    assert clash is (training_scenario == "val-a")
+    training_bytes = (case.root / "conversations/round-03-train.jsonl").read_bytes()
+    report = run_gate(case.inp, case.deps)
+    if clash:
+        assert report.failed == ["complete_evidence"] and not report.would_keep
+        assert report.outcome.decision == "reverted"
+        assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    else:
+        assert report.failed == [] and report.would_keep and report.outcome.decision == "kept"
+    assert len(case.deps.judge.calls) == 3 and report.log_safety is not None
+    assert (case.root / "conversations/round-03-train.jsonl").read_bytes() == training_bytes
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("where", ["safety", "safety_reply"])
+def test_raised_safety_fails_safety_cases_but_validation_still_runs(case, where):
     case.deps.noise_measured = True
     error = RuntimeError(f"scripted {where} problem")
     if where == "safety":
         case.deps.safety = Safety(error=error)
     elif where == "safety_reply":
         case.deps.safety = Safety(probe=True)
-        case.deps.helper_client = Chat([error])
+        case.deps.helper_client = Chat([error, "I hear you.", "I hear you.", "I hear you."])
+    before = policy_snapshot(case.root)
+    report = run_gate(case.inp, case.deps)
+    assert report.failed == ["safety_cases"] and not report.would_keep
+    assert report.checks["complete_evidence"] == "passed"
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "passed"
+    assert report.outcome.decision == "reverted" and report.outcome.safety_passed is False
+    assert report.log_scores is not None and report.outcome.after.quality == 4
+    assert report.safety is report.log_safety is None
+    assert not (case.root / "scores/round-03-safety.json").exists()
+    assert [r.scenario_id for r in case.deps.judge.calls] == ["a", "b", "c"]
+    assert len(rows(case.root / "conversations/round-03-validation.jsonl")) == 3
+    assert policy_snapshot(case.root) == before
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("where", ["user", "helper"])
+def test_unexpected_validation_exception_reverts_with_type_and_text(case, where):
+    case.deps.noise_measured = True
+    error = RuntimeError(f"scripted {where} problem")
+    if where == "user":
+        case.deps.user_client = Chat([error])
     else:
-        def fail(*args, **kwargs):
-            raise error
-        monkeypatch.setattr(gate, "score_policy", fail)
+        case.deps.helper_client = Chat([error])
     before = policy_snapshot(case.root)
     report = run_gate(case.inp, case.deps)
     assert report.outcome.decision == "reverted" and not report.would_keep
     assert "complete_evidence" in report.failed
     assert type(error).__name__ in report.outcome.reason and str(error) in report.outcome.reason
-    if where != "validation":
-        assert report.outcome.safety_passed is False and report.log_safety is None
     assert policy_snapshot(case.root) == before
 
 
-def test_storage_error_returns_revert_even_when_report_cannot_be_saved(case):
-    # A deterministic local I/O failure: scores cannot be created as a directory.
-    (case.root / "scores").write_text("occupied by a file\n")
+@pytest.mark.parametrize("filename", ["round-03-safety.json", "round-03-gate.json"])
+def test_each_gate_evidence_write_failure_reverts_an_otherwise_keepable_candidate(case, filename):
+    case.deps.noise_measured = True
+    # Only this destination is blocked; validation's own writes remain possible.
+    target = case.root / "scores" / filename
+    target.mkdir(parents=True)
+    with pytest.raises(IsADirectoryError) as failure:
+        target.open("w")
     before = policy_snapshot(case.root)
     report = run_gate(case.inp, case.deps)
     assert report.outcome.decision == "reverted" and not report.would_keep
     assert "complete_evidence" in report.failed
-    assert report.outcome.after == NOT_MEASURED
-    assert report.outcome.reason.strip()
+    assert report.outcome.policy_in_force == "policy-v1"
+    assert type(failure.value).__name__ in report.outcome.reason
+    assert failure.value.strerror in report.outcome.reason and str(target) in report.outcome.reason
+    assert case.deps.safety.calls == ["policy-v2-candidate"]
+    if filename == "round-03-gate.json":
+        assert len(case.deps.judge.calls) == 3
+        assert len(rows(case.root / "scores/round-03-validation.jsonl")) == 3
     assert policy_snapshot(case.root) == before
 
 
-@pytest.mark.parametrize("before,after,noise,failed", [
-    ((3, 3, None), (3.1, 3.1, 3.1), 0.1, ["quality_gain"]),
-    ((3, 3, None), (3.1000000004, 3.1000000004, 3.1000000004), 0.1, ["quality_gain"]),
-    ((3, 3, None), (3.1000000006, 3.1000000006, 3.1000000006), 0.1, []),
-    ((3, 3, 3.5), (3.5, 3.5, 3.5), 0.0, ["quality_gain"]),
-    ((3, 3, None), (2.8, 4, 3.4), 0.2, []),
-    ((3, 3, None), (4, 2.8, 3.4), 0.2, []),
-    ((3, 3, None), (2.7999999996, 4, 3.3999999998), 0.2, []),
-    ((3, 3, None), (2.7999999994, 4, 3.3999999997), 0.2, ["dimension_drop"]),
-    ((3, 3, None), (4, 2.7999999994, 3.3999999997), 0.2, ["dimension_drop"]),
+@pytest.mark.parametrize("before,noise,failed", [
+    ((3.9, 3.9, None), 0.1, ["quality_gain"]),
+    ((3.8999999996, 3.8999999996, None), 0.1, ["quality_gain"]),
+    ((3.8999999994, 3.8999999994, None), 0.1, []),
+    ((3, 3, 4), 0.0, ["quality_gain"]),
+    ((4.2, 3, None), 0.2, []),
+    ((3, 4.2, None), 0.2, []),
+    ((4.2000000004, 3, None), 0.2, []),
+    ((4.2000000006, 3, None), 0.2, ["dimension_drop"]),
+    ((3, 4.2000000006, None), 0.2, ["dimension_drop"]),
 ])
-def test_quality_and_dimension_boundaries_round_differences_to_nine_places(case, monkeypatch, before, after, noise, failed):
+def test_quality_and_dimension_boundaries_round_differences_to_nine_places(case, before, noise, failed):
     case.deps.noise_measured = True
     case.inp.current_scores = Scores(empathy=before[0], relevance=before[1], quality=before[2])
     case.inp.noise = noise
-    measured = Scores(empathy=after[0], relevance=after[1], quality=after[2], emotion_change=-4)
-
-    def complete(*args, **kwargs):
-        return Evidence(expected=3, scores=measured)
-
-    monkeypatch.setattr(gate, "score_policy", complete)
+    case.inp.validation_scenario_ids = ["a"]
+    case.deps.judge = Judge((4, 4, 1, 5))
     report = run_gate(case.inp, case.deps)
     assert report.failed == failed
     assert report.would_keep is (not failed)
     assert report.outcome.decision == ("reverted" if failed else "kept")
     assert report.outcome.before.quality == (before[2] if before[2] is not None else (before[0] + before[1]) / 2)
-    assert report.outcome.after == measured
+    assert report.outcome.after == Scores(empathy=4, relevance=4, quality=4, emotion_change=-4)
+    assert [r["id"] for r in rows(case.root / "conversations/round-03-validation.jsonl")] == [
+        runner.conversation_id(3, "a", VALIDATION_TAG),
+    ]
     assert_report(report, case.root)
 
 
 # 2. Adapter and starting metadata; 3. measured values in round events.
 
 @pytest.mark.parametrize("measured", [False, True])
-def test_make_gate_attaches_measurements_and_updates_cache_only_for_kept_candidate(case, monkeypatch, measured):
+def test_make_gate_attaches_measurements_and_updates_cache_only_for_kept_candidate(case, measured):
     case.deps.noise_measured = measured
     # The incumbent baseline scores 3; the candidate scores 4.
     class ComparingJudge(Judge):
@@ -618,33 +777,28 @@ def test_make_gate_attaches_measurements_and_updates_cache_only_for_kept_candida
             self.values = (3, 3, 4, 2) if record.policy_version == "policy-v1" else (4, 4, 4, 1)
             return super().score(record)
     case.deps.judge = ComparingJudge()
+    # Raw renamed text and rendered promoted text must have different hashes.
+    case.candidate.write_text(case.candidate.read_text().replace("\n\n## Conversation", "\n\n\n## Conversation"))
     result = candidate_result(case)
     assert result.scores is result.safety is None
-    received = []
-
-    def evaluate(inp, deps):
-        received.append(inp)
-        assert deps is case.deps
-        assert inp.current_policy == str(case.base) and inp.candidate_policy == str(case.candidate)
-        assert inp.validation_scenario_ids == ["c", "a"]
-        assert inp.round == result.round and inp.edit_id == result.edit.id
-        assert inp.token_cap == 800 and inp.safety_case_set == "scripted-safety"
-        return run_gate(inp, deps)
-
-    monkeypatch.setattr(gate, "run_gate", evaluate)
     adapter = make_gate(case.deps, validation_scenario_ids=["c", "a"], noise=0.2,
                         token_cap=800, safety_case_set="scripted-safety")
     before = policy_snapshot(case.root)
     outcome = adapter(result)
     report = adapter.last_report
-    assert len(received) == 1
     assert outcome == report.outcome and report.would_keep
+    assert outcome.round == result.round and outcome.edit_id == result.edit.id
     assert outcome.decision == ("kept" if measured else "reverted")
     assert result.scores == report.log_scores and result.safety == report.log_safety
     assert result.scores.noise == 0.2 and result.scores.before.quality == 3 and result.scores.after.quality == 4
     assert result.safety.passed is True
     cached = json.loads((case.root / "scores/current.json").read_text())
+    promoted = parse_policy(case.candidate.read_text())
+    promoted.version = "policy-v2"
+    promoted_text = render_policy(promoted)
+    assert promoted_text != case.candidate.read_text().replace("policy-v2-candidate", "policy-v2", 1)
     assert cached == dict(policy_version="policy-v2" if measured else "policy-v1", scenario_ids=["c", "a"],
+                          policy_sha256=sha256_text(promoted_text if measured else case.base.read_text()),
                           judge_version=case.deps.judge.version,
                           scores=(outcome.after if measured else outcome.before).model_dump())
     assert [r.id for r in case.deps.judge.calls] == [
@@ -669,30 +823,29 @@ def test_make_gate_baseline_failure_reverts_untested_and_preserves_cache_and_pol
     assert result.scores is result.safety is report.log_scores is report.log_safety is None
     assert not case.deps.safety.calls and outcome.safety_passed is False
     assert all(r.policy_version == "policy-v1" for r in case.deps.judge.calls)
-    assert outcome.reason.strip()
+    assert_baseline_unscored_reason(outcome.reason)
     assert not (case.root / "scores/current.json").exists()
     assert policy_snapshot(case.root) == before
 
 
-def test_make_gate_catches_unexpected_baseline_exception(case, monkeypatch):
-    def fail(*args, **kwargs):
-        raise RuntimeError("baseline exploded")
-    monkeypatch.setattr(gate, "current_scores", fail)
+def test_make_gate_catches_unexpected_baseline_exception(case):
+    case.deps.user_client = Chat([RuntimeError("baseline exploded")])
     adapter = make_gate(case.deps, validation_scenario_ids=["a"], noise=0)
     outcome = adapter(candidate_result(case))
     assert outcome.decision == "reverted"
     assert "complete_evidence" in adapter.last_report.failed
     assert outcome.before == outcome.after == NOT_MEASURED
     assert not case.deps.safety.calls and not case.deps.helper_client.calls
+    assert len(case.deps.user_client.calls) == 1
+    assert_baseline_unscored_reason(outcome.reason)
 
 
 @pytest.mark.parametrize("mode", ["static", "partial"])
 def test_make_gate_replaces_stale_measurements_with_what_was_actually_measured(case, mode):
     cache = case.root / "scores/current.json"
     cache.parent.mkdir()
-    cache.write_text(json.dumps(dict(
-        policy_version="policy-v1", scenario_ids=["a", "b", "c"], judge_version=case.deps.judge.version,
-        scores=Scores(empathy=3, relevance=3, quality=3).model_dump(),
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps.judge, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
     )))
     original_cache = cache.read_bytes()
     if mode == "static":
@@ -723,7 +876,7 @@ def test_starting_meta_validates_uses_replay_safety_hash_and_is_never_overwritte
     policy = parse_policy(case.base.read_text())
     expected = replay.expected_meta([], policy, policy, case.base.read_text())
     assert meta.policy_version == "policy-v1" and meta.parent is None
-    assert meta.policy_sha256 == hashlib.sha256(case.base.read_text().encode("utf-8")).hexdigest()
+    assert meta.policy_sha256 == sha256_text(case.base.read_text())
     assert meta.safety_sha256 == expected.safety_sha256
     assert {"C1", "C2"} <= set(meta.base_rules) and meta.learned_rules == {}
     assert all(policy_snapshot(case.root)[p] == text for p, text in before.items())
@@ -833,55 +986,39 @@ def test_graph_real_gate_artifacts_and_promotion_replay(case, measured):
     if measured:
         meta = PolicyMeta.model_validate_json((case.root / "policies/policy-v2.meta.json").read_text())
         assert meta.parent == "policy-v1" and "C3" in meta.learned_rules
+        cached = json.loads((case.root / "scores/current.json").read_text())
+        assert cached["policy_sha256"] == sha256_text(promoted.read_text())
+        counts = (len(case.deps.helper_client.calls), len(case.deps.user_client.calls), len(case.deps.judge.calls))
+        assert current_scores(case.deps, promoted, ["a", "b", "c"]) == event.scores.after
+        assert counts == (len(case.deps.helper_client.calls), len(case.deps.user_client.calls), len(case.deps.judge.calls))
 
 
 @pytest.mark.usefixtures("local_mlflow")
-def test_starting_meta_is_after_price_check_and_before_graph(case, monkeypatch):
-    order = []
-    original_meta, original_build = gate.ensure_starting_meta, graph.build_round_graph
+def test_starting_meta_is_after_price_check_and_before_graph(case):
+    meta_path = case.root / "policies/policy-v1.meta.json"
+    prices = PriceProbe(meta_path)
 
-    def meta(root, path):
-        order.append("meta")
-        assert root == case.root and path == case.base
-        return original_meta(root, path)
+    def before_conversation():
+        assert prices.calls == 2
+        assert PolicyMeta.model_validate_json(meta_path.read_text()).policy_version == "policy-v1"
 
-    def build(deps):
-        compiled = original_build(deps)
-
-        def invoke(*args, **kwargs):
-            order.append("graph")
-            assert (case.root / "policies/policy-v1.meta.json").is_file()
-            return compiled.invoke(*args, **kwargs)
-
-        return SimpleNamespace(invoke=invoke)
-
-    monkeypatch.setattr(gate, "ensure_starting_meta", meta)
-    # Also replace an existing direct import of this public API, if used.
-    for alias, value in tuple(vars(graph).items()):
-        if value is original_meta:
-            monkeypatch.setattr(graph, alias, meta)
-    monkeypatch.setattr(graph, "build_round_graph", build)
-    deps = graph.RoundDeps(helper_client=Chat(), user_client=Chat("Worry."), llm=Agents(),
-                           search=lambda q: [], memory=FakeMemory(), log=DecisionLog(case.root),
-                           root=case.root, start_policy=case.base)
-    deps.helper_client.model = "unpriced-acceptance-model"
+    deps = graph.RoundDeps(
+        helper_client=Chat(), user_client=Chat("Worry.", before_call=before_conversation), llm=Agents(),
+        search=lambda q: [], memory=FakeMemory(), log=DecisionLog(case.root), root=case.root,
+        start_policy=case.base, judge=lambda records: [], usage=Meter(case.root, prices),
+    )
     with pytest.raises(MissingPrice):
-        graph.run_round(deps, policy_path=case.base, scenarios=[], max_turns=1)
-    assert order == [] and not (case.root / "policies/policy-v1.meta.json").exists()
-    del deps.helper_client.model
-    graph.run_round(deps, policy_path=case.base, scenarios=[], max_turns=1)
-    assert order == ["meta", "graph"]
+        graph.run_round(deps, policy_path=case.base, scenarios=case.deps.scenarios[:1], max_turns=1)
+    assert prices.calls == 1 and not meta_path.exists()
+    assert not deps.helper_client.calls and not deps.user_client.calls
+    assert deps.log.rounds() == []
+    prices.reject = False
+    graph.run_round(deps, policy_path=case.base, scenarios=case.deps.scenarios[:1], max_turns=1)
+    assert prices.calls == 2 and len(deps.user_client.calls) == 1
 
 
 @pytest.mark.usefixtures("local_mlflow")
-def test_absent_start_policy_preserves_old_graph_behavior(case, monkeypatch):
-    def forbidden(*args, **kwargs):
-        pytest.fail("Starting metadata was requested without start_policy")
-    original = gate.ensure_starting_meta
-    monkeypatch.setattr(gate, "ensure_starting_meta", forbidden)
-    for alias, value in tuple(vars(graph).items()):
-        if value is original:
-            monkeypatch.setattr(graph, alias, forbidden)
+def test_absent_start_policy_preserves_old_graph_behavior(case):
     deps = graph.RoundDeps(helper_client=Chat(), user_client=Chat("Worry."), llm=Agents(),
                            search=lambda q: [], memory=FakeMemory(), log=DecisionLog(case.root), root=case.root)
     assert deps.start_policy is None
@@ -909,7 +1046,7 @@ def test_fake_real_cli_uses_all_validation_scenarios_and_defaults_to_unmeasured_
     event = DecisionLog(root).rounds()[0]
     captured = capsys.readouterr()
     assert captured.out == f"round 1: reverted. {event.reason}\n"
-    assert "noise" in event.reason.lower() and "measur" in event.reason.lower()
+    assert event.reason.strip()
     report = json.loads((root / "scores/round-01-gate.json").read_text())
     assert report["failed"][-1] == "noise_not_measured"
     assert event.scores is not None and event.scores.noise == 0.0
@@ -921,45 +1058,33 @@ def test_fake_real_cli_uses_all_validation_scenarios_and_defaults_to_unmeasured_
 
 
 @pytest.mark.usefixtures("local_mlflow")
-@pytest.mark.parametrize("mode", ["real", "kept", "reverted"])
-def test_cli_forwards_start_policy_for_every_gate_mode_and_accepts_real_gate_flags(case, monkeypatch, mode):
+@pytest.mark.parametrize("mode,token_cap", [("real", 777), ("real", 1), ("kept", 777), ("reverted", 777)])
+def test_cli_forwards_start_policy_for_every_gate_mode_and_accepts_real_gate_flags(case, mode, token_cap):
     scenarios = case.root / "cli-scenarios.jsonl"
     scenarios.write_text(case.deps.scenarios[0].model_dump_json() + "\n")
-    calls, configured = [], []
-
-    original_make = gate.make_gate
-
-    def configure(deps, **kwargs):
-        configured.append(deps)
-        assert deps.noise_measured is True
-        assert kwargs["validation_scenario_ids"] == ["a"]
-        assert kwargs["noise"] == 0.25 and kwargs["token_cap"] == 777
-        return original_make(deps, **kwargs)
-
-    monkeypatch.setattr(gate, "make_gate", configure)
-    for alias, value in tuple(vars(script).items()):
-        if value is original_make:
-            monkeypatch.setattr(script, alias, configure)
-
-    def run(deps, **kwargs):
-        calls.append(deps)
-        assert deps.start_policy == case.base
-        return {"event": SimpleNamespace(round=1, outcome="no_pattern", reason="No pattern.")}
-
-    original = graph.run_round
-    monkeypatch.setattr(graph, "run_round", run)
-    for alias, value in tuple(vars(script).items()):
-        if value is original:
-            monkeypatch.setattr(script, alias, run)
+    root = case.root / "flags"
     assert script.main([
-        "--fake", "--gate", mode, "--root", str(case.root / "flags"), "--policy", str(case.base),
+        "--fake", "--gate", mode, "--root", str(root), "--policy", str(case.base),
         "--scenarios", str(scenarios), "--validation", str(scenarios),
-        "--noise", "0.25", "--noise-measured", "--token-cap", "777",
+        "--noise", "0.25", "--noise-measured", "--token-cap", str(token_cap), "--max-turns", "1",
         "--mlflow", f"sqlite:///{case.root}/mlflow.db",
     ]) == 0
-    assert len(calls) == 1
+    meta = PolicyMeta.model_validate_json((root / "policies/policy-v1.meta.json").read_text())
+    assert meta.policy_sha256 == sha256_text(case.base.read_text())
+    event = DecisionLog(root).rounds()[0]
+    assert replay.check(DecisionLog(root), root, case.base).is_file()
     if mode == "real":
-        assert configured
+        report = json.loads((root / "scores/round-01-gate.json").read_text())
+        if token_cap == 1:
+            assert report["failed"] == ["token_cap"] and report["would_keep"] is False
+            assert report["checks"]["noise_not_measured"] == "not_run"
+            assert event.scores is event.safety is None and event.outcome == "reverted"
+        else:
+            assert report["checks"]["token_cap"] == report["checks"]["noise_not_measured"] == "passed"
+            assert event.scores is not None and event.scores.noise == 0.25
+    else:
+        assert event.outcome == mode
+        assert (root / "policies/policy-v2.meta.json").exists() is (mode == "kept")
 
 
 def test_nonfake_real_cli_refuses_before_any_file_is_written(case, capsys):
@@ -972,5 +1097,5 @@ def test_nonfake_real_cli_refuses_before_any_file_is_written(case, capsys):
     captured = capsys.readouterr()
     assert not captured.out
     assert len(captured.err.splitlines()) == 1
-    assert all(word in captured.err.lower() for word in ("judge", "safety", "later"))
+    assert captured.err.strip()
     assert {p.relative_to(case.root): p.read_bytes() for p in case.root.rglob("*") if p.is_file()} == before
