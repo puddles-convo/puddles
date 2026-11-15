@@ -122,7 +122,8 @@ class WeightStep:
         problems = ledger.check(self.root)
         if problems:
             raise ConfigError("adapter log check failed: " + "; ".join(problems))
-        self.use_helper(self.loader.load(kept.adapter_id, self.root / kept.adapter_dir), kept.adapter_id)
+        name = kept.served_as or kept.adapter_id
+        self.use_helper(self.loader.load(name, self.root / kept.adapter_dir), name)
         return kept.adapter_id
 
     def after_round(self, round_: int) -> Optional[AdapterEvent]:
@@ -144,6 +145,7 @@ class WeightStep:
                     base_model=s.base_model, parent_adapter=parent.adapter_id if parent else None,
                     policy_version=policy.version)
         self.out(f"weights: {adapter_id} ({method}) after round {round_}: {why}")
+        served: Optional[str] = None
         try:
             backend = self.backend_factory()
             backend.start(parent.state_path if parent else None)
@@ -179,28 +181,37 @@ class WeightStep:
                     reason="the judge did not separate the sampled replies enough to train on"))
             saved = backend.save(adapter_id)
             peft = backend.export(saved, folder)
-            candidate = self.loader.load(adapter_id, peft)
+            adapter_sha = ledger.sha256_dir(peft)
+            # Unique per adapter's bytes, so roots sharing one helper server never pick up each other's.
+            served = f"{adapter_id}-{adapter_sha[:12]}"
+            candidate = self.loader.load(served, peft)
             current = rule_gate.current_scores(self.gate_deps, policy_path, self.validation_ids)
             verdict = gate_adapter(self.gate_deps, candidate, policy_path=policy_path, current_scores=current,
                                    validation_ids=self.validation_ids, noise=self.noise, round_=round_,
                                    adapter_id=adapter_id)
         except Exception as exc:  # noqa: BLE001  a failed training run costs this run only
+            if served is not None:
+                try:
+                    self.loader.unload(served)
+                except Exception:  # noqa: BLE001  the original error is the one to record
+                    pass
             return ledger.append(self.root, AdapterEvent(**base, outcome="failed",
                                                          reason=f"{type(exc).__name__}: {str(exc)[:300]}"))
         event = AdapterEvent(
             **base, groups=groups_n, pairs=pairs_n, dataset_sha256=ledger.sha256_file(dataset),
             sampler_path=saved.sampler_path, state_path=saved.state_path,
-            adapter_dir=peft.relative_to(self.root).as_posix(), adapter_sha256=ledger.sha256_dir(peft),
-            served_as=adapter_id, metrics=metrics, outcome="kept" if verdict.kept else "reverted",
+            adapter_dir=peft.relative_to(self.root).as_posix(), adapter_sha256=adapter_sha,
+            served_as=served, metrics=metrics, outcome="kept" if verdict.kept else "reverted",
             failed_checks=verdict.failed,
             quality_before=verdict.before.quality if verdict.before else None,
             quality_after=verdict.after.quality if verdict.after else None,
             safety_passed=sum(c.passed for c in verdict.safety.cases) if verdict.safety else None,
             safety_total=len(verdict.safety.cases) if verdict.safety else None, reason=verdict.reason)
+        assert served is not None
         if verdict.kept:
-            self.use_helper(candidate, adapter_id)
+            self.use_helper(candidate, served)
             rule_gate.current_path(self.root).unlink(missing_ok=True)  # measured on the old weights
         else:
-            self.loader.unload(adapter_id)
+            self.loader.unload(served)
         self.out(f"weights: {adapter_id} {event.outcome}. {verdict.reason}")
         return ledger.append(self.root, event)
