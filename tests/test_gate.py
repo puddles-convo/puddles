@@ -777,7 +777,7 @@ def test_the_fake_script_runs_the_real_gate_and_promotes_nothing(tmp_path, trace
     [event] = DecisionLog(root).rounds()
 
     assert event.outcome == "reverted" and "noise has not been measured" in event.reason
-    assert event.scores is not None and event.safety is not None and event.safety.passed is True
+    assert event.scores is not None and event.safety is not None and event.safety.passed is False  # ran no case
     assert capsys.readouterr().out == f"round 1: reverted. {event.reason}\n"
     assert (root / "conversations" / "round-01-validation.jsonl").exists()
     assert (root / "policies" / "policy-v1.meta.json").exists()

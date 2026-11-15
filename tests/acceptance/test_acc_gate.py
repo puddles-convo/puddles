@@ -308,6 +308,476 @@ def candidate_result(case, round_=3):
                                  edit=edit, pattern=pattern, candidate_path=case.candidate)
 
 
+def rejected_followup(case, api, cached_before=None):
+    """Exercise a negative gate case, including its real record and memory path when requested."""
+    cache = case.root / "scores/current.json"
+    cache.parent.mkdir(exist_ok=True)
+    cache.write_text(json.dumps(cache_payload(
+        case.base, case.deps, ["a", "b", "c"],
+        cached_before if cached_before is not None else Scores(empathy=3, relevance=3, quality=3),
+    )))
+    cache_before = cache.read_bytes()
+    ensure_starting_meta(case.root, case.base)
+    policies_before = policy_snapshot(case.root)
+    event, memory = None, FakeMemory()
+    memory.ensure_training_audience()
+    if api == "run_gate":
+        report = run_gate(case.inp, case.deps)
+    else:
+        result = candidate_result(case)
+        for kind in ("pattern", "edit"):
+            result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+        adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+        outcome = adapter(result)
+        report = adapter.last_report
+        event = round_api.finish_round(result, outcome, DecisionLog(case.root), memory, case.root,
+                                       start_policy=case.base)
+        assert event.outcome == "reverted"
+        assert event.scores == report.log_scores and event.safety == report.log_safety
+        saved_outcome = json.loads((case.root / event.records["outcome"].path).read_bytes())
+        assert saved_outcome["safety_passed"] == report.outcome.safety_passed
+        assert memory.entries[event.records["outcome"].id].metadata["sha256"] == event.records["outcome"].sha256
+        assert replay.check(DecisionLog(case.root), case.root, case.base) == case.base
+    assert report.outcome.decision == "reverted" and report.would_keep is False
+    assert policy_snapshot(case.root) == policies_before
+    assert_report(report, case.root)
+    return SimpleNamespace(report=report, event=event, memory=memory, cache=cache, cache_before=cache_before)
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+@pytest.mark.parametrize("passed", [False, True])
+@pytest.mark.parametrize("measured", [False, True])
+def test_no_safety_case_is_never_a_measured_safety_pass(case, api, passed, measured):
+    case.deps.noise_measured = measured
+    raw = SafetyResult(policy_version="policy-v2-candidate", case_file="empty-cases.json", passed=passed, cases=[])
+    case.deps.safety = lambda version, reply: raw
+    checked = rejected_followup(case, api)
+    report = checked.report
+    assert report.failed == ["safety_cases"] + ([] if measured else ["noise_not_measured"])
+    assert report.checks["safety_cases"] == "failed"
+    assert report.outcome.safety_passed is False
+    assert report.log_safety.passed is False and report.log_safety.cases == 0
+    assert report.log_safety.failed_case_ids == []
+    assert "no safety case was run" in report.outcome.reason.lower()
+    assert "safety check passed" not in report.outcome.reason.lower()
+    assert "would have kept" not in report.outcome.reason.lower()
+    assert report.log_scores is not None and report.log_scores.after.quality == 4
+    assert len(case.deps.judge.calls) == 3
+    assert SafetyResult.model_validate_json((case.root / "scores/round-03-safety.json").read_bytes()) == raw
+    assert checked.cache.read_bytes() == checked.cache_before
+    for entry in checked.memory.entries.values():
+        assert "safety check passed" not in entry.content.lower()
+        assert "all safety cases passed" not in entry.content.lower()
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+@pytest.mark.parametrize("passed", [False, True])
+@pytest.mark.parametrize("failed_ids", [["bad-b"], ["bad-a", "bad-b"]])
+def test_failed_cases_override_a_safety_results_overall_pass(case, api, passed, failed_ids):
+    case.deps.noise_measured = True
+    raw = SafetyResult(policy_version="policy-v2-candidate", case_file="mixed-cases.json", passed=passed,
+                       cases=[SafetyCaseResult(case_id=id_, passed=id_ not in failed_ids)
+                              for id_ in ("bad-a", "bad-b")])
+    case.deps.safety = lambda version, reply: raw
+    checked = rejected_followup(case, api)
+    report = checked.report
+    assert report.failed == ["safety_cases"]
+    assert report.outcome.safety_passed is report.log_safety.passed is False
+    assert report.log_safety.failed_case_ids == failed_ids and report.log_safety.cases == 2
+    assert all(id_ in report.outcome.reason for id_ in failed_ids)
+    assert "safety check passed" not in report.outcome.reason.lower()
+    assert report.log_scores is not None and len(case.deps.judge.calls) == 3
+    assert SafetyResult.model_validate_json((case.root / "scores/round-03-safety.json").read_bytes()) == raw
+    assert checked.cache.read_bytes() == checked.cache_before
+    for entry in checked.memory.entries.values():
+        assert "safety check passed" not in entry.content.lower()
+        assert "all safety cases passed" not in entry.content.lower()
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+@pytest.mark.parametrize("dimension", ["empathy", "relevance"])
+@pytest.mark.parametrize("value", [0, -1, 0.5, 5.5, float("inf"), float("-inf"), float("nan")])
+def test_out_of_range_baselines_cannot_supply_a_measured_gain(case, api, dimension, value):
+    case.deps.noise_measured = True
+    before = Scores(**{**dict(empathy=3, relevance=3), dimension: value})
+    case.inp.current_scores = before
+    checked = rejected_followup(case, api, cached_before=before)
+    report = checked.report
+    if api == "run_gate":
+        assert report.failed == ["complete_evidence"]
+        assert "the policy in force has no measured scores" in report.outcome.reason.lower()
+        assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+        assert report.log_scores is None and report.outcome.after == NOT_MEASURED
+        assert checked.cache.read_bytes() == checked.cache_before
+    else:
+        # The bad cache is absent: both policies are genuinely scored 4, so there is no gain.
+        assert report.failed == ["quality_gain"]
+        assert report.log_scores.before.quality == report.log_scores.after.quality == 4
+        assert len(case.deps.judge.calls) == 6
+        rebuilt = json.loads(checked.cache.read_bytes())
+        assert rebuilt["scores"]["empathy"] == rebuilt["scores"]["relevance"] == 4
+        assert checked.event.scores == report.log_scores
+    assert report.outcome.safety_passed and report.log_safety.passed
+
+
+@pytest.mark.parametrize("quality", [0, -1, 1.0, 4.5, float("inf"), float("-inf"), float("nan")])
+def test_out_of_range_cached_quality_cannot_invent_a_measured_gain(case, quality):
+    """Any cached quality other than the dimensions' mean is absent, even when in range."""
+    case.deps.noise_measured = True
+    ids = ["a", "b", "c"]
+    baseline = current_scores(case.deps, case.base, ids)
+    assert baseline.empathy == baseline.relevance == baseline.quality == 4
+    cache = case.root / "scores/current.json"
+    data = json.loads(cache.read_bytes())
+    data["scores"]["quality"] = quality  # retain genuinely measured dimensions and every cache identity
+    cache.write_text(json.dumps(data))
+    ensure_starting_meta(case.root, case.base)
+    result = candidate_result(case)
+    for kind in ("pattern", "edit"):
+        result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+    adapter = make_gate(case.deps, validation_scenario_ids=ids, noise=0.1)
+    outcome = adapter(result)
+    assert len(case.deps.judge.calls) == 9  # original baseline, remeasured baseline, candidate
+    assert json.loads(cache.read_bytes())["scores"]["quality"] == 4
+    log, memory = DecisionLog(case.root), FakeMemory()
+    memory.ensure_training_audience()
+    policies_before = policy_snapshot(case.root)
+    event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+    assert event.outcome == "reverted", "An impossible cached quality manufactured a gain and promoted a policy"
+    assert policy_snapshot(case.root) == policies_before
+    if event.scores is not None:
+        before = event.scores.before
+        assert before.quality == (before.empathy + before.relevance) / 2
+        assert event.scores.after.quality == before.quality == 4
+    for entry in memory.entries.values():
+        assert "quality rose from" not in entry.content.lower()
+
+
+@pytest.mark.parametrize("quality", [0, -1, 1.0, 4.5, float("inf"), float("-inf"), float("nan")])
+def test_a_callers_inconsistent_quality_is_not_measured(case, quality):
+    case.deps.noise_measured = True
+    case.inp.current_scores = Scores(empathy=4, relevance=4, quality=quality)
+    report = run_gate(case.inp, case.deps)
+    assert report.failed == ["complete_evidence"] and not report.would_keep
+    assert report.outcome.decision == "reverted"
+    assert "the policy in force has no measured scores" in report.outcome.reason
+    assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    assert report.outcome.before.quality == 4 and report.outcome.after == NOT_MEASURED
+    assert report.log_scores is None
+    assert "quality rose" not in report.outcome.reason.lower()
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+def test_zero_helper_turn_limit_cannot_measure_or_keep_a_policy(case, api):
+    case.deps.noise_measured = True
+    case.deps.max_turns = 0
+    ensure_starting_meta(case.root, case.base)
+    policies_before = policy_snapshot(case.root)
+    if api == "run_gate":
+        report = run_gate(case.inp, case.deps)
+        assert report.log_scores is None and report.outcome.after == NOT_MEASURED
+        conversation_round, tag, filename = 3, VALIDATION_TAG, "round-03-validation.jsonl"
+    else:
+        result = candidate_result(case)
+        for kind in ("pattern", "edit"):
+            result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+        adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+        outcome = adapter(result)
+        report = adapter.last_report
+        assert outcome.before == outcome.after == NOT_MEASURED
+        assert result.scores is result.safety is None and not case.deps.safety.calls
+        assert "candidate was not tested" in outcome.reason.lower()
+        memory, log = FakeMemory(), DecisionLog(case.root)
+        memory.ensure_training_audience()
+        event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+        assert event.outcome == "reverted" and event.scores is event.safety is None
+        assert "no helper reply" in event.reason
+        assert replay.check(log, case.root, case.base) == case.base
+        assert not (case.root / "scores/current.json").exists()
+        for entry in memory.entries.values():
+            assert "quality rose from" not in entry.content.lower()
+        conversation_round, tag, filename = 0, CURRENT_TAG, "round-00-current.jsonl"
+    assert report.failed == ["complete_evidence"]
+    assert report.outcome.decision == "reverted" and not report.would_keep
+    assert "no helper reply" in report.outcome.reason
+    for sid in ("a", "b", "c"):
+        assert runner.conversation_id(conversation_round, sid, tag) in report.outcome.reason
+    assert not case.deps.judge.calls
+    records = rows(case.root / "conversations" / filename)
+    assert len(records) == 3 and all(not any(t["speaker"] == "helper" for t in r["turns"]) for r in records)
+    assert (case.root / "scores" / filename).read_bytes() == b""
+    assert policy_snapshot(case.root) == policies_before
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("api,phase", [
+    ("score_policy", "baseline"), ("score_policy", "validation"),
+    ("run_gate", "validation"), ("make_gate_finish", "baseline"), ("make_gate_finish", "validation"),
+])
+def test_one_helperless_conversation_cannot_hide_among_measured_ones(case, monkeypatch, phase, api):
+    """Let the real runner return one user-only conversation, with ordinary records around it."""
+    case.deps.noise_measured = True
+    target_tag = CURRENT_TAG if phase == "baseline" else VALIDATION_TAG
+    original = runner.run_conversation
+
+    def stop_one(helper, user, policy, scenario, **kwargs):
+        if scenario.scenario_id == "b" and kwargs.get("tag") == target_tag:
+            kwargs["max_turns"] = 0
+        return original(helper, user, policy, scenario, **kwargs)
+
+    monkeypatch.setattr(runner, "run_conversation", stop_one)
+    round_ = 0 if phase == "baseline" else 3
+    missing_id = runner.conversation_id(round_, "b", target_tag)
+    if api == "score_policy":
+        evidence = score_policy(case.deps, case.base if phase == "baseline" else case.candidate,
+                                ["a", "b", "c"], round_, target_tag)
+        assert not evidence.complete and evidence.scores is None
+        assert evidence.unscored == [missing_id]
+        assert "no helper reply" in evidence.describe() and missing_id in evidence.describe()
+    elif api == "run_gate":
+        checked = rejected_followup(case, api)
+        assert checked.report.failed == ["complete_evidence"]
+        assert "no helper reply" in checked.report.outcome.reason and missing_id in checked.report.outcome.reason
+        assert checked.report.log_scores is None
+    else:
+        if phase == "validation":
+            checked = rejected_followup(case, api)  # matching measured cache skips baseline
+        else:
+            ensure_starting_meta(case.root, case.base)
+            policies_before = policy_snapshot(case.root)
+            result = candidate_result(case)
+            for kind in ("pattern", "edit"):
+                result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+            adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+            outcome = adapter(result)
+            memory, log = FakeMemory(), DecisionLog(case.root)
+            memory.ensure_training_audience()
+            event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+            assert policy_snapshot(case.root) == policies_before
+            assert replay.check(log, case.root, case.base) == case.base
+            checked = SimpleNamespace(report=adapter.last_report, event=event)
+            assert not case.deps.safety.calls
+        assert checked.event.outcome == "reverted" and checked.event.scores is None
+        assert checked.report.failed == ["complete_evidence"]
+        assert "no helper reply" in checked.event.reason and missing_id in checked.event.reason
+    assert missing_id not in [record.id for record in case.deps.judge.calls]
+    assert [record.scenario_id for record in case.deps.judge.calls] == ["a", "c"]
+    filename = "round-00-current.jsonl" if phase == "baseline" else "round-03-validation.jsonl"
+    assert [row["conversation_id"] for row in rows(case.root / "scores" / filename)] == [
+        runner.conversation_id(round_, sid, target_tag) for sid in ("a", "c")]
+
+
+@pytest.mark.parametrize("with_replay", [False, True])
+@pytest.mark.parametrize("noise", [float("inf"), float("-inf"), float("nan"), -1.0],
+                         ids=["inf", "negative-inf", "nan", "negative"])
+def test_infinite_noise_cannot_leave_an_unreadable_round_log(case, with_replay, noise):
+    """Every invalid noise is refused before measurement, and a later round still finishes."""
+    case.deps.noise_measured = True
+    ensure_starting_meta(case.root, case.base)
+    result = candidate_result(case)
+    for kind in ("pattern", "edit"):
+        result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+    adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=noise)
+    outcome = adapter(result)
+    assert outcome.decision == "reverted" and not adapter.last_report.would_keep
+    assert adapter.last_report.failed == ["complete_evidence"]
+    assert "noise" in outcome.reason.lower() and "candidate was not tested" in outcome.reason.lower()
+    assert outcome.before == outcome.after == NOT_MEASURED
+    assert adapter.last_report.log_scores is result.scores is result.safety is None
+    assert not case.deps.judge.calls and not case.deps.safety.calls
+    assert not case.deps.helper_client.calls and not case.deps.user_client.calls
+    assert not (case.root / "scores/current.json").exists()
+    memory, log = FakeMemory(), DecisionLog(case.root)
+    memory.ensure_training_audience()
+    event = round_api.finish_round(result, outcome, log, memory, case.root,
+                                   start_policy=case.base if with_replay else None)
+    assert log.rounds() == [event] and event.outcome == "reverted" and log.next_round() == 4
+    assert event.scores is event.safety is None
+    assert replay.check(log, case.root, case.base) == case.base
+    next_result = candidate_result(case, round_=4)
+    # Even a rejected add reserves its rule ID: the next genuine proposal must use C4.
+    next_result.candidate_path = write_policy(
+        case.root / "policies/policy-v3-candidate.md", "policy-v3-candidate",
+        BASE_RULES + ADDED_RULE.replace("C3.", "C4."))
+    next_result.edit = next_result.edit.model_copy(update={
+        "rule_id": "C4", "new_policy_version": "policy-v3-candidate",
+        "policy_path": str(next_result.candidate_path.relative_to(case.root)),
+    })
+    for kind in ("pattern", "edit"):
+        next_result.refs[kind] = save_record(getattr(next_result, kind), 4, case.root)
+    next_adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+    next_outcome = next_adapter(next_result)
+    next_event = round_api.finish_round(next_result, next_outcome, log, memory, case.root,
+                                        start_policy=case.base if with_replay else None)
+    assert [r.round for r in log.rounds()] == [3, 4] and next_event.outcome == "reverted"
+    assert "quality_gain" in next_adapter.last_report.failed and log.next_round() == 5
+    assert replay.check(log, case.root, case.base) == case.base
+
+
+@pytest.mark.parametrize("noise", [float("inf"), float("-inf"), float("nan"), -1.0])
+def test_invalid_noise_in_run_gate_is_refused_before_any_measurement(case, noise):
+    case.deps.noise_measured = True
+    # GateInput itself refuses negative/NaN; exercise the public function's same guard too.
+    inp = case.inp.model_copy(update={"noise": noise})
+    report = run_gate(inp, case.deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert report.log_scores is report.log_safety is None and report.outcome.after == NOT_MEASURED
+    assert "noise" in report.outcome.reason.lower()
+    assert not case.deps.judge.calls and not case.deps.safety.calls
+    assert not case.deps.helper_client.calls and not case.deps.user_client.calls
+    assert report.candidate_sha256 is None
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+@pytest.mark.parametrize("field", ["empathy", "relevance", "quality", "emotion_change"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_baseline_fields_are_not_written_or_handed_on(case, api, field, value):
+    case.deps.noise_measured = True
+    before = Scores(empathy=3, relevance=3, quality=3, emotion_change=1).model_copy(update={field: value})
+    case.inp.current_scores = before
+    checked = rejected_followup(case, api, cached_before=before)
+    report = checked.report
+    if api == "run_gate":
+        assert report.failed == ["complete_evidence"] and report.log_scores is None
+    else:
+        assert report.failed == ["quality_gain"] and len(case.deps.judge.calls) == 6
+        assert report.log_scores.before.quality == report.log_scores.after.quality == 4
+    # Strict JSON rendering must preserve the actual numbers, without converting NaN/inf to null.
+    for model in (report.outcome, report.log_scores, report.log_safety, checked.event):
+        if model is not None:
+            json.dumps(model.model_dump(mode="python"), default=str, allow_nan=False)
+
+
+@pytest.mark.parametrize("field", ["empathy", "relevance", "emotion_before", "emotion_after"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_judge_record_cannot_be_filed_as_complete_evidence(case, field, value):
+    """A typed but mutable judge result must not bypass the rule at the score-file write."""
+    class NonfiniteJudge(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            if record.scenario_id == "b":
+                setattr(answer.score, field, value)
+            return answer
+
+    case.deps.judge = NonfiniteJudge()
+    try:
+        evidence = score_policy(case.deps, case.candidate, ["a", "b", "c"], 3, VALIDATION_TAG)
+    except GateError:
+        pass  # A refusal before saving is also safe; the gate converts it to an unmeasured revert.
+    else:
+        assert not evidence.complete and evidence.scores is None
+        assert evidence.unscored == [runner.conversation_id(3, "b", VALIDATION_TAG)]
+        assert runner.conversation_id(3, "b", VALIDATION_TAG) in evidence.describe()
+    path = case.root / "scores/round-03-validation.jsonl"
+    if path.exists():
+        for raw in rows(path):
+            ScoreRecord.model_validate(raw)
+            json.dumps(raw, allow_nan=False)
+
+
+def test_judges_retained_objects_cannot_rewrite_saved_measurements(case):
+    case.deps.noise_measured = True
+    retained = []
+
+    class RetainingJudge(Judge):
+        def score(self, record):
+            if retained:
+                prior_record, prior_score = retained[-1]
+                prior_record.id = "other-conversation"
+                prior_record.turns[0].text = "Changed after the judge returned."
+                prior_score.emotion_before = float("nan")
+                prior_score.empathy = 1
+            answer = super().score(record)
+            retained.append((record, answer.score))
+            return answer
+
+    case.deps.judge = RetainingJudge()
+    report = run_gate(case.inp, case.deps)
+    assert report.outcome.decision == "kept" and not report.failed
+    assert report.outcome.after == Scores(empathy=4, relevance=4, quality=4, emotion_change=2)
+    conversations = rows(case.root / "conversations/round-03-validation.jsonl")
+    saved = [ScoreRecord.model_validate(r) for r in rows(case.root / "scores/round-03-validation.jsonl")]
+    expected_ids = [runner.conversation_id(3, sid, VALIDATION_TAG) for sid in ("a", "b", "c")]
+    assert [r["id"] for r in conversations] == [s.conversation_id for s in saved] == expected_ids
+    assert all(r["turns"][0]["text"] == "My hours were cut." for r in conversations)
+    assert all(s.empathy == 4 and s.emotion_before == 4 for s in saved)
+    assert retained[0][0].id == "other-conversation"  # the attempted mutation actually ran
+    assert_report(report, case.root)
+
+
+def test_judge_cannot_rename_its_input_to_make_a_foreign_score_match(case):
+    case.deps.noise_measured = True
+
+    class RenamingJudge(Judge):
+        def score(self, record):
+            if record.scenario_id == "b":
+                record.id = "other-conversation"
+                record.turns[0].text = "Another conversation's words."
+            return super().score(record)
+
+    case.deps.judge = RenamingJudge()
+    report = run_gate(case.inp, case.deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert runner.conversation_id(3, "b", VALIDATION_TAG) in report.outcome.reason
+    assert report.log_scores is None and report.outcome.after == NOT_MEASURED
+    conversations = rows(case.root / "conversations/round-03-validation.jsonl")
+    assert [r["id"] for r in conversations] == [runner.conversation_id(3, sid, VALIDATION_TAG)
+                                                for sid in ("a", "b", "c")]
+    assert all(r["turns"][0]["text"] == "My hours were cut." for r in conversations)
+    assert [r["conversation_id"] for r in rows(case.root / "scores/round-03-validation.jsonl")] == [
+        runner.conversation_id(3, sid, VALIDATION_TAG) for sid in ("a", "c")]
+    assert_report(report, case.root)
+
+
+def test_safety_result_and_caller_input_are_snapshots_during_validation(case):
+    case.deps.noise_measured = True
+    raw_safety = Safety()("policy-v2-candidate", None)
+    case.deps.safety = lambda version, reply: raw_safety
+
+    class MutatingJudge(Judge):
+        def score(self, record):
+            raw_safety.passed = False
+            raw_safety.cases[0].passed = False
+            case.inp.current_scores.empathy = float("nan")
+            case.inp.noise = float("inf")
+            case.inp.validation_scenario_ids.clear()
+            case.inp.candidate_policy = str(case.root / "missing-policy.md")
+            case.inp.token_cap = 0
+            return super().score(record)
+
+    case.deps.judge = MutatingJudge()
+    report = run_gate(case.inp, case.deps)
+    assert report.outcome.decision == "kept" and not report.failed
+    assert report.outcome.before.quality == 3 and report.outcome.after.quality == 4
+    assert report.log_scores.noise == 0.1 and len(case.deps.judge.calls) == 3
+    assert report.outcome.safety_passed and report.log_safety.passed and report.safety.passed
+    assert report.safety.cases[0].passed and not raw_safety.passed and not raw_safety.cases[0].passed
+    saved = SafetyResult.model_validate_json((case.root / "scores/round-03-safety.json").read_bytes())
+    assert saved == report.safety
+    json.dumps(report.outcome.model_dump(mode="python"), default=str, allow_nan=False)
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("where", ["result", "case"])
+def test_truthy_invalid_safety_verdict_is_not_a_measured_pass(case, where):
+    case.deps.noise_measured = True
+    raw_safety = Safety()("policy-v2-candidate", None)
+    if where == "result":
+        raw_safety.passed = "no"
+    else:
+        raw_safety.cases[0].passed = "no"
+    case.deps.safety = lambda version, reply: raw_safety
+    report = run_gate(case.inp, case.deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["safety_cases"]
+    assert not report.outcome.safety_passed and report.safety is report.log_safety is None
+    assert "not valid" in report.outcome.reason.lower()
+    assert not (case.root / "scores/round-03-safety.json").exists()
+    assert len(case.deps.judge.calls) == 3 and report.log_scores.after.quality == 4
+    assert_report(report, case.root)
+
+
 # 1. Runner: training/validation identity separation, with legacy IDs preserved.
 
 @pytest.mark.parametrize("tag,expected", [
@@ -861,7 +1331,7 @@ def test_each_gate_evidence_write_failure_reverts_an_otherwise_keepable_candidat
     ((3.9, 3.9, None), 0.1, ["quality_gain"]),
     ((3.8999999996, 3.8999999996, None), 0.1, ["quality_gain"]),
     ((3.8999999994, 3.8999999994, None), 0.1, []),
-    ((3, 3, 4), 0.0, ["quality_gain"]),
+    ((3, 3, 4), 0.0, ["complete_evidence"]),
     ((4.2, 3, None), 0.2, []),
     ((3, 4.2, None), 0.2, []),
     ((4.2000000004, 3, None), 0.2, []),
@@ -878,8 +1348,13 @@ def test_quality_and_dimension_boundaries_round_differences_to_nine_places(case,
     assert report.failed == failed
     assert report.would_keep is (not failed)
     assert report.outcome.decision == ("reverted" if failed else "kept")
-    assert report.outcome.before.quality == (before[2] if before[2] is not None else (before[0] + before[1]) / 2)
-    assert report.outcome.after == Scores(empathy=4, relevance=4, quality=4, emotion_change=-4)
+    assert report.outcome.before.quality == (before[0] + before[1]) / 2
+    if failed == ["complete_evidence"]:
+        # A supplied quality of 4 beside dimensions 3 and 3 is unmeasured, not a gain boundary.
+        assert report.outcome.after == NOT_MEASURED and report.log_scores is None
+        assert report.checks["quality_gain"] == report.checks["dimension_drop"] == "not_run"
+    else:
+        assert report.outcome.after == Scores(empathy=4, relevance=4, quality=4, emotion_change=-4)
     assert [r["id"] for r in rows(case.root / "conversations/round-03-validation.jsonl")] == [
         runner.conversation_id(3, "a", VALIDATION_TAG),
     ]
@@ -1885,7 +2360,10 @@ def test_fake_real_cli_uses_all_validation_scenarios_and_defaults_to_unmeasured_
     report = json.loads((root / "scores/round-01-gate.json").read_text())
     assert report["failed"][-1] == "noise_not_measured"
     assert event.scores is not None and event.scores.noise == 0.0
-    assert event.safety is not None and event.safety.passed
+    # The amended contract rejects the fake safety callback, which runs no case.
+    assert report["checks"]["safety_cases"] == "failed"
+    assert "no safety case was run" in event.reason.lower()
+    assert event.safety is not None and event.safety.passed is False and event.safety.cases == 0
     expected = {"b", "c"} if validation_file else {"a"}
     assert {r["scenario_id"] for r in rows(root / "conversations/round-01-validation.jsonl")} == expected
     assert (root / "policies/policy-v1.meta.json").is_file()
@@ -1920,6 +2398,57 @@ def test_cli_forwards_start_policy_for_every_gate_mode_and_accepts_real_gate_fla
     else:
         assert event.outcome == mode
         assert (root / "policies/policy-v2.meta.json").exists() is (mode == "kept")
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+def test_judge_record_relabelled_during_snapshot_is_not_complete_evidence(case, api):
+    """The saved score's ID must match too when the judge changes its object after returning."""
+    class RelabelledScore(ScoreRecord):
+        def model_dump(self, *args, **kwargs):
+            # A deterministic post-return change at the snapshot boundary; the
+            # object matched the conversation when the judge returned it.
+            self.conversation_id = "another-conversation"
+            return super().model_dump(*args, **kwargs)
+
+    class RelabellingJudge(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            if record.scenario_id == "b":
+                answer.score = RelabelledScore.model_validate(answer.score.model_dump())
+            return answer
+
+    case.deps.judge = RelabellingJudge()
+    case.deps.noise_measured = True
+    event = None
+    if api == "run_gate":
+        report = run_gate(case.inp, case.deps)
+    else:
+        cache = case.root / "scores/current.json"
+        cache.parent.mkdir(exist_ok=True)
+        cache.write_text(json.dumps(cache_payload(
+            case.base, case.deps, ["a", "b", "c"], Scores(empathy=3, relevance=3, quality=3),
+        )))
+        result = candidate_result(case)
+        for kind in ("pattern", "edit"):
+            result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
+        ensure_starting_meta(case.root, case.base)
+        adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+        outcome = adapter(result)
+        report = adapter.last_report
+        memory, log = FakeMemory(), DecisionLog(case.root)
+        memory.ensure_training_audience()
+        event = round_api.finish_round(result, outcome, log, memory, case.root, start_policy=case.base)
+
+    assert report.outcome.decision == "reverted", "A foreign score must not promote the candidate"
+    assert "complete_evidence" in report.failed and "conv-r03-val-b" in report.outcome.reason
+    assert report.outcome.after == NOT_MEASURED and report.log_scores is None
+    assert {r["conversation_id"] for r in rows(case.root / "scores/round-03-validation.jsonl")} == {
+        "conv-r03-val-a", "conv-r03-val-c",
+    }
+    if event is not None:
+        assert event.outcome == "reverted" and event.scores is None
+        assert not (case.root / "policies/policy-v2.md").exists()
+        assert replay.check(log, case.root, case.base) == case.base
 
 
 def test_nonfake_real_cli_refuses_before_any_file_is_written(case, capsys):
