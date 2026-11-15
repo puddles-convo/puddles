@@ -68,11 +68,6 @@ def check(out: CriticOutput, inp: CriticInput, log: DecisionLog) -> list[str]:
         problems.append(f"example IDs not in the input: {unknown}")
     if not out.example_conversation_ids:
         problems.append("give at least one example conversation ID")
-    distinct = set(out.example_conversation_ids)
-    if len(distinct) != len(out.example_conversation_ids):
-        problems.append("example_conversation_ids must not repeat an ID")
-    if out.seen_in != len(distinct):
-        problems.append(f"seen_in must equal the number of distinct example conversation IDs ({len(distinct)})")
     if out.same_as_pattern_id and log.pattern_identity(out.same_as_pattern_id) is None:
         problems.append(f"same_as_pattern_id {out.same_as_pattern_id} is not an earlier pattern")
     return problems

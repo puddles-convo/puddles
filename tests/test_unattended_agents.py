@@ -282,27 +282,3 @@ def test_a_failed_search_writes_one_failed_line_for_the_researcher(tmp_path):
         researcher.run(researcher.build_input(pattern, log, mem, tmp_path), llm, exa_down, log)
     failed = [line for line in read_usage(tmp_path / "log/usage.jsonl") if line.get("event") == "failed"]
     assert [(f["round"], f["agent"], f["reason"]) for f in failed] == [(3, "researcher", str(caught.value))]
-
-
-# ---------- 3.6: the critic's count matches its evidence ----------
-
-def critic_problems(tmp_path, **answer):
-    log, mem = setup(tmp_path)
-    inp = critic.build_input(1, POLICY, CONVS, log, mem, tmp_path)
-    return critic.check(CriticOutput.model_validate({**PATTERN, **answer}), inp, log)
-
-
-def test_critic_count_equal_to_distinct_ids_passes(tmp_path):
-    assert critic_problems(tmp_path) == []
-
-
-def test_critic_count_larger_than_its_evidence_fails(tmp_path):
-    problems = critic_problems(tmp_path, seen_in=4)
-    assert any("seen_in must equal the number of distinct example conversation IDs (2)" in p for p in problems)
-
-
-def test_critic_duplicate_ids_fail(tmp_path):
-    problems = critic_problems(tmp_path, seen_in=3,
-                               example_conversation_ids=["conv-hand-001", "conv-hand-001", "conv-hand-002"])
-    assert "example_conversation_ids must not repeat an ID" in problems
-    assert any("distinct example conversation IDs (2)" in p for p in problems)

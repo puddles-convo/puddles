@@ -105,8 +105,9 @@ turn cut off at the output limit fails the researcher (`AgentFailed`).
 `provider-settings.md`), one `failed` line is written for the researcher, so the loop's same-agent
 streak sees an Exa outage.
 
-**3.6 The critic's count matches its evidence.** `seen_in` equals the number of distinct example
-conversation IDs; duplicates are a failed check.
+(A rule 3.6, "the critic's `seen_in` equals the number of distinct example IDs", was written and then
+withdrawn before the check: the example IDs are a sample of the sightings, as the critic's own doc
+shows with 14 sightings and 3 examples, so the rule would have failed correct answers.)
 
 ## Knowingly left out tonight
 
