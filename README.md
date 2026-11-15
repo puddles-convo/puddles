@@ -4,7 +4,7 @@ A support-conversation helper that improves its own behaviour, built at the SF A
 
 The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.
 
-**Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The inference text path (crisis checker, release step, note-taker, per-person notes, a text chat command and an HTTP turn service) is in [`puddles/inference/`](puddles/inference/) and was run end to end on real models on 15 November; see [Inference, tested end to end](#inference-tested-end-to-end-15-november). The judge adapter (`puddles/judging.py`), the gatekeeper (`puddles/gate.py`) and the round graph (`puddles/graph.py`) are in the code too. Speech is in the separate [puddles-stack](https://github.com/puddles-convo/puddles-stack) repository and is not connected through this path yet. Scores, counts and sources in the examples are illustrative.
+**Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The inference text path (crisis checker, release step, note-taker, per-person notes, a text chat command and an HTTP turn service) is in [`puddles/inference/`](puddles/inference/) and was run end to end on real models on 15 November; see [Inference, tested end to end](#inference-tested-end-to-end-15-november). The judge adapter (`puddles/judging.py`), the gatekeeper (`puddles/gate.py`) and the round graph (`puddles/graph.py`) are in the code too. Speech is in the separate `puddles-stack` repository (private at the time of submission, available to judges on request) and is not connected through this path yet. Scores, counts and sources in the examples are illustrative.
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
 - **How the judges grade: the grading skill.** Every judge reads a grading guide built from the ESConv training split, and the guide is part of the judge's frozen version. Read this before trusting any score: [How the judges grade](#how-the-judges-grade-the-grading-skill) · [docs/agents/t3-judge.md](docs/agents/t3-judge.md#grading-skill)
@@ -12,7 +12,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 - The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
 - Proposed version 2 prompts for every agent, including the held-out jury (not live yet): [docs/agent-prompts.md](docs/agent-prompts.md)
 - Record formats: `schemas.py` (version 4: version 3 plus what the proposed version 2 prompts need), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
-- The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
+- The device and its cloud brain: `puddles-stack`
 
 ## Contents
 
@@ -689,7 +689,7 @@ Datasets are loaded at run time and are not committed to this repo.
 
 ## 13. Robot side
 
-The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [section 4](#4-inference-agents) run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [section 4](#4-inference-agents) run in a cloud brain. The code is in `puddles-stack`.
 
 ```
 +----------------------------+                          +------------------------------------+
@@ -751,7 +751,7 @@ These run with the stock model first, so that the merge changes nothing but conf
 - Soak: a 15-minute conversation with no crash and no answering itself.
 - Latency: median and p95 from end of speech to first sound, recorded.
 
-Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
+Tasks: V1 to V9, tracked in the `puddles-stack` repository's issues.
 
 ## 14. Related work
 

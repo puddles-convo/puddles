@@ -12,7 +12,7 @@
 | Model | A speech-to-text model: faster-whisper with large-v3-turbo, on the same GPU as the helper. |
 | Reads from memory | Nothing |
 | Writes to memory | Nothing |
-| Task | [puddles-stack #1](https://github.com/puddles-convo/puddles-stack/issues/1), [#2](https://github.com/puddles-convo/puddles-stack/issues/2) |
+| Task | puddles-stack #1, #2 |
 
 ## 1. The prompt
 
