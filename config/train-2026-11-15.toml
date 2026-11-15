@@ -66,5 +66,5 @@ train_ids = "fixtures/train_ids.txt"
 # max_rounds =          # total round events allowed; unset means no round cap
 conversations_per_round = 8
 # conversations_for_critic =   # the n lowest-scoring conversations the critic reads; unset = all
-spend_limit_usd = 14.00
+spend_limit_usd = 11.00
 round_cost_estimate_usd = 0.70
