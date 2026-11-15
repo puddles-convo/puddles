@@ -8,6 +8,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
 - The design behind memory, policy and the crisis path: [docs/agents.md](docs/agents.md)
+- Proposed version 2 prompts for every agent, including the held-out jury: [docs/agent-prompts.md](docs/agent-prompts.md)
 - Record formats: `schemas.py` (version 2), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
