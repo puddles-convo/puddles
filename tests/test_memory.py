@@ -25,10 +25,11 @@ def test_entry_matches_memory_example():
     assert entry.metadata["record_id"] == p.id
 
 
-def test_recurring_pattern_gets_new_entry_id():
-    p = pattern()
+def test_recurrence_is_its_own_entry_pointing_to_the_first_sighting():
+    p = pattern().model_copy(update={"id": "pattern-r06", "round": 6, "same_as_pattern_id": "pattern-r03"})
     entry = entry_for(p, RecordRef(id=p.id, path="x", sha256="h"), round_=6)
-    assert entry.id == "pattern-r03-seen-r06"
+    assert entry.id == "pattern-r06"
+    assert entry.content.endswith("Same pattern as pattern-r03.")
 
 
 def test_fake_memory_keeps_training_memory_from_other_identities():

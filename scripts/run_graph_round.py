@@ -59,6 +59,9 @@ class FakeLLM:
             raise TypeError(f"FakeLLM has no searched answer for {schema.__name__}")
         query = f"counselling skills: open questions before advice ({_pattern_id(user)})"
         results = search(query)
+        if results and "error" in results[0]:  # already run for this pattern in an earlier round
+            query += f" ({len(re.findall(r'^- ', user, re.M))} earlier)"
+            results = search(query)
         return schema.model_validate({
             "queries": [query],
             "sources": [{"url": r["url"], "title": r["title"], "technique": "Ask one open question first."}

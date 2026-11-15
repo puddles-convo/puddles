@@ -14,7 +14,7 @@ from puddles import exa
 from puddles.decision_log import DecisionLog
 from puddles.llm import OpenAILLM
 from puddles.memory import PastClient
-from puddles.round import finish_round, memory_trace, policy_in_force, retry_pending, run_agents, stand_in_gate
+from puddles.round import finish_round, memory_trace, prepare_round, run_agents, stand_in_gate
 from schemas import ScoredConversation
 
 
@@ -29,14 +29,14 @@ def main() -> None:
     root = Path(args.root)
     log, memory = DecisionLog(root), PastClient()
     memory.ensure_training_audience()
-    retry_pending(log, memory, root)
+    start = Path(args.policy)
+    policy_path = prepare_round(log, memory, root, start)
     conversations = [ScoredConversation.model_validate(c)
                      for c in json.loads(Path(args.conversations).read_text())]
     round_ = log.next_round()
-    result = run_agents(round_, conversations, policy_in_force(root, Path(args.policy)), log, memory,
-                        OpenAILLM(), exa.search, root)
+    result = run_agents(round_, conversations, policy_path, log, memory, OpenAILLM(), exa.search, root)
     gate = stand_in_gate(result, args.gate) if result.outcome == "candidate" else None
-    event = finish_round(result, gate, log, memory, root)
+    event = finish_round(result, gate, log, memory, root, start)
     print(f"round {round_}: {event.outcome}. {event.reason}")
     for row in memory_trace(log, root):
         print(f"  {row['record']:<14} written by {row['written_by']:<11} read by {', '.join(row['read_by']) or '-'}")
