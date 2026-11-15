@@ -427,8 +427,8 @@ def _stale_scores(root: Path) -> None:
     path = root / "scores" / "round-01-train.jsonl"
     first = json.loads(path.read_text().splitlines()[0])
     gone = {**first, "id": "score-conv-r01-gone", "conversation_id": "conv-r01-gone"}
-    older = {**first, "id": "score-older", "created_at": "2020-01-01T00:00:00Z"}
-    path.write_text(path.read_text() + json.dumps(gone) + "\n" + json.dumps(older) + "\n")
+    other = {**first, "id": "score-conv-r09-x", "conversation_id": "conv-r09-x"}
+    path.write_text(path.read_text() + json.dumps(gone) + "\n" + json.dumps(other) + "\n")
 
 
 def _bad_usage(root: Path) -> None:
@@ -465,7 +465,7 @@ def _cut_reads(root: Path) -> None:
     (lambda root: _cut(root / "conversations" / "round-01-train.jsonl"),
      "1 line(s) of conversations/round-01-train.jsonl"),
     (_failures, "1 line(s) of conversations/round-01-train.failures.jsonl"),
-    (_bad_usage, "1 finished call(s) of this round in log/usage.jsonl have numbers that could not be read"),
+    (_bad_usage, "1 finished call(s) in log/usage.jsonl, of this round or of a round that cannot be read"),
     (lambda root: (root / "scores" / "round-01-gate.json").write_text(
         (root / "scores" / "round-01-gate.json").read_text()[:60]), "scores/round-01-gate.json could not be read"),
     (_stale_gate, "does not match this round's gate decision"),
@@ -507,6 +507,108 @@ def test_scores_left_by_an_earlier_attempt_stay_out_of_the_judges_means(tmp_path
     summary = node_summary("judge", {"round": 1, "records": [record]}, {"scored": scored, "unscored": []}, tmp_path)
     assert summary == {"scored": 1, "unscored": 0, "mean_empathy": 4, "mean_relevance": 2,
                        "judge_version": "judge-fake"}
+
+
+# a value read from a file is shown or used only when it is of its kind
+@pytest.fixture
+def gated_round(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "real") == 0
+    return root
+
+
+def test_a_score_of_this_rounds_conversation_is_kept_whatever_its_stamp(gated_round):
+    path = gated_round / "scores" / "round-01-train.jsonl"
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    lines[0].update(created_at="2001-01-01T00:00:00Z", empathy=5, relevance=1)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    report = build_report(gated_round, 1)
+    assert f"| {lines[0]['conversation_id']} | 5 | 1 |" in report
+    assert "belong to no conversation" not in report
+    judged = node_summary("judge", {"round": 1}, {"unscored": []}, gated_round)
+    assert judged["scored"] == len(lines) and judged["mean_empathy"] == pytest.approx((5 + 3 * (len(lines) - 1)) / len(lines))
+
+
+SPOKEN = "I just feel like nobody would notice if I was gone."
+
+
+@pytest.mark.parametrize("value", [{}, [], SPOKEN, 1, True, None, "PASSED"])
+def test_a_check_value_that_is_not_a_status_is_unreadable_and_never_printed(gated_round, value):
+    path = gated_round / "scores" / "round-01-gate.json"
+    data = json.loads(path.read_text())
+    data["checks"]["safety_cases"] = value
+    path.write_text(json.dumps(data))
+    report = build_report(gated_round, 1)
+    assert "- safety_cases: unreadable" in report and SPOKEN not in report
+    assert "are not passed, failed or not_run" in report
+    assert "Noise: not measured; the figure given was 0.00." in report
+    gate = node_summary("gate", {"round": 1}, {"gate": None}, gated_round)
+    assert gate["failed_checks"] is None
+
+
+@pytest.mark.parametrize("change", [
+    {"checks": {SPOKEN: "failed"}}, {"round": "1"}, {"round": True}, {"decision": SPOKEN}, {"checks": [SPOKEN]},
+])
+def test_gate_report_fields_that_are_not_of_their_kind_are_never_printed(gated_round, change):
+    path = gated_round / "scores" / "round-01-gate.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **change}))
+    report = build_report(gated_round, 1)
+    assert SPOKEN not in report
+    assert "not a gate check" in report or "not a gate report" in report
+    assert node_summary("gate", {"round": 1}, {"gate": None}, gated_round)["failed_checks"] is None
+
+
+@pytest.mark.parametrize("numbers", [
+    {}, {"tokens_in": 10, "tokens_out": 5}, {"tokens_in": 10, "tokens_out": 5, "cost_usd": float("nan")},
+    {"tokens_in": 10, "tokens_out": 5, "cost_usd": float("inf")},
+    {"tokens_in": float("inf"), "tokens_out": 5, "cost_usd": 0.25},
+    {"tokens_in": "10", "tokens_out": 5, "cost_usd": 0.25}, {"tokens_in": True, "tokens_out": 5, "cost_usd": 0.25},
+    {"tokens_in": 10, "tokens_out": 5, "cost_usd": 0.25, "agent": ["x"]},
+    {"tokens_in": 10, "tokens_out": 5, "cost_usd": 0.25, "kind": SPOKEN},
+])
+def test_usage_numbers_that_cannot_be_read_are_left_out_never_zero(gated_round, numbers):
+    clean = build_report(gated_round, 1).split("## Cost", 1)[1]
+    line = {"event": "done", "round": 1, "kind": "model", "agent": "odd-agent", **numbers}
+    with (gated_round / "log" / "usage.jsonl").open("a") as f:
+        f.write(json.dumps(line) + "\n")
+    cost = build_report(gated_round, 1).split("## Cost", 1)[1]
+    assert "odd-agent" not in cost and "nan" not in cost.lower() and "inf" not in cost.lower()
+    assert "left out of the totals" in cost
+    assert [l for l in cost.splitlines() if l.startswith("| total")] == \
+        [l for l in clean.splitlines() if l.startswith("| total")]
+
+
+def test_failure_and_reads_lines_that_are_not_text_are_unreadable(gated_round):
+    (gated_round / "conversations" / "round-01-train.failures.jsonl").write_text(
+        json.dumps({"scenario_id": {"said": SPOKEN}, "reason": [SPOKEN]}) + "\n")
+    reads = gated_round / "log" / "memory_reads.jsonl"
+    reads.parent.mkdir(parents=True, exist_ok=True)
+    reads.write_text(json.dumps({"reader": {"x": SPOKEN}, "record_ids": "pattern-r01"}) + "\n")
+    report = build_report(gated_round, 1)
+    assert SPOKEN not in report
+    assert "| unreadable (failed) |  |  | failed: unreadable |" in report
+    assert "Who read the round's records could not be worked out" in report
+    assert "read later by unknown" in report
+
+
+def test_non_finite_gate_figures_are_unreadable_and_never_measurements(tmp_path):
+    from puddles.round import RoundResult
+    from schemas import LogScores, Scores
+
+    (tmp_path / "scores").mkdir()
+    (tmp_path / "scores" / "round-01-gate.json").write_text(json.dumps(
+        {"round": 1, "decision": "reverted", "checks": {"noise_not_measured": "passed"}}))
+    result = RoundResult(round=1, outcome="candidate", base_policy_path=POLICY)
+    result.scores = LogScores(before=Scores(empathy=3, relevance=3, quality=float("nan")),
+                              after=Scores(empathy=3, relevance=3, quality=float("inf")), noise=float("inf"))
+
+    class Outcome:
+        decision = "reverted"
+
+    state = {"round": 1, "result": result, "gate": Outcome()}
+    assert round_view.gate_metrics(state, tmp_path) == {"kept": 0}
+    summary = node_summary("gate", state, {"gate": Outcome()}, tmp_path)
+    assert summary["quality_before"] is None and summary["quality_after"] is None and summary["noise"] is None
 
 
 # the view never breaks a round

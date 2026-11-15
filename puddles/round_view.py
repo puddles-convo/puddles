@@ -11,9 +11,9 @@ belongs to an earlier attempt, is left out and the report says so.
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -22,6 +22,7 @@ import mlflow
 from puddles import replay
 from puddles.decision_log import DecisionLog
 from puddles.judging import CRITIC_CONVERSATIONS, scored_conversations, select_for_critic
+from puddles.memory import READS_PATH
 from puddles.policy import parse_policy
 from puddles.records import load_record
 from puddles.round import memory_trace
@@ -41,6 +42,7 @@ SUMMARY_KEY = "puddles.summary"
 NODES = ("converse", "judge", "critic", "researcher", "proposer", "gate", "finish")
 CHECK_WORDS = {"passed": "passed", "failed": "failed", "not_run": "not run"}
 STRAY_SCORES = "{n} score(s) in the scores file belong to no conversation of this round."
+UNREADABLE = "unreadable"  # shown in place of a value that is not of its kind; the value itself never is
 
 
 class ReportError(RuntimeError):
@@ -79,7 +81,8 @@ def report_path(root: Path, round_: int) -> Path:
 # ---------- reading what a round left, without ever raising ----------
 
 def _why(exc: BaseException) -> str:
-    return " ".join(f"{type(exc).__name__}: {exc}".split())[:200]
+    """Only the kind of error: its message can quote the input it failed on, which may be a spoken line."""
+    return type(exc).__name__
 
 
 def _lines(path: Path, root: Path, problems: list[str]) -> list[dict]:
@@ -97,7 +100,7 @@ def _lines(path: Path, root: Path, problems: list[str]) -> list[dict]:
             continue
         try:
             data = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             bad += 1
             continue
         if isinstance(data, dict):
@@ -109,10 +112,34 @@ def _lines(path: Path, root: Path, problems: list[str]) -> list[dict]:
     return out
 
 
-def _models(path: Path, root: Path, model: type, problems: list[str]) -> list:
+def is_int(x: Any) -> bool:
+    """A whole number as JSON gives one; a bool is not a number here."""
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def is_number(x: Any) -> bool:
+    """A finite number as JSON gives one; not a bool, not NaN, not infinity."""
+    return (is_int(x) or isinstance(x, float)) and math.isfinite(x)
+
+
+def finite(x: Any) -> Optional[float]:
+    """The value if it is a finite number, else None: a value that cannot be read is never shown."""
+    return x if is_number(x) else None
+
+
+def _score_line(data: dict) -> bool:
+    """What the view takes from a score line, checked as JSON gave it, before any coercion."""
+    return (isinstance(data.get("conversation_id"), str) and isinstance(data.get("judge_version"), str)
+            and all(is_int(data.get(k)) and 1 <= data[k] <= 5 for k in ("empathy", "relevance")))
+
+
+def _models(path: Path, root: Path, model: type, problems: list[str],
+            check: Callable[[dict], bool] = lambda data: True) -> list:
     out, bad = [], 0
     for data in _lines(path, root, problems):
         try:
+            if not check(data):
+                raise ValueError("a field the view shows is not of its kind")
             out.append(model.model_validate(data))
         except Exception:  # noqa: BLE001  a line that is not a whole record is left out
             bad += 1
@@ -121,14 +148,55 @@ def _models(path: Path, root: Path, model: type, problems: list[str]) -> list:
     return out
 
 
-def _older(score: ScoreRecord, record: ConversationRecord) -> bool:
-    """A score made before its conversation was: it belongs to an earlier attempt at this round number.
+STATUSES = ("passed", "failed", "not_run")
+DECISIONS = ("kept", "reverted")
 
-    One second of slack, because some writers stamp records to the whole second."""
-    try:
-        return score.created_at < record.created_at - timedelta(seconds=1)
-    except TypeError:  # one stamp with a time zone and one without: no way to tell, so it is kept
-        return False
+
+def _gate_checks() -> tuple[str, ...]:
+    from puddles.gate import CHECKS  # puddles.gate imports puddles.graph, which imports this module
+
+    return tuple(CHECKS)
+
+
+def _clean_gate_report(data: Any, round_: int, gate: Optional[GateOutcome], name: str,
+                       where: list[str]) -> Optional[dict]:
+    """The gate report as the view uses it, every value checked for what it is.
+
+    Returns {"checks": {check: status or "unreadable"}, "unknown": count, "readable": bool,
+    "failed": list or None}, or None when the file is not this round's gate report. A check value
+    that is not passed, failed or not_run, and a check whose name is not a gate check, are never shown.
+    """
+    if not isinstance(data, dict):
+        where.append(f"{name} is not a gate report; its checks are not shown.")
+        return None
+    rnd, decision, checks = data.get("round", round_), data.get("decision"), data.get("checks", {})
+    if not is_int(rnd) or (decision is not None and decision not in DECISIONS) or not isinstance(checks, dict):
+        where.append(f"{name} is not a gate report (its round, decision or checks are unreadable); "
+                     "its checks are not shown.")
+        return None
+    if rnd != round_ or (gate is not None and decision is not None and decision != gate.decision):
+        where.append(f"{name} does not match this round's gate decision; it was left by an earlier attempt "
+                     "and its checks are not shown.")
+        return None
+    known = _gate_checks()
+    clean: dict[str, str] = {}
+    unknown = bad = 0
+    for check, status in checks.items():
+        if check not in known:
+            unknown += 1
+        elif status in STATUSES:
+            clean[check] = status
+        else:
+            clean[check], bad = "unreadable", bad + 1
+    if bad:
+        where.append(f"{bad} check value(s) in {name} are not passed, failed or not_run; they are shown as "
+                     "unreadable and the round's failed checks are not worked out.")
+    if unknown:
+        where.append(f"{unknown} check(s) in {name} have a name that is not a gate check; they are unreadable "
+                     "and not shown.")
+    failed = data.get("failed")
+    failed_names = list(failed) if isinstance(failed, list) and all(f in known for f in failed) else None
+    return {"checks": clean, "unknown": unknown, "readable": not bad and not unknown, "failed": failed_names}
 
 
 @dataclass
@@ -155,21 +223,29 @@ def read_round_files(root: Path, round_: int, records: Optional[list[Conversatio
     root = Path(root)
     files = RoundFiles()
     conv = files.problems["Conversations"]
-    files.records = list(records) if records is not None else \
-        _models(conversations_path(root, round_), root, ConversationRecord, conv)
+    files.records = list(records) if records is not None else _models(
+        conversations_path(root, round_), root, ConversationRecord, conv,
+        lambda data: isinstance(data.get("id"), str))
+    unreadable_failures = 0
     for data in _lines(failures_file(root, round_), root, conv):
-        files.failures.append({"scenario_id": str(data.get("scenario_id", "?")), "reason": str(data.get("reason", ""))})
+        scenario, reason = data.get("scenario_id"), data.get("reason")
+        if not isinstance(scenario, str) or not isinstance(reason, str):
+            unreadable_failures += 1
+        files.failures.append({"scenario_id": scenario if isinstance(scenario, str) else UNREADABLE,
+                               "reason": reason if isinstance(reason, str) else UNREADABLE})
+    if unreadable_failures:
+        conv.append(f"{unreadable_failures} line(s) of {_rel(failures_file(root, round_), root)} have a scenario "
+                    "or a reason that is not text; it is shown as unreadable.")
 
     path = scores_path(root, round_)
     if path.exists():
-        by_id = {r.id: r for r in files.records}
+        ids = {r.id for r in files.records}
         current = []
-        for s in _models(path, root, ScoreRecord, conv):
-            record = by_id.get(s.conversation_id)
-            if record is None or _older(s, record):
-                files.stray_scores += 1
-            else:
+        for s in _models(path, root, ScoreRecord, conv, _score_line):
+            if s.conversation_id in ids:  # membership is by conversation ID in this round's file, nothing else
                 current.append(s)
+            else:
+                files.stray_scores += 1
         # The real judge rewrites the file every round, so a file holding only stray lines was left by an
         # earlier attempt and this round's judge saved none (the stub judge).
         files.scores = None if not current and files.stray_scores else current
@@ -178,37 +254,28 @@ def read_round_files(root: Path, round_: int, records: Optional[list[Conversatio
     files.gate_report_exists = gate_path.exists()
     if files.gate_report_exists:
         where = files.problems["Gate"]
+        name = _rel(gate_path, root)
         try:
             data = json.loads(gate_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, ValueError) as exc:
-            where.append(f"{_rel(gate_path, root)} could not be read ({_why(exc)}); its checks are not shown.")
-            data = None
-        if data is not None and not (isinstance(data, dict) and isinstance(data.get("checks", {}), dict)):
-            where.append(f"{_rel(gate_path, root)} is not a gate report; its checks are not shown.")
-            data = None
-        if data is not None and (data.get("round", round_) != round_
-                                 or (gate is not None and data.get("decision", gate.decision) != gate.decision)):
-            where.append(f"{_rel(gate_path, root)} does not match this round's gate decision; it was left by "
-                         "an earlier attempt and its checks are not shown.")
-            data = None
-        files.gate_report = data
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+            where.append(f"{name} could not be read ({_why(exc)}); its checks are not shown.")
+        else:
+            files.gate_report = _clean_gate_report(data, round_, gate, name, where)
     return files
 
 
 def _failed_checks(report: Optional[dict]) -> Optional[list[str]]:
-    if report is None:
+    """The names of the failed checks, or None when there is no gate report or part of it is unreadable."""
+    if report is None or not report["readable"]:
         return None
-    checks = report.get("checks")
-    if isinstance(checks, dict) and checks:
-        return [str(name) for name, status in checks.items() if status == "failed"]
-    failed = report.get("failed")
-    return [str(name) for name in failed] if isinstance(failed, list) else None
+    if report["checks"]:
+        return [name for name, status in report["checks"].items() if status == "failed"]
+    return report["failed"]
 
 
 def noise_measured(report: Optional[dict]) -> bool:
-    """The noise is a measurement only when the gate report marks noise_not_measured as passed."""
-    checks = report.get("checks") if report is not None else None
-    return isinstance(checks, dict) and checks.get("noise_not_measured") == "passed"
+    """The noise is a measurement only when a readable gate report marks noise_not_measured as passed."""
+    return report is not None and report["readable"] and report["checks"].get("noise_not_measured") == "passed"
 
 
 def _mean(values: list[float]) -> Optional[float]:
@@ -263,11 +330,12 @@ def _node_summary(node: str, state: Mapping[str, Any], update: Mapping[str, Any]
         scores = result.scores if result is not None else None
         safety = result.safety if result is not None else None
         report = read_round_files(root, round_, records=[], gate=outcome).gate_report
-        return {"decision": outcome.decision if outcome is not None else None,
-                "quality_before": scores.before.quality if scores is not None else None,
-                "quality_after": scores.after.quality if scores is not None else None,
-                "noise": scores.noise if scores is not None and noise_measured(report) else None,
-                "safety_passed": safety.passed if safety is not None else None,
+        decision = outcome.decision if outcome is not None else None
+        return {"decision": decision if decision in DECISIONS else None,
+                "quality_before": finite(scores.before.quality) if scores is not None else None,
+                "quality_after": finite(scores.after.quality) if scores is not None else None,
+                "noise": finite(scores.noise) if scores is not None and noise_measured(report) else None,
+                "safety_passed": safety.passed if safety is not None and isinstance(safety.passed, bool) else None,
                 "failed_checks": _failed_checks(report)}
     if node == "finish":
         event = update.get("event")
@@ -324,16 +392,18 @@ def gate_metrics(state: Mapping[str, Any], root: Path) -> dict[str, float]:
         outcome = state.get("gate")
         if outcome is None:
             return {}
+        if outcome.decision not in DECISIONS:
+            return {}
         out: dict[str, float] = {"kept": 1 if outcome.decision == "kept" else 0}
         result = state.get("result")
         scores = result.scores if result is not None else None
         if scores is not None:
-            if scores.before.quality is not None:
+            if finite(scores.before.quality) is not None:
                 out["quality_before"] = scores.before.quality
-            if scores.after.quality is not None:
+            if finite(scores.after.quality) is not None:
                 out["quality_after"] = scores.after.quality
             report = read_round_files(Path(root), int(state["round"]), records=[], gate=outcome).gate_report
-            if noise_measured(report):
+            if noise_measured(report) and finite(scores.noise) is not None:
                 out["noise"] = scores.noise
         return out
     except Exception:  # noqa: BLE001  the view never breaks a round
@@ -534,9 +604,25 @@ def _conversations_section(files: RoundFiles) -> list[str]:
     return out
 
 
+def _reads_file_readable(root: Path) -> bool:
+    """memory_trace trusts every line of the reads file; a reader that is not text, or record IDs that are
+    a string rather than a list (it would match by substring), would be shown or matched wrongly."""
+    path = root / READS_PATH
+    if not path.exists():
+        return True
+    problems: list[str] = []
+    lines = _lines(path, root, problems)
+    if problems:
+        return False
+    return all(isinstance(r.get("reader"), str) and isinstance(r.get("record_ids"), list)
+               and all(isinstance(i, str) for i in r["record_ids"]) for r in lines)
+
+
 def _memory_section(event: RoundEvent, root: Path, copies: list, problems: list[str]) -> list[str]:
     out: list[str] = []
     try:
+        if not _reads_file_readable(root):
+            raise ValueError("a line of the reads file is not a reader's name and a list of record IDs")
         rows = [r for r in memory_trace(DecisionLog(root), root) if r["round"] == event.round]
     except Exception as exc:  # noqa: BLE001  a half-written reads file or record: say so, list what the log holds
         problems.append(f"Who read the round's records could not be worked out ({_why(exc)}).")
@@ -594,6 +680,13 @@ def _policy_section(event: RoundEvent, rounds: list[RoundEvent], root: Path) -> 
     return out
 
 
+def _quality(x: Any, measured: bool) -> str:
+    """not measured when there are no scores, unreadable when the figure is not a finite number."""
+    if not measured or x is None:
+        return "not measured"
+    return _num(x) if finite(x) is not None else UNREADABLE
+
+
 def _gate_section(event: RoundEvent, files: RoundFiles) -> list[str]:
     if "outcome" not in event.records:
         return ["The gate did not run.", ""]
@@ -601,18 +694,20 @@ def _gate_section(event: RoundEvent, files: RoundFiles) -> list[str]:
     if report is None and not files.gate_report_exists:
         return ["Stand-in gate: nothing was measured.", ""]
     out: list[str] = []
-    for name, status in ((report or {}).get("checks") or {}).items():
-        out.append(f"- {name}: {CHECK_WORDS.get(status, status)}")
+    for name, status in (report["checks"] if report is not None else {}).items():
+        out.append(f"- {name}: {CHECK_WORDS.get(status, UNREADABLE)}")
     out.append("")
     s = event.scores
     if s is None:
         noise = "not measured"
+    elif finite(s.noise) is None:
+        noise = UNREADABLE
     elif noise_measured(report):
         noise = _num(s.noise)
     else:
         noise = f"not measured; the figure given was {s.noise:.2f}"
-    out.append(f"Quality before: {_num(s.before.quality if s else None)}. "
-               f"Quality after: {_num(s.after.quality if s else None)}. Noise: {noise}.")
+    out.append(f"Quality before: {_quality(s.before.quality if s else None, s is not None)}. "
+               f"Quality after: {_quality(s.after.quality if s else None, s is not None)}. Noise: {noise}.")
     if event.safety is None:
         out.append("The safety check did not run.")
     elif event.safety.failed_case_ids:
@@ -622,33 +717,43 @@ def _gate_section(event: RoundEvent, files: RoundFiles) -> list[str]:
     return out + [""]
 
 
+def _dollars(x: float) -> str:
+    """Four decimal places; a sum of finite figures can still overflow, and then it is unreadable."""
+    return f"{x:.4f}" if math.isfinite(x) else UNREADABLE
+
+
 def _cost_section(root: Path, round_: int, problems: list[str]) -> list[str]:
     tally: dict[str, dict[str, float]] = defaultdict(lambda: {"calls": 0, "in": 0, "out": 0, "usd": 0.0})
     bad = 0
     for line in _lines(root / USAGE_PATH, root, problems):
-        if line.get("event") != "done" or line.get("round") != round_:
+        if line.get("event") != "done":
             continue
-        try:
-            calls, tokens_in, tokens_out = 0, 0, 0
-            if line.get("kind") == "model":
-                calls, tokens_in, tokens_out = 1, int(line.get("tokens_in", 0)), int(line.get("tokens_out", 0))
-            usd = float(line.get("cost_usd", 0.0))
-        except (TypeError, ValueError):
-            bad += 1
+        rnd = line.get("round")
+        if is_int(rnd) and rnd != round_:
             continue
-        t = tally[str(line.get("agent"))]
+        # A finished call of this round, or one whose round cannot be read: every value it gives is checked.
+        kind, agent, usd = line.get("kind"), line.get("agent"), line.get("cost_usd")
+        tokens = (line.get("tokens_in"), line.get("tokens_out"))
+        ok = is_int(rnd) and isinstance(agent, str) and is_number(usd) and usd >= 0 and (
+            kind == "search" or (kind == "model" and all(is_int(n) and n >= 0 for n in tokens)))
+        if not ok:
+            bad += 1  # a missing or non-finite number is never counted as 0
+            continue
+        calls, tokens_in, tokens_out = (1, tokens[0], tokens[1]) if kind == "model" else (0, 0, 0)
+        t = tally[agent]
         t["calls"] += calls
         t["in"] += tokens_in
         t["out"] += tokens_out
         t["usd"] += usd
     if bad:
-        problems.append(f"{bad} finished call(s) of this round in {USAGE_PATH} have numbers that could not be read "
-                        "and are not counted.")
+        problems.append(f"{bad} finished call(s) in {USAGE_PATH}, of this round or of a round that cannot be read, "
+                        "have an agent, a kind or a number that is missing or could not be read (not a finite "
+                        "number); they are left out of the totals.")
     out = [_row("Agent", "Calls", "Tokens in", "Tokens out", "Dollars"), _row("---", "---", "---", "---", "---")]
     for agent in sorted(tally):
         t = tally[agent]
-        out.append(_row(agent, int(t["calls"]), int(t["in"]), int(t["out"]), f"{t['usd']:.4f}"))
+        out.append(_row(agent, int(t["calls"]), int(t["in"]), int(t["out"]), _dollars(t["usd"])))
     total = sum(t["usd"] for t in tally.values())
     out.append(_row("total", int(sum(t["calls"] for t in tally.values())), int(sum(t["in"] for t in tally.values())),
-                    int(sum(t["out"] for t in tally.values())), f"{total:.4f}"))
+                    int(sum(t["out"] for t in tally.values())), _dollars(total)))
     return out + [""]
