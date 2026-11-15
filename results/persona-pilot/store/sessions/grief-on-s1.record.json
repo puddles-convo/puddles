@@ -1,0 +1,102 @@
+{
+  "id": "grief-on-s1",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-15T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "My dad died two months ago. Today I found his gardening gloves in the shed and I just sat there."
+    },
+    {
+      "speaker": "helper",
+      "text": "Finding his gloves must have brought him close again, and left you sitting with all of it. I’m glad you told me. What was going through you as you sat there?"
+    },
+    {
+      "speaker": "user",
+      "text": "I kept thinking he’d come back for them. Like he was just out in the garden and would call me later. I miss his Sunday calls so much."
+    },
+    {
+      "speaker": "helper",
+      "text": "You miss the ordinary things that made him feel close—the Sunday calls, and the thought that he might still come back for his gloves. Grief can make those familiar moments feel so vivid. What were your Sunday calls usually like?"
+    },
+    {
+      "speaker": "user",
+      "text": "He’d ask what I was doing, then tell me about the garden, even if we’d talked about it the day before. I didn’t realize how much I counted on hearing his voice."
+    },
+    {
+      "speaker": "helper",
+      "text": "Those calls were a steady part of your life, and now the quiet where his voice used to be hurts. You’re letting yourself say how much he mattered, and I’m glad you shared that with me. What do you find yourself missing most about hearing him?"
+    },
+    {
+      "speaker": "user",
+      "text": "His laugh, I think. And how he never made me feel like I had to have anything interesting to say. We haven’t spoken since the funeral. My brother and I argued about selling the house, and now I don’t know how to reach out."
+    },
+    {
+      "speaker": "helper",
+      "text": "You miss his laugh and the ease of being with him, and the argument with your brother has left you both silent since the funeral. It sounds like you’re carrying grief and this distance at the same time. Reaching out doesn’t have to settle the house question; would it feel possible to send something small, like “I miss talking with you. Could we talk sometime?”?"
+    },
+    {
+      "speaker": "user",
+      "text": "I don’t know. I’m afraid he’ll take it as me giving in about the house. But I do miss him. I just wish he’d call first, like Dad used to."
+    },
+    {
+      "speaker": "helper",
+      "text": "You miss your brother, and you wish he’d make the first move in that familiar, comforting way your dad did. It makes sense that reaching out feels risky if you’re worried he’ll read it as giving in. Maybe a message could make both things clear: “I miss you. I’m not changing my position about the house, but I’d like us to talk.”"
+    },
+    {
+      "speaker": "user",
+      "text": "That might be clearer. I still don’t know if I can send it tonight. I think I just want to sit with Dad’s gloves for a while."
+    },
+    {
+      "speaker": "helper",
+      "text": "You don’t have to decide about messaging your brother tonight. Sitting with your dad’s gloves sounds like a way to be close to him for a while, and you can take that time. Is there something about the gloves that brings back a particular memory?"
+    }
+  ],
+  "remember_me": true,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1424,
+      "helper": 1422,
+      "total": 1424
+    },
+    {
+      "keyword": 0,
+      "checker": 950,
+      "helper": 2176,
+      "total": 2176
+    },
+    {
+      "keyword": 0,
+      "checker": 1025,
+      "helper": 1332,
+      "total": 1333
+    },
+    {
+      "keyword": 0,
+      "checker": 1347,
+      "helper": 2044,
+      "total": 2044
+    },
+    {
+      "keyword": 0,
+      "checker": 1029,
+      "helper": 1643,
+      "total": 1644
+    },
+    {
+      "keyword": 0,
+      "checker": 1099,
+      "helper": 1422,
+      "total": 1423
+    }
+  ]
+}

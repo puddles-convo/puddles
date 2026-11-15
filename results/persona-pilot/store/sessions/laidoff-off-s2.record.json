@@ -1,0 +1,102 @@
+{
+  "id": "laidoff-off-s2",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-22T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "So I had that interview at the warehouse place on Tuesday. It went badly. Please don't tell me what I should have done."
+    },
+    {
+      "speaker": "helper",
+      "text": "That sounds really disappointing, especially after getting through the interview. I won’t tell you what you should have done. You made it through something that felt hard, and you can talk it out here. What part is sticking with you most?"
+    },
+    {
+      "speaker": "user",
+      "text": "I froze when they asked why I left my last job. Just sat there trying to come up with an answer. I keep replaying it."
+    },
+    {
+      "speaker": "helper",
+      "text": "That moment sounds painful to replay—you were put on the spot, and your mind just went blank. Getting through the interview at all took effort, even though it didn’t go the way you hoped. What do you find yourself thinking when you replay that pause?"
+    },
+    {
+      "speaker": "user",
+      "text": "That they probably thought I was hiding something. I got laid off last week. I haven’t even told my parents yet. I just can’t deal with their reaction on top of everything else."
+    },
+    {
+      "speaker": "helper",
+      "text": "Being laid off last week is a lot to carry, and now you’re worried the interviewers read the pause as hiding something. It also makes sense that telling your parents feels like one more hard thing. I’m glad you told me. Are you worried they might react in a way that puts you at risk, or is it more that you’re bracing for disappointment or questions?"
+    },
+    {
+      "speaker": "user",
+      "text": "Mostly the questions. And the look they get when they think I’ve messed up. I don’t want to talk about it with them right now. I just want one person to hear how awful this feels without turning it into a plan."
+    },
+    {
+      "speaker": "helper",
+      "text": "That look and all the questions sound like the last thing you need right now. You don’t have to talk with them or make a plan here. Being laid off and then freezing in the interview feels awful, and I hear how much you’re carrying. I can just stay with you in it."
+    },
+    {
+      "speaker": "user",
+      "text": "Thanks. I keep trying to get through the day without thinking about it. Walking the dog in the morning is the only time my head clears a little. Then I get back and it all comes back."
+    },
+    {
+      "speaker": "helper",
+      "text": "That brief quiet while you’re walking the dog sounds like a small bit of breathing room, and then the worry rushes back when you get home. I’m glad you have that walk, even if it doesn’t make the rest of the day easy. What’s it like when you’re out walking—does anything in particular help your head clear?"
+    },
+    {
+      "speaker": "user",
+      "text": "It’s just being outside with him. No questions, no pretending I’m fine. I don’t know. It only lasts a little while."
+    },
+    {
+      "speaker": "helper",
+      "text": "Being outside with him, without having to answer questions or pretend, sounds like a real relief. Even if it only lasts a little while, that quiet matters. You don’t have to make it last or turn it into anything. I’m here with you."
+    }
+  ],
+  "remember_me": false,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 1507,
+      "helper": 1373,
+      "total": 1508
+    },
+    {
+      "keyword": 0,
+      "checker": 908,
+      "helper": 1536,
+      "total": 1537
+    },
+    {
+      "keyword": 0,
+      "checker": 1203,
+      "helper": 1414,
+      "total": 1415
+    },
+    {
+      "keyword": 0,
+      "checker": 1102,
+      "helper": 1368,
+      "total": 1369
+    },
+    {
+      "keyword": 0,
+      "checker": 1067,
+      "helper": 1468,
+      "total": 1468
+    },
+    {
+      "keyword": 0,
+      "checker": 872,
+      "helper": 1295,
+      "total": 1296
+    }
+  ]
+}

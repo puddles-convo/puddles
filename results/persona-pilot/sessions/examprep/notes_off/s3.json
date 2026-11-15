@@ -1,0 +1,132 @@
+{
+  "persona_id": "examprep",
+  "session": 3,
+  "arm": "notes_off",
+  "user_id": "examprep-off",
+  "session_id": "examprep-off-s3",
+  "failed": false,
+  "reason": "",
+  "notes_given": [],
+  "record": {
+    "id": "examprep-off-s3",
+    "schema_version": 4,
+    "written_by": "helper",
+    "created_at": "2026-11-29T12:00:00Z",
+    "parent_ids": [],
+    "source": "live",
+    "scenario_id": null,
+    "split": null,
+    "policy_version": "policy-v2",
+    "turns": [
+      {
+        "speaker": "user",
+        "text": "Exam is on Friday. I did the 25 minute blocks on hypothesis testing most days. Now I'm scared I'll blank in the room."
+      },
+      {
+        "speaker": "helper",
+        "text": "You\u2019ve been putting in steady practice with those 25-minute blocks, and it makes sense that the exam room feels scary even after preparing. You\u2019ve already built some familiarity with hypothesis testing by showing up most days. What part of blanking worries you most?"
+      },
+      {
+        "speaker": "user",
+        "text": "That I\u2019ll see a question and just not know where to start. Then I\u2019ll panic and lose time. I want something concrete to do if that happens."
+      },
+      {
+        "speaker": "helper",
+        "text": "You\u2019re worried that one unfamiliar-looking question could set off a panic spiral and eat into your time. It\u2019s good that you\u2019re thinking through a plan before you\u2019re in the room. Would it help to try a simple reset: pause for one slow breath, underline what the question gives you and asks for, then write the first step you recognize\u2014even if you\u2019re not sure yet?"
+      },
+      {
+        "speaker": "user",
+        "text": "Maybe. The counted breathing helped before, but I don\u2019t want to spend ages calming down. And if I still can\u2019t see the first step, then what?"
+      },
+      {
+        "speaker": "helper",
+        "text": "You want a reset that\u2019s quick, and a fallback if the method still isn\u2019t coming to mind. Since counted breathing has helped before, maybe use just one slow breath, then give the question a short first pass: jot down what\u2019s given, what you\u2019re asked to find, and any relevant formula or definition."
+      },
+      {
+        "speaker": "user",
+        "text": "And if nothing comes to mind after that? Should I just skip it?"
+      },
+      {
+        "speaker": "helper",
+        "text": "If you\u2019ve made that quick pass and still feel stuck, it\u2019s reasonable to mark it and move on, then come back after collecting points elsewhere. Before you leave it, you could jot down any known information or a likely starting point, so you have something to return to. Does your exam let you move between questions easily?"
+      },
+      {
+        "speaker": "user",
+        "text": "I think so. I can turn pages. I\u2019m worried I\u2019ll keep checking the clock, though. Maybe I can decide now how long to give a stuck question."
+      },
+      {
+        "speaker": "helper",
+        "text": "That makes sense\u2014having a limit decided ahead of time could keep one question from taking over. Since you can turn pages, you might give a stuck question one quick pass, mark it, and move on if you still have no starting point after a couple of minutes. What\u2019s the total exam time?"
+      },
+      {
+        "speaker": "user",
+        "text": "It\u2019s two hours. Maybe I could do one pass through everything first, then come back. I\u2019m still a bit scared, but that sounds manageable. My last exam Friday."
+      },
+      {
+        "speaker": "helper",
+        "text": "A first pass through everything, then returning to the marked questions, sounds like a manageable plan\u2014and you\u2019ve already done steady practice to prepare. I\u2019m not sure what you mean by \u201cmy last exam Friday\u201d: is this your final exam, or is something else about Friday on your mind?"
+      }
+    ],
+    "remember_me": false,
+    "consent_for_training": true,
+    "helped": null,
+    "timings_ms": [
+      {
+        "keyword": 0,
+        "checker": 1022,
+        "helper": 1452,
+        "total": 1452
+      },
+      {
+        "keyword": 0,
+        "checker": 1583,
+        "helper": 1563,
+        "total": 1583
+      },
+      {
+        "keyword": 0,
+        "checker": 1073,
+        "helper": 1878,
+        "total": 1879
+      },
+      {
+        "keyword": 0,
+        "checker": 1046,
+        "helper": 1409,
+        "total": 1410
+      },
+      {
+        "keyword": 0,
+        "checker": 1235,
+        "helper": 1552,
+        "total": 1553
+      },
+      {
+        "keyword": 0,
+        "checker": 802,
+        "helper": 1302,
+        "total": 1303
+      }
+    ]
+  },
+  "notes_before": [],
+  "notes_after": [],
+  "changes": {
+    "added": [],
+    "replaced": [],
+    "confirmed": [],
+    "deleted": [],
+    "failed": false,
+    "reason": ""
+  },
+  "score": {
+    "status": "scored",
+    "reason": "",
+    "empathy": 4,
+    "relevance": 4,
+    "emotion_before": 3,
+    "emotion_after": 2,
+    "judge_version": "judge-fallback-v1-74e8678d",
+    "note": "In turn 8, the helper directly addressed the user's fear of losing time by offering a concrete fallback: mark the stuck question, move on, and return after collecting points elsewhere."
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "id": "laidoff-on-s1",
+  "schema_version": 4,
+  "written_by": "helper",
+  "created_at": "2026-11-15T12:00:00Z",
+  "parent_ids": [],
+  "source": "live",
+  "scenario_id": null,
+  "split": null,
+  "policy_version": "policy-v2",
+  "turns": [
+    {
+      "speaker": "user",
+      "text": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud."
+    },
+    {
+      "speaker": "helper",
+      "text": "You were laid off three weeks ago, and you’ve been carrying the fact that your parents don’t know. You don’t need advice right now; you just need room to say it. I’m glad you told me. What’s it been like holding that in?"
+    },
+    {
+      "speaker": "user",
+      "text": "It’s embarrassing. I was there eight years, and now I keep thinking I should’ve seen it coming. I have an interview next Tuesday, but even thinking about it makes my stomach turn."
+    },
+    {
+      "speaker": "helper",
+      "text": "After eight years, losing the job feels embarrassing, and now you’re second-guessing yourself while an interview is looming. That’s a lot to carry. Getting that interview lined up while you’re feeling this way says something about the effort you’re making. What feels most unsettling when you picture Tuesday?"
+    },
+    {
+      "speaker": "user",
+      "text": "I don’t know. The thought of sitting there and having them ask why I left. I can barely say “laid off” without feeling like I failed."
+    },
+    {
+      "speaker": "helper",
+      "text": "Saying “laid off” feels tangled up with the fear that you failed, even though losing a job doesn’t mean you did. After eight years, it makes sense this would hit hard. What do you notice in yourself when you try to say the words?"
+    },
+    {
+      "speaker": "user",
+      "text": "My face gets hot. And I just want to change the subject. I know it wasn’t exactly my choice, but it still feels like I should have done something differently."
+    },
+    {
+      "speaker": "helper",
+      "text": "Your face gets hot, and changing the subject feels like a way out. Even knowing it wasn’t your choice, you’re still turning it over and wondering what you could’ve done differently. That sounds painful. What do you find yourself blaming yourself for most?"
+    },
+    {
+      "speaker": "user",
+      "text": "Mostly that I didn’t see it coming. They said it was restructuring, but I keep thinking maybe I should’ve been more useful or noticed the signs. I don’t really want to dig into it right now."
+    },
+    {
+      "speaker": "helper",
+      "text": "We don’t have to dig into it. You were told it was restructuring, and the uncertainty is still making you question yourself. It’s okay to leave that there for now. Would you rather just sit with it together, or talk about something else?"
+    },
+    {
+      "speaker": "user",
+      "text": "I think I just want to sit with it. I’m tired of trying to make it sound okay."
+    },
+    {
+      "speaker": "helper",
+      "text": "You don’t have to make it sound okay here. You lost a job you’d held for eight years, and it hurts and feels embarrassing. We can just leave it at that for a moment. You’ve been carrying a lot, and I’m here with you."
+    }
+  ],
+  "remember_me": true,
+  "consent_for_training": true,
+  "helped": null,
+  "timings_ms": [
+    {
+      "keyword": 0,
+      "checker": 941,
+      "helper": 1655,
+      "total": 1655
+    },
+    {
+      "keyword": 0,
+      "checker": 1623,
+      "helper": 1836,
+      "total": 1836
+    },
+    {
+      "keyword": 0,
+      "checker": 1075,
+      "helper": 1391,
+      "total": 1393
+    },
+    {
+      "keyword": 0,
+      "checker": 1201,
+      "helper": 1868,
+      "total": 1868
+    },
+    {
+      "keyword": 0,
+      "checker": 874,
+      "helper": 1467,
+      "total": 1467
+    },
+    {
+      "keyword": 0,
+      "checker": 1205,
+      "helper": 1306,
+      "total": 1306
+    }
+  ]
+}

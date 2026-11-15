@@ -1,0 +1,171 @@
+{
+  "personas": [
+    {
+      "persona_id": "laidoff",
+      "description": "Laid off from a logistics job; wants to be heard and pushes back on advice.",
+      "sessions": [
+        {
+          "session": 1,
+          "opener": "I got laid off three weeks ago and I still haven't told my parents. I don't need tips, I just need to say it out loud.",
+          "scenario": {
+            "scenario_id": "laidoff-s1",
+            "split": "test",
+            "emotion_type": "shame",
+            "problem_type": "job crisis",
+            "situation": "I was laid off from my logistics coordinator job three weeks ago after eight years. I have not told my parents yet. I have a job interview at a warehouse firm next Tuesday and I am dreading it. I hate being given advice; I want someone to just listen.",
+            "initial_intensity": 4,
+            "openness": "guarded"
+          },
+          "fake_markers": [
+            "[note:situation:Was laid off from a logistics coordinator job after eight years]",
+            "[note:preferences:Wants to be listened to, not given advice]",
+            "[note:follow_up:Has a job interview at a warehouse firm next Tuesday]"
+          ]
+        },
+        {
+          "session": 2,
+          "opener": "So I had that interview at the warehouse place on Tuesday. It went badly. Please don't tell me what I should have done.",
+          "scenario": {
+            "scenario_id": "laidoff-s2",
+            "split": "test",
+            "emotion_type": "frustration",
+            "problem_type": "job crisis",
+            "situation": "Last week I told the helper I was laid off and had an interview at a warehouse firm on Tuesday. The interview went badly: I froze on a question about why I left. I still have not told my parents. Walking the dog in the morning is the only thing that clears my head. I still do not want advice.",
+            "initial_intensity": 4,
+            "openness": "guarded"
+          },
+          "fake_markers": [
+            "[note:what_helps:Walking the dog in the morning clears the head]"
+          ]
+        },
+        {
+          "session": 3,
+          "opener": "I finally told my parents about losing the job. They were kinder than I expected. I've been walking the dog every morning like I said.",
+          "scenario": {
+            "scenario_id": "laidoff-s3",
+            "split": "test",
+            "emotion_type": "relief",
+            "problem_type": "job crisis",
+            "situation": "Two weeks ago I told the helper about being laid off and freezing in the warehouse interview. Since then I told my parents and they were kind. The morning dog walks still help. I am unsure whether to apply for coordinator jobs again or try something new, but I want to think it through out loud, not be told what to do.",
+            "initial_intensity": 3,
+            "openness": "open"
+          },
+          "fake_markers": [
+            "[note:goals:Wants to decide between coordinator jobs and a new field]"
+          ]
+        }
+      ]
+    },
+    {
+      "persona_id": "examprep",
+      "description": "University student with exam anxiety who wants concrete, small steps.",
+      "sessions": [
+        {
+          "session": 1,
+          "opener": "My statistics exam is in three weeks and every time I open the notes my chest gets tight. Can you give me something concrete to do?",
+          "scenario": {
+            "scenario_id": "examprep-s1",
+            "split": "test",
+            "emotion_type": "anxiety",
+            "problem_type": "academic pressure",
+            "situation": "I am a second-year student. My statistics exam is in three weeks and I failed the mock exam. When I open my notes my chest gets tight and I end up on my phone. I want concrete steps, not reassurance.",
+            "initial_intensity": 4,
+            "openness": "open"
+          },
+          "fake_markers": [
+            "[note:situation:Has a statistics exam in three weeks after failing the mock]",
+            "[note:preferences:Wants concrete steps rather than reassurance]"
+          ]
+        },
+        {
+          "session": 2,
+          "opener": "I tried the breathing thing before studying, the slow counting one. It actually helped on two days. But I still can't start on the hard chapters.",
+          "scenario": {
+            "scenario_id": "examprep-s2",
+            "split": "test",
+            "emotion_type": "anxiety",
+            "problem_type": "academic pressure",
+            "situation": "Last week I told the helper about my statistics exam. I tried slow counted breathing before studying and it helped on two days. I still avoid the hypothesis testing chapters. The exam is now two weeks away. I want a concrete plan for the hard chapters.",
+            "initial_intensity": 3,
+            "openness": "open"
+          },
+          "fake_markers": [
+            "[note:what_helps:Slow counted breathing before studying helped]",
+            "[note:goals:Study the hypothesis testing chapters in 25 minute blocks]"
+          ]
+        },
+        {
+          "session": 3,
+          "opener": "Exam is on Friday. I did the 25 minute blocks on hypothesis testing most days. Now I'm scared I'll blank in the room.",
+          "scenario": {
+            "scenario_id": "examprep-s3",
+            "split": "test",
+            "emotion_type": "fear",
+            "problem_type": "academic pressure",
+            "situation": "Over the last two weeks I told the helper about my statistics exam, the counted breathing that helped, and my plan to study the hard chapters in 25 minute blocks. I kept to the blocks most days. The exam is on Friday and I am scared of blanking in the exam room. I want concrete things to do on the day.",
+            "initial_intensity": 3,
+            "openness": "open"
+          },
+          "fake_markers": [
+            "[note:follow_up:Statistics exam is on Friday]"
+          ]
+        }
+      ]
+    },
+    {
+      "persona_id": "grief",
+      "description": "Grieving their father, who died two months ago; asks the robot to forget one thing.",
+      "sessions": [
+        {
+          "session": 1,
+          "opener": "My dad died two months ago. Today I found his gardening gloves in the shed and I just sat there.",
+          "scenario": {
+            "scenario_id": "grief-s1",
+            "split": "test",
+            "emotion_type": "sadness",
+            "problem_type": "loss of a parent",
+            "situation": "My father died of a heart condition two months ago. Today I found his gardening gloves in the shed. At the funeral I had an argument with my brother about selling the house, and we have not spoken since. I miss my father's Sunday phone calls.",
+            "initial_intensity": 4,
+            "openness": "open"
+          },
+          "fake_markers": [
+            "[note:situation:Father died two months ago]",
+            "[note:people:Argued with their brother at the funeral about selling the house]",
+            "[note:what_helps:Remembering the father's Sunday phone calls]"
+          ]
+        },
+        {
+          "session": 2,
+          "opener": "Before anything else: please forget what I told you about the argument with my brother at the funeral. I don't want that kept. I want to talk about my dad.",
+          "scenario": {
+            "scenario_id": "grief-s2",
+            "split": "test",
+            "emotion_type": "sadness",
+            "problem_type": "loss of a parent",
+            "situation": "Last week I told the helper about my father's death and his gardening gloves, and also about an argument with my brother. I regret mentioning my brother and want that forgotten. Sundays are the hardest because my father used to call me then. I have started looking after his tomato plants.",
+            "initial_intensity": 4,
+            "openness": "guarded"
+          },
+          "fake_markers": [
+            "[forget:note-{user_id}-002]",
+            "[note:what_helps:Looking after the father's tomato plants]"
+          ]
+        },
+        {
+          "session": 3,
+          "opener": "The tomatoes from Dad's plants came in this week. I picked the first ones on Sunday, which is when he used to call.",
+          "scenario": {
+            "scenario_id": "grief-s3",
+            "split": "test",
+            "emotion_type": "sadness",
+            "problem_type": "loss of a parent",
+            "situation": "Over the last two weeks I told the helper about my father's death, how Sundays are hard because he used to call then, and that I have been looking after his tomato plants. The first tomatoes came in and I picked them on Sunday. It was sad and a little comforting at once.",
+            "initial_intensity": 3,
+            "openness": "open"
+          },
+          "fake_markers": []
+        }
+      ]
+    }
+  ]
+}
