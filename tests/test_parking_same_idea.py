@@ -230,7 +230,8 @@ def test_park_after_1_parks_c1_after_its_one_failed_try_on_v4(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("value, expected",
-                         [(None, 2), ("1", 1), ("2", 2), ("3", 3), ("0", 2), ("abc", 2), ("1.5", 2)])
+                         [(None, 2), ("1", 1), ("2", 2), ("3", 3), ("0", 2), ("abc", 2), ("1.5", 2),
+                          ("0" * 5000, 2)])
 def test_park_after_reads_the_setting_and_falls_back_to_2(monkeypatch, value, expected):
     if value is None:
         monkeypatch.delenv("PUDDLES_PARK_AFTER", raising=False)

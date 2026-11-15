@@ -67,8 +67,8 @@ class Parked:
 
 
 def parse_park_after(value: str) -> Optional[int]:
-    """5.8: a whole number of 1 or more, or None when `value` is not one."""
-    return int(value) if re.fullmatch(r"[0-9]+", value) and int(value) >= 1 else None
+    """5.8: a whole number of 1 or more, or None when `value` is not one. At most 9 digits, so int() never raises."""
+    return int(value) if re.fullmatch(r"[0-9]{1,9}", value) and int(value) >= 1 else None
 
 
 def park_after() -> int:
