@@ -9,6 +9,7 @@ from typing import Callable, Literal, Optional
 
 import httpx
 
+from puddles import meta
 from puddles.agents import critic, proposer, researcher
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM
@@ -21,6 +22,8 @@ from schemas import (
     LogEdit,
     LogPattern,
     LogPolicy,
+    LogSafety,
+    LogScores,
     MemoryCopyEvent,
     PolicyEdit,
     Record,
@@ -49,6 +52,9 @@ class RoundResult:
     candidate_path: Optional[Path] = None
     refs: dict[str, RecordRef] = field(default_factory=dict)
     unscored: list[str] = field(default_factory=list)  # conversations the judge failed on twice
+    # Set by the gate, for the round event. None means it was not measured, never that it passed.
+    scores: Optional[LogScores] = None
+    safety: Optional[LogSafety] = None
 
 
 def policy_in_force(root: Path, fallback: Path) -> Path:
@@ -189,6 +195,12 @@ def unscored_note(unscored: list[str]) -> str:
 
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
                  root: Path) -> RoundEvent:
+    """Log the round and copy its records into memory.
+
+    The gate's scores, noise and safety results come in on `result.scores` and `result.safety`
+    and go into the round event. A kept edit writes the new policy file and its .meta.json; a
+    reverted one writes neither, so the policy in force is left exactly as it was.
+    """
     base_text = result.base_policy_path.read_text()
     base_version = parse_policy(base_text).version
     policy = LogPolicy(base=base_version, base_sha256=sha256_text(base_text), in_force=base_version)
@@ -203,7 +215,12 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         if gate.decision == "kept":
             candidate.version = gate.policy_in_force
             text = render_policy(candidate)
+            parent = meta.load_meta(root, base_version) or meta.starting_meta(base_text)
+            if parent.policy_sha256 != sha256_text(base_text):
+                raise meta.MetaError(f"{meta.meta_path(root, base_version)} is not for the {base_version} in force")
+            new_meta = meta.promoted_meta(parent, result.edit, text)  # raises before anything is written
             (root / "policies" / f"{candidate.version}.md").write_text(text)
+            meta.write_meta(root, new_meta)
             policy.new, policy.new_sha256, policy.in_force = candidate.version, sha256_text(text), candidate.version
         else:
             policy.new, policy.new_sha256 = candidate.version, sha256_text(result.candidate_path.read_text())
@@ -215,7 +232,8 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
         pattern=LogPattern(id=p.id, name=p.name, seen_in=p.seen_in, out_of=p.out_of,
                            status_before=result.status_before) if p else None,
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
-                     rule_text=result.edit.rule_text) if result.edit and gate else None)
+                     rule_text=result.edit.rule_text) if result.edit and gate else None,
+        scores=result.scores if gate else None, safety=result.safety if gate else None)
     log.append(event)
     for kind, model in MODELS.items():
         if kind in result.refs:

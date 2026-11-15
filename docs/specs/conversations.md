@@ -193,7 +193,7 @@ def run_batch(helper_client: ChatClient, user_client: ChatClient, policy: Policy
 - It stops when the simulated user returns `None`, or straight after the helper's `max_turns`-th reply. It never ends on a user line that the helper did not answer, unless the helper's limit is zero.
 - Both clients are given `scenario_seed(seed, scenario.scenario_id)`.
 - `helper_reply` is called with `session_id` set to the record ID and `turn` counting the helper's replies from 1.
-- It returns a `ConversationRecord` with `id` equal to `conv-r{round:02d}-{scenario_id}`, `written_by="helper"`, `created_at` equal to `now` or the current UTC time, `source="simulated"`, the scenario's `scenario_id` and `split`, `policy_version=policy.version`, and the turns.
+- It returns a `ConversationRecord` with `id` equal to `conv-r{round:02d}-{scenario_id}`, or `conv-r{round:02d}-{tag}-{scenario_id}` when the optional `tag` is given (added in stage 2 for the gate's validation run; `run_batch` takes the same `tag`, which must be lower-case letters and digits), `written_by="helper"`, `created_at` equal to `now` or the current UTC time, `source="simulated"`, the scenario's `scenario_id` and `split`, `policy_version=policy.version`, and the turns.
 - If the simulated user ends before saying anything, or any `LLMError`, `HelperError` or `SimulatedUserError` is raised, it raises `ConversationFailed` with the scenario ID and a reason.
 
 `run_batch`

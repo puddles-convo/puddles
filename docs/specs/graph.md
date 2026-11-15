@@ -105,7 +105,7 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
 ```
 
 - `stub_judge` returns one `ScoredConversation` per record, in order: the record's `id` as `conversation_id`, its turns, `empathy=3`, `relevance=3`, and a note that says it is a stub. Stage 2 replaced it: see "The real judge" below.
-- `stand_in_reverted(result)` is `puddles.round.stand_in_gate(result, "reverted")`. Stage 2 replaces it through `RoundDeps.gate`.
+- `stand_in_reverted(result)` is `puddles.round.stand_in_gate(result, "reverted")`. Stage 2 replaced it through `RoundDeps.gate`: `puddles.gate.make_gate(...)` returns a callable with the same signature. It also sets `result.scores` and `result.safety`, which `finish_round` writes into the round event.
 - `check_policy_file` raises `loop.errors.PolicyError` if the file's bytes contain a carriage return, and otherwise returns `loop.policy.load_policy(path)`, which raises `PolicyError` on a malformed file, including a rule wrapped onto a second line.
 
 ### The graph
@@ -150,7 +150,7 @@ In this order:
 
 1. `check_policy_file(policy_path)`. A `PolicyError` propagates. Nothing has touched the memory or the log by then, so the log is exactly as it was, even when it holds copies that are still pending.
 2. `deps.memory.ensure_training_audience()`, then `puddles.round.retry_pending(deps.log, deps.memory, deps.root)`.
-3. `round = deps.log.next_round()`.
+3. `round = deps.log.next_round()`. When that is 1, `puddles.meta.ensure_starting_meta(root, policy_path)` writes `<root>/policies/<version>.meta.json` for the starting policy, unless it is already there.
 4. Inside one MLflow run named `round-NN`, invoke the graph with `invoke`.
 5. On that MLflow run: parameters `round` and `policy_version`; tag `outcome`, set to `event.outcome`; metrics `conversations` (finished) and `conversations_failed`.
 6. Return the final state.
@@ -184,12 +184,17 @@ python -m scripts.run_graph_round --fake --root runs/dev
 | `--scenarios` | `fixtures/scenarios.jsonl` | Read with `loop.runner.load_scenarios` |
 | `--max-turns` | `10` | |
 | `--seed` | none | |
-| `--gate` | `reverted` | `kept` or `reverted`: what the stand-in gate decides |
+| `--gate` | `real` | `real`: the gatekeeper in `puddles/gate.py`. `kept` or `reverted`: a stand-in that decides so, for tests |
+| `--validation` | the `--scenarios` file | The scenarios the gate tests on |
+| `--safety-cases` | `fixtures/safety-v1.json` in the repo | The safety case file, checked before the round starts |
+| `--noise` | `0.0` | The run-to-run noise in quality |
+| `--noise-measured` | off | Says `--noise` is a measured figure. Without it the gate keeps nothing. |
+| `--token-cap` | `800` | The most tokens a policy may have |
 | `--fake` | off | Scripted chat clients, a scripted model, a fake search and `FakeMemory`. No keys, no network. The scripted model also answers as the judge, so the real judge code runs. |
 | `--mlflow` | none | Tracking address, passed to `tracing.setup` |
 
 - It calls `tracing.setup`, runs one round with `run_round`, and prints one line: `round N: <outcome>. <reason>`.
-- With `--fake` on a root with no log, the round reaches the gate, so the outcome is `kept` or `reverted` as `--gate` says. The chat clients speak the same scripted lines as `python -m loop.run_batch --fake`. A second `--fake` run on the same root also finishes, as round 2; its outcome may be any of the four.
+- With `--fake` on a root with no log, the round reaches the gate. With the real gate the outcome is `reverted`: the scripted helper passes no safety case. With `--gate kept` or `--gate reverted` it is what the stand-in was told. The chat clients speak the same scripted lines as `python -m loop.run_batch --fake`. A second `--fake` run on the same root also finishes, as round 2; its outcome may be any of the four.
 - Without `--fake` it builds `loop.llm.client_from_env("HELPER")`, `client_from_env("SIMUSER")`, `puddles.llm.OpenAILLM()`, `puddles.exa.search`, `puddles.memory.PastClient()` and, for the judge, `puddles.agents.judge.llm_from_env()`, which needs `PUDDLES_JUDGE_MODEL`. It checks that `EXA_API_KEY` is set before the round starts, because the search would otherwise fail only in the middle of a round; a missing key is missing configuration.
 - Exit code 0 when a round finished, whatever its outcome. Exit code 2, with one line on standard error and nothing in the log, for a policy or scenario file that cannot be read or is malformed, and for missing configuration.
 

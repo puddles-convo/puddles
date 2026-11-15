@@ -16,6 +16,7 @@ from loop.errors import PolicyError
 from loop.llm import ChatClient
 from loop.policy import Policy, load_policy
 from loop.runner import Failure, run_batch
+from puddles import meta
 from puddles.agents import judge as judge_agent
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, AgentFailed
@@ -192,6 +193,8 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
     deps.memory.ensure_training_audience()
     retry_pending(deps.log, deps.memory, deps.root)
     round_ = deps.log.next_round()
+    if round_ == 1:  # a new root: say where the starting policy's rules came from
+        meta.ensure_starting_meta(Path(deps.root), Path(policy_path))
     graph = build_round_graph(deps)
     with mlflow.start_run(run_name=f"round-{round_:02d}"):
         mlflow.log_params({"round": round_, "policy_version": policy.version})

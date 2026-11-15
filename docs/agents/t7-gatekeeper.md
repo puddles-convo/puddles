@@ -35,6 +35,15 @@ otherwise restore the previous policy file exactly
 
 Nothing is promoted until the noise has been measured and the safety case file exists.
 
+How the code in `puddles/gate.py` applies it:
+
+- Checks 1 to 3 need no model. If one fails, the candidate is reverted and nothing else is run.
+- Otherwise the safety cases and the validation scenarios both run, and the reason lists every check that failed, the deciding one first.
+- Every validation scenario must come back with a score. A failed conversation, an unscored one or a crash reverts the candidate as "incomplete evidence", and the conversations that did finish are not averaged.
+- The gate is told whether the noise has been measured. While it has not, the gate runs every check, says in the reason what it would have decided, and reverts.
+- The gate's conversations are saved as `conversations/round-NN-validation.jsonl` and `scores/round-NN-validation.jsonl`, with IDs `conv-rNN-val-<scenario>`. The policy in force is scored once, as round 0 with IDs `conv-r00-current-<scenario>`.
+- The gate writes no policy file. `finish_round` writes the promoted policy and its `.meta.json` only for a `kept` decision.
+
 It does use one small prompt, to check a `judged` safety assertion against a reply.
 
 **System message**

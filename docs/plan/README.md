@@ -25,10 +25,10 @@ This plan was reviewed against the code by a second model on 14 November and cor
 | Simulated user, helper, conversation runner, batch command | `loop/` | Built, tested offline. `python -m loop.run_batch --fake ...` runs with no keys. |
 | Critic, researcher, proposer | `puddles/agents/` | Built, tested offline with a scripted model. |
 | past.dev memory for the training agents, record files, decision log, policy edits | `puddles/memory.py`, `records.py`, `decision_log.py`, `policy.py` | Built, tested offline. |
-| Steps 4 to 6 of a round, log entry, copies into memory | `puddles/round.py`, `scripts/run_round.py` | Built. Uses a stand-in gate. |
+| Steps 4 to 6 of a round, log entry, copies into memory | `puddles/round.py`, `scripts/run_round.py` | Built. `scripts/run_round.py` still uses a stand-in gate. |
 | Judge | `puddles/agents/judge.py`, `scripts/calibrate_judge.py` | Built, tested offline. Not calibrated or frozen (issue #4). |
-| Gatekeeper and safety cases | | Not built (issues #5, #20) |
-| Where each rule came from (`policies/<version>.meta.json`) | | Not built. The format `PolicyMeta` exists; nothing writes it. |
+| Gatekeeper and safety cases | `puddles/gate.py`, `fixtures/safety-v1.json` | Built, tested offline with a scripted judge. The cases are a draft with no clinical review. Promotes nothing until the noise is measured (stage 5). |
+| Where each rule came from (`policies/<version>.meta.json`) | `puddles/meta.py` | Built. Written under the run's root for the starting policy and for each promoted one. |
 | ESConv loader | `puddles/esconv.py` | Built. Downloads at run time; nothing is committed. `fixtures/scenarios.jsonl` has 5 hand-written scenarios. |
 | One round as a graph, with MLflow tracing | `puddles/graph.py`, `puddles/tracing.py`, `scripts/run_graph_round.py`; contract in [docs/specs/graph.md](../specs/graph.md) | Built, tested offline. `python -m scripts.run_graph_round --fake --root runs/dev` runs with no keys. The judge and the gate in it are stand-ins. |
 | Token counts, the loop command | | Not built (stages 1, 6) |
