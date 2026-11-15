@@ -206,3 +206,63 @@ def test_run_retries_once_after_a_same_idea_answer(tmp_path, on):
     assert out == second
     assert len(llm.prompts[proposer.ProposerOutput]) == 2
     assert "edit-r07" in llm.prompts[proposer.ProposerOutput][1] and "different idea" in llm.prompts[proposer.ProposerOutput][1]
+
+
+# ---------- 5.8 ----------
+
+# Rounds 5, 7 and 9 clearly worse rewordings of C9; round 8 keeps policy-v4; round 10 rewords C1 on v4 and rises.
+ROUND_11 = TONIGHT[:7] + [
+    (8, "kept", None, "add", "C10", "policy-v3", "policy-v4", 4.15, 4.6),
+    (9, "reverted", "pattern-r04", "reword", "C9", "policy-v4", "policy-v4", 4.6, 3.9),
+    (10, "reverted", "pattern-r01", "reword", "C1", "policy-v4", "policy-v4", 4.0, 4.125),
+]
+
+
+def test_park_after_1_parks_c1_after_its_one_failed_try_on_v4(tmp_path, monkeypatch):
+    log = write_log(tmp_path, ROUND_11)
+    monkeypatch.delenv("PUDDLES_PARK_AFTER", raising=False)
+    v4 = parking.parked(log, "policy-v4")
+    assert set(v4.rules) == {"C9"} and set(v4.patterns) == {"pattern-r04"}
+    monkeypatch.setenv("PUDDLES_PARK_AFTER", "1")
+    v4 = parking.parked(log, "policy-v4")
+    assert set(v4.rules) == {"C1", "C9"} and set(v4.patterns) == {"pattern-r01", "pattern-r04"}
+    assert [t.edit_id for t in v4.rules["C1"]] == ["edit-r10"]
+
+
+@pytest.mark.parametrize("value, expected",
+                         [(None, 2), ("1", 1), ("2", 2), ("3", 3), ("0", 2), ("abc", 2), ("1.5", 2)])
+def test_park_after_reads_the_setting_and_falls_back_to_2(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("PUDDLES_PARK_AFTER", raising=False)
+    else:
+        monkeypatch.setenv("PUDDLES_PARK_AFTER", value)
+    assert parking.park_after() == expected
+
+
+@pytest.mark.parametrize("value", ["0", "abc", "1.5"])
+def test_run_loop_refuses_a_bad_park_after_before_any_call(tmp_path, monkeypatch, capsys, value):
+    import scripts.run_loop as driver
+    from tests.test_unattended_driver import capture_round, patch_real, write_config
+    write_config(tmp_path, monkeypatch)
+    made = patch_real(monkeypatch)
+    seen: list = []
+    capture_round(monkeypatch, tmp_path / "root", seen)
+    monkeypatch.delenv("PUDDLES_GATE_REMEASURE_KEPT", raising=False)
+    monkeypatch.delenv("PUDDLES_PARK_REVERTED", raising=False)
+    monkeypatch.setenv("PUDDLES_PARK_AFTER", value)
+    assert driver.main(["--root", str(tmp_path / "root"), "--gate", "real", "--max-rounds", "1"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "PUDDLES_PARK_AFTER" in err and err.count("\n") == 1
+    assert made == [] and seen == []
+    assert not (tmp_path / "root").exists()
+
+
+@pytest.mark.parametrize("value", [None, "1", "2", "3"])
+def test_run_loop_accepts_park_after(monkeypatch, value):
+    import scripts.run_loop as driver
+    monkeypatch.delenv("PUDDLES_PARK_REVERTED", raising=False)
+    if value is None:
+        monkeypatch.delenv("PUDDLES_PARK_AFTER", raising=False)
+    else:
+        monkeypatch.setenv("PUDDLES_PARK_AFTER", value)
+    driver._check_park_reverted()  # raises ConfigError on a refusal

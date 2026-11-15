@@ -119,15 +119,6 @@ def test_acc_noise_boundary_and_missing_measurements_across_two_keeps(tmp_path):
     assert not missing_noise.clearly_worse
 
 
-def test_acc_real_decision_log_remembers_only_c9_on_v4():
-    log = DecisionLog(Path("/Users/moamen/.hermes/cache/scratch/train/train-root2"))
-    assert log.path.is_file()
-    parked = parking.parked(log, "policy-v4")
-    assert set(parked.rules) == {"C9"}
-    assert set(parked.patterns) == {"pattern-r04"}
-    assert [t.edit_id for t in parking.to_compare(log, "policy-v4")] == ["edit-r05", "edit-r07"]
-
-
 def test_acc_call_requires_setting_coded_checks_and_comparison_history(tmp_path, monkeypatch):
     monkeypatch.setenv(parking.SETTING, "1")
     inp, policy = inputs()

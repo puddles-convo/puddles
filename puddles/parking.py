@@ -3,6 +3,7 @@
 Worked out by code from the decision log's round events only, for the policy version in force.
 """
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from puddles.decision_log import DecisionLog
 
 SETTING = "PUDDLES_PARK_REVERTED"
+PARK_AFTER = "PUDDLES_PARK_AFTER"
 
 
 def enabled() -> bool:
@@ -64,8 +66,19 @@ class Parked:
     patterns: dict[str, list[FailedTry]] = field(default_factory=dict)  # pattern identity -> the failed tries
 
 
+def parse_park_after(value: str) -> Optional[int]:
+    """5.8: a whole number of 1 or more, or None when `value` is not one."""
+    return int(value) if re.fullmatch(r"[0-9]+", value) and int(value) >= 1 else None
+
+
+def park_after() -> int:
+    """5.8: PUDDLES_PARK_AFTER, the failed tries that park; 2 when unset (or invalid: run_loop refuses those)."""
+    value = os.environ.get(PARK_AFTER)
+    return (parse_park_after(value) if value is not None else None) or 2
+
+
 def _is_parked(tries: list[FailedTry]) -> bool:
-    return len(tries) >= 2 or any(t.negative for t in tries)
+    return len(tries) >= park_after() or any(t.negative for t in tries)
 
 
 def _all_failed_tries(log: DecisionLog) -> list[FailedTry]:

@@ -39,6 +39,7 @@ from loop.llm import ChatClient, FakeClient
 from loop.run_batch import _fake_helper, _fake_user
 from loop.runner import load_scenarios
 from puddles import gate as real_gate
+from puddles import parking
 from puddles import tracing
 from puddles.baselines import load_id_file, resolve_ids
 from puddles.config import LoopConfig, load_config, load_loop_config
@@ -164,6 +165,10 @@ def _check_park_reverted() -> None:
     value = os.environ.get("PUDDLES_PARK_REVERTED")
     if value not in (None, "0", "1"):
         raise ConfigError(f"environment variable PUDDLES_PARK_REVERTED is {value!r}: it must be 1, 0 or unset")
+    after = os.environ.get("PUDDLES_PARK_AFTER")  # spec 5.8; read by puddles.parking.park_after
+    if after is not None and parking.parse_park_after(after) is None:
+        raise ConfigError(f"environment variable PUDDLES_PARK_AFTER is {after!r}: "
+                          f"it must be a whole number of 1 or more, or unset")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
