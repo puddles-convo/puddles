@@ -1,0 +1,443 @@
+"""The round view: node summaries on the spans, gate numbers on the run, the report and show_round.
+
+All offline: rounds are run with the fakes of scripts/run_graph_round.py and tests/fakes.py.
+"""
+import json
+import re
+from pathlib import Path
+
+import mlflow
+import pytest
+from mlflow.tracking import MlflowClient
+
+import puddles.round_view as round_view
+from loop.llm import FakeClient
+from loop.run_batch import _fake_helper, _fake_user
+from loop.runner import load_scenarios
+from puddles import tracing
+from puddles.decision_log import DecisionLog
+from puddles.eval.judge import JudgePanel, PanelConfig
+from puddles.graph import RoundDeps, run_round
+from puddles.memory import FakeMemory
+from puddles.round_view import SUMMARY_KEY, build_report, node_summary, report_path, with_summary
+from schemas import ConversationRecord, CriticOutput, JudgeOutput, ResearcherOutput
+from scripts import run_graph_round, show_round
+from tests.fakes import FakeSearch, ScriptedLLM
+
+REPO = Path(__file__).parents[1]
+POLICY = REPO / "policies" / "policy-v1.md"
+SCENARIOS_FILE = REPO / "fixtures" / "scenarios.jsonl"
+SCENARIOS = load_scenarios(SCENARIOS_FILE)
+NODES = ("converse", "judge", "critic", "researcher", "proposer", "gate", "finish")
+KEYS = {
+    "converse": {"finished", "failed", "file"},
+    "judge": {"scored", "unscored", "mean_empathy", "mean_relevance", "judge_version"},
+    "critic": {"pattern", "seen_in", "out_of"},
+    "researcher": {"queries", "sources"},
+    "proposer": {"action", "rule_id", "rule_text"},
+    "gate": {"decision", "quality_before", "quality_after", "noise", "safety_passed", "failed_checks"},
+    "finish": {"outcome", "policy_in_force", "copies"},
+}
+GATE_NUMBERS = ("quality_before", "quality_after", "noise")
+QUERY = "counselling skills exploring before giving advice"
+URL = "https://counselling.example.ac.uk/skills"
+PATTERN = {"found": True, "name": "advice-before-understanding",
+           "description": "Gives advice in its first reply before asking about the situation.",
+           "seen_in": 1, "out_of": len(SCENARIOS), "example_conversation_ids": ["conv-r01-fixture-0001"]}
+
+
+@pytest.fixture
+def mlflow_db(tmp_path, monkeypatch):
+    """Tracking in the test's folder; the working folder too, so no artifact lands in the repo."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    tracing.setup(tracking_uri=uri)
+    yield uri
+    mlflow.flush_trace_async_logging()
+
+
+def fake_round(root: Path, uri: str, gate: str) -> int:
+    argv = ["--fake", "--root", str(root), "--policy", str(POLICY), "--scenarios", str(SCENARIOS_FILE),
+            "--gate", gate, "--mlflow", uri, "--max-turns", "4"]
+    return run_graph_round.main(argv)
+
+
+def spoken_lines(root: Path, round_: int = 1) -> list[str]:
+    path = root / "conversations" / f"round-{round_:02d}-train.jsonl"
+    records = [ConversationRecord.model_validate_json(line) for line in path.read_text().splitlines() if line]
+    return [t.text for r in records for t in r.turns if len(t.text.strip()) > 3]
+
+
+def only_trace():
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.search_traces(return_type="list")
+    assert len(traces) == 1
+    return traces[0]
+
+
+def summaries(trace) -> dict[str, dict]:
+    out = {}
+    for span in trace.data.spans:
+        name = span.name.removeprefix("summary:")
+        if name in NODES and span.attributes.get(SUMMARY_KEY) is not None:
+            out[name] = span.attributes[SUMMARY_KEY]
+    return out
+
+
+def run_of(round_: int):
+    [run] = mlflow.search_runs(filter_string=f"attributes.run_name = 'round-{round_:02d}'", output_format="list")
+    return run
+
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def scripted_deps(root: Path, llm) -> RoundDeps:
+    search = FakeSearch({QUERY: [{"url": URL, "title": "Skills", "text": "..."}]})
+    return RoundDeps(helper_client=FakeClient(_fake_helper), user_client=FakeClient(_fake_user), llm=llm,
+                     search=search, memory=FakeMemory(), log=DecisionLog(root), root=root,
+                     judge_panel=run_graph_round.FakeJudge())
+
+
+# 1
+def test_every_node_span_has_a_summary_and_none_holds_a_spoken_line(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "real") == 0
+    found = summaries(only_trace())
+    assert set(found) == set(NODES)
+    for node in NODES:
+        assert KEYS[node] <= set(found[node]), node
+    text = json.dumps(found)
+    lines = spoken_lines(root)
+    assert lines
+    for line in lines:
+        assert line not in text
+    assert "Scripted judge" not in text  # the judge's note is not copied either
+    assert found["converse"]["file"] == "conversations/round-01-train.jsonl"
+    assert found["judge"]["judge_version"] == "judge-fake"
+    assert found["judge"]["scored"] == found["converse"]["finished"] and found["judge"]["unscored"] == 0
+    assert found["judge"]["mean_empathy"] == 3 and found["judge"]["mean_relevance"] == 3
+    assert found["critic"]["pattern"] == "advice-before-understanding"
+    assert found["researcher"]["queries"] == 1 and found["researcher"]["sources"][0].startswith("https://")
+    assert found["proposer"]["action"] == "add" and found["proposer"]["rule_id"]
+    assert found["gate"]["decision"] == "reverted"
+    assert "noise_not_measured" in found["gate"]["failed_checks"]
+    assert found["gate"]["safety_passed"] is True  # the fake safety check ran and passed
+    assert found["finish"]["outcome"] == "reverted"
+    event = DecisionLog(root).rounds()[0]
+    assert found["finish"]["policy_in_force"] == event.policy.in_force
+    assert sorted(c["record_id"] for c in found["finish"]["copies"]) == sorted(r.id for r in event.records.values())
+    assert {c["status"] for c in found["finish"]["copies"]} == {"confirmed"}
+
+
+# 2
+@pytest.mark.parametrize("answers, outcome, not_run", [
+    ({CriticOutput: [{"found": False, "reason": "The conversations went well."}]}, "no_pattern",
+     {"researcher", "proposer", "gate"}),
+    ({CriticOutput: [PATTERN], ResearcherOutput: [{"queries": [QUERY], "sources": []}]}, "no_evidence",
+     {"proposer", "gate"}),
+])
+def test_rounds_that_end_early_give_a_report_with_the_later_nodes_not_run(tmp_path, mlflow_db, answers, outcome,
+                                                                          not_run):
+    llm = ScriptedLLM()
+    for schema, outs in answers.items():
+        llm.add(schema, *outs)
+    state = run_round(scripted_deps(tmp_path, llm), policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)
+    assert state["event"].outcome == outcome
+    report = build_report(tmp_path, 1)
+    assert report.startswith(f"# Round 1: {outcome}\n")
+    rows = {line.split("|")[1].strip(): line for line in report.splitlines()
+            if line.startswith("| ") and line.split("|")[1].strip() in NODES}
+    assert set(rows) == set(NODES)
+    for node in NODES:
+        assert ("did not run" in rows[node]) == (node in not_run), node
+    assert "The gate did not run." in report and "No edit." in report
+    sections = [line for line in report.splitlines() if line.startswith("## ")]
+    assert sections == ["## Nodes", "## Conversations", "## Memory", "## Policy change", "## Gate", "## Cost"]
+    for line in spoken_lines(tmp_path):
+        assert line not in report
+
+
+def test_a_round_with_nothing_scored_marks_the_critic_not_run(tmp_path, mlflow_db):
+    deps = scripted_deps(tmp_path, ScriptedLLM())
+    deps.judge_panel = None
+    deps.judge = lambda records: []
+    assert run_round(deps, policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)["event"].outcome == "no_pattern"
+    report = build_report(tmp_path, 1)
+    rows = [line for line in report.splitlines() if line.startswith("| critic ")]
+    assert rows and "did not run" in rows[0]
+
+
+# 3
+def test_a_kept_round_shows_the_rule_diff(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    event = DecisionLog(root).rounds()[0]
+    report = build_report(root, 1)
+    assert f"+ {event.edit.rule_id}. {event.edit.rule_text}" in report
+    assert f"Policy in force after the round: {event.policy.in_force}" in report
+    assert "Stand-in gate: nothing was measured." in report
+
+
+def test_a_kept_rewording_shows_both_lines(tmp_path, mlflow_db):
+    from puddles.round import policy_in_force, stand_in_gate
+    from schemas import ProposerOutput
+
+    def kept(result):
+        return stand_in_gate(result, "kept")
+
+    first = ScriptedLLM()
+    first.add(CriticOutput, PATTERN)
+    first.add(ResearcherOutput, {"queries": [QUERY], "sources": [{"url": URL, "title": "S", "technique": "Ask."}]})
+    first.add(ProposerOutput, {"action": "add", "rule_text": "Ask one open question first.", "summary": "Ask."})
+    deps = scripted_deps(tmp_path, first)
+    deps.gate = kept
+    run_round(deps, policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)
+    rule_id = DecisionLog(tmp_path).rounds()[0].edit.rule_id
+
+    second = ScriptedLLM()
+    second.add(CriticOutput, {**PATTERN, "example_conversation_ids": ["conv-r02-fixture-0001"]})
+    second.add(ResearcherOutput, {"queries": [QUERY + " again"],
+                                  "sources": [{"url": URL, "title": "S", "technique": "Ask."}]})
+    second.add(ProposerOutput, {"action": "reword", "rule_id": rule_id,
+                                "rule_text": "Ask one open question before any suggestion.", "summary": "Reword."})
+    deps = scripted_deps(tmp_path, second)
+    deps.search = lambda q: [{"url": URL, "title": "Skills", "text": "..."}]
+    deps.gate = kept
+    state = run_round(deps, policy_path=policy_in_force(tmp_path, POLICY), scenarios=SCENARIOS, max_turns=4)
+    assert state["event"].outcome == "kept", state["event"].reason
+    report = build_report(tmp_path, 2)
+    assert f"- {rule_id}. Ask one open question first." in report
+    assert f"+ {rule_id}. Ask one open question before any suggestion." in report
+
+
+def test_failed_and_unscored_conversations_are_listed_without_text(tmp_path, mlflow_db):
+    from loop.errors import LLMError
+
+    def user(system, messages):
+        if "two mugs" in system:  # fixture-0002
+            raise LLMError("simulated user server down")
+        return _fake_user(system, messages)
+
+    class SometimesJudge(run_graph_round.FakeJudge):
+        def score(self, record):
+            if record.id.endswith("0003"):
+                raise ValueError("the judge failed twice")
+            return super().score(record)
+
+    llm = ScriptedLLM()
+    llm.add(CriticOutput, {"found": False, "reason": "The conversations went well."})
+    deps = scripted_deps(tmp_path, llm)
+    deps.user_client = FakeClient(user)
+    deps.judge_panel = SometimesJudge()
+    run_round(deps, policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)
+    report = build_report(tmp_path, 1)
+    assert "| conv-r01-fixture-0003 |  |  | unscored |" in report
+    assert "fixture-0002 (failed)" in report and "simulated user server down" in report
+    for line in spoken_lines(tmp_path):
+        assert line not in report
+
+
+def test_a_reverted_round_with_the_real_gate_names_the_failed_checks(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "real") == 0
+    report = build_report(root, 1)
+    gate = json.loads((root / "scores" / "round-01-gate.json").read_text())
+    for name, status in gate["checks"].items():
+        assert f"- {name}: {round_view.CHECK_WORDS[status]}" in report
+    assert "- noise_not_measured: failed" in report
+    unscored_or_scored = [line for line in report.splitlines() if line.startswith("| conv-r01-")]
+    assert unscored_or_scored and all("| 3 | 3 |" in line for line in unscored_or_scored)
+
+
+# 4
+def test_a_stand_in_gate_leaves_the_numbers_off_the_run_and_null_in_the_summary(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    metrics = run_of(1).data.metrics
+    for name in GATE_NUMBERS:
+        assert name not in metrics
+    assert metrics["kept"] == 1
+    gate = summaries(only_trace())["gate"]
+    for name in (*GATE_NUMBERS, "safety_passed", "failed_checks"):
+        assert gate[name] is None, name
+
+
+def test_the_real_gate_logs_its_numbers_and_kept_zero(tmp_path, mlflow_db):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "real") == 0
+    metrics = run_of(1).data.metrics
+    scores = DecisionLog(root).rounds()[0].scores
+    assert metrics["kept"] == 0
+    if scores is None:
+        assert all(name not in metrics for name in GATE_NUMBERS)
+    else:
+        assert metrics["quality_before"] == pytest.approx(scores.before.quality)
+        assert metrics["noise"] == pytest.approx(scores.noise)
+
+
+def test_a_round_without_a_gate_logs_no_gate_numbers(tmp_path, mlflow_db):
+    llm = ScriptedLLM()
+    llm.add(CriticOutput, {"found": False, "reason": "The conversations went well."})
+    run_round(scripted_deps(tmp_path, llm), policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)
+    metrics = run_of(1).data.metrics
+    assert all(name not in metrics for name in (*GATE_NUMBERS, "kept"))
+
+
+# 5
+def test_show_round_attaches_the_report_to_the_rounds_run(tmp_path, mlflow_db, capsys):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    capsys.readouterr()
+    assert show_round.main(["--root", str(root), "--mlflow", mlflow_db]) == 0
+    out = capsys.readouterr().out
+    text = report_path(root, 1).read_text()
+    assert text in out and "not attached" not in out
+    artifacts = MlflowClient(tracking_uri=mlflow_db).list_artifacts(run_of(1).info.run_id, "reports")
+    assert [a.path for a in artifacts] == ["reports/round-01.md"]
+
+
+def test_show_round_with_no_such_run_still_writes_and_prints(tmp_path, mlflow_db, capsys):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    other = f"sqlite:///{tmp_path}/other.db"
+    capsys.readouterr()
+    assert show_round.main(["--root", str(root), "--mlflow", other]) == 0
+    out = capsys.readouterr().out
+    assert report_path(root, 1).read_text() in out
+    assert len([line for line in out.splitlines() if "not attached" in line]) == 1
+    assert not (tmp_path / "other.db").exists()  # looking for the run made no tracking store
+
+
+def test_show_round_refuses_a_missing_log_or_round(tmp_path, mlflow_db, capsys):
+    assert show_round.main(["--root", str(tmp_path / "empty"), "--mlflow", mlflow_db]) == 2
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    capsys.readouterr()
+    assert show_round.main(["--root", str(root), "--round", "7", "--mlflow", mlflow_db]) == 2
+    assert len(capsys.readouterr().err.strip().splitlines()) == 1
+    bad = tmp_path / "bad"
+    (bad / "log").mkdir(parents=True)
+    (bad / "log" / "decisions.jsonl").write_text("{not json\n")
+    assert show_round.main(["--root", str(bad), "--mlflow", mlflow_db]) == 2
+    assert not (root / "reports" / "round-07.md").exists()
+
+
+# 6
+def test_build_report_writes_nothing_and_show_round_adds_only_the_report(tmp_path, mlflow_db, capsys):
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "real") == 0
+    assert fake_round(root, mlflow_db, "kept") == 0
+    before = snapshot(root)
+    build_report(root, 1)
+    build_report(root, 2)
+    assert snapshot(root) == before
+    assert show_round.main(["--root", str(root), "--round", "1", "--mlflow", mlflow_db]) == 0
+    after = snapshot(root)
+    assert set(after) - set(before) == {"reports/round-01.md"}
+    assert {k: v for k, v in after.items() if k in before} == before
+
+
+# the view never breaks a round
+def test_a_failing_mlflow_does_not_break_the_round(tmp_path, mlflow_db, monkeypatch):
+    def boom():
+        raise RuntimeError("mlflow is down")
+
+    monkeypatch.setattr(round_view.mlflow, "get_current_active_span", boom)
+    root = tmp_path / "root"
+    assert fake_round(root, mlflow_db, "kept") == 0
+    assert DecisionLog(root).rounds()[0].outcome == "kept"
+
+
+def test_with_summary_without_a_span_returns_the_result_and_lets_errors_through(tmp_path):
+    update = {"records": [], "failures": []}
+    wrapped = with_summary("converse", lambda state: update, tmp_path)
+    assert wrapped({"round": 1}) is update
+
+    def fails(state):
+        raise KeyError("inside the node")
+
+    with pytest.raises(KeyError):
+        with_summary("converse", fails, tmp_path)({"round": 1})
+
+    def interrupted(state):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        with_summary("judge", interrupted, tmp_path)({"round": 1})
+
+
+def test_a_span_not_named_after_the_node_gets_a_summary_child(tmp_path, mlflow_db):
+    wrapped = with_summary("converse", lambda state: {"records": [], "failures": []}, tmp_path)
+    with mlflow.start_span(name="outer"):
+        wrapped({"round": 1})
+    spans = {s.name: s for s in only_trace().data.spans}
+    assert spans["summary:converse"].attributes[SUMMARY_KEY]["finished"] == 0
+    assert SUMMARY_KEY not in spans["outer"].attributes
+
+
+def test_not_measured_is_null_never_zero(tmp_path):
+    judged = node_summary("judge", {"round": 1}, {"scored": [], "unscored": ["conv-r01-a"]}, tmp_path)
+    assert judged == {"scored": 0, "unscored": 1, "mean_empathy": None, "mean_relevance": None,
+                      "judge_version": None}
+
+
+# where his judge's model calls land in the trace
+class SpanningJudgeLLM:
+    """His JudgeLLM protocol, opening one MLflow span per call, as a real traced client would."""
+
+    def __init__(self, model):
+        self.model = model
+
+    def judge(self, system, user):
+        conversation = user.split("</conversation>")[0]
+        helpers = len(re.findall(r"^\d+\. helper: ", conversation, re.M))
+        with mlflow.start_span(name=f"llm:judge:{self.model}"):
+            out = JudgeOutput(empathy=3, relevance=3, emotion_before=4, emotion_after=3,
+                              strategies=["Question"] * helpers, note="A fake note.")
+        return out, 10, 5
+
+
+def test_where_the_panels_threaded_judge_calls_land(tmp_path, mlflow_db, capsys):
+    config = PanelConfig(judges=["m-a", "m-b", "m-c"], astra="m-astra")
+    panel = JudgePanel(config, [SpanningJudgeLLM(m) for m in config.judges], SpanningJudgeLLM("m-astra"))
+    llm = ScriptedLLM()
+    llm.add(CriticOutput, {"found": False, "reason": "The conversations went well."})
+    deps = scripted_deps(tmp_path, llm)
+    deps.judge_panel = panel
+    from puddles.usage import Meter, ModelPrice, Prices
+
+    deps.usage = Meter(tmp_path, Prices(models={m: ModelPrice(1.0, 1.0) for m in [*config.judges, config.astra]}))
+    state = run_round(deps, policy_path=POLICY, scenarios=SCENARIOS, max_turns=4)
+    assert state["event"].outcome == "no_pattern"
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.search_traces(return_type="list")
+    round_trace = next(t for t in traces if any(s.name == "judge" for s in t.data.spans))
+    by_id = {s.span_id: s for s in round_trace.data.spans}
+    judge_span = next(s for s in round_trace.data.spans if s.name == "judge")
+
+    def under_judge(span):
+        while span.parent_id in by_id:
+            span = by_id[span.parent_id]
+            if span is judge_span:
+                return True
+        return False
+
+    in_round = [s for s in round_trace.data.spans if s.name.startswith("llm:judge:")]
+    astra = [s for s in in_round if s.name == "llm:judge:m-astra"]
+    assert astra and all(under_judge(s) for s in astra)  # Astra runs on the node's own thread
+    elsewhere = [t for t in traces if t is not round_trace]
+    panel_spans = [s for s in in_round if s not in astra] + [
+        s for t in elsewhere for s in t.data.spans if s.name.startswith("llm:judge:m-")]
+    conversations = len(state["records"])
+    assert len(astra) == conversations and len(panel_spans) == 6 * conversations  # 3 judges, 2 calls each
+    with capsys.disabled():
+        print(f"\n[judge threads] round trace {round_trace.info.trace_id}: "
+              f"{len(astra)} Astra spans under judge, "
+              f"{len([s for s in in_round if s not in astra])} panel-judge spans in the round trace; "
+              f"{len(elsewhere)} separate traces: "
+              f"{sorted({t.info.trace_id for t in elsewhere})[:3]}...")

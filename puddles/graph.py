@@ -40,6 +40,7 @@ from puddles.round import (
     run_researcher,
     stand_in_gate,
 )
+from puddles.round_view import gate_metrics, with_summary
 from puddles.tracing import TracedClient, TracedLLM
 from puddles.usage import Meter, metering, model_name
 from schemas import ConversationRecord, GateOutcome, RoundEvent, Scenario, ScoredConversation
@@ -210,7 +211,7 @@ def build_round_graph(deps: RoundDeps):
 
     b = StateGraph(RoundState)
     for fn in (converse, judge, critic, researcher, proposer, gate, finish):
-        b.add_node(fn.__name__, fn)
+        b.add_node(fn.__name__, with_summary(fn.__name__, fn, root))
     b.add_edge(START, "converse")
     b.add_edge("converse", "judge")
     b.add_conditional_edges("judge", after_judge, ["critic", "finish"])
@@ -248,5 +249,5 @@ def run_round(deps: RoundDeps, *, policy_path: Path, scenarios: list[Scenario],
         mlflow.log_metrics({"conversations": len(state.get("records", [])),
                             "conversations_failed": len(state.get("failures", [])),
                             "conversations_unscored": len(state.get("unscored", [])),
-                            **meter.metrics()})
+                            **meter.metrics(), **gate_metrics(state)})
     return state
