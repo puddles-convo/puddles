@@ -20,11 +20,12 @@ def load(agent):
     return json.loads((CASES / f"{agent}.json").read_text())
 
 
-# Hand-written answers that meet every case's expectations, in file order.
+# Hand-written good answers that meet every case's expectations, in file order.
 CRITIC_ANSWERS = [
     {"found": True, "name": "advice-before-understanding",
      "description": "Gives a suggestion in its first reply before asking about the situation.",
-     "seen_in": 3, "out_of": 4, "example_conversation_ids": ["conv-hand-001", "conv-hand-002", "conv-hand-003"]},
+     "seen_in": 4, "out_of": 4,
+     "example_conversation_ids": ["conv-hand-001", "conv-hand-002", "conv-hand-003", "conv-hand-004"]},
     {"found": True, "name": "question-without-acknowledgement",
      "description": "Opens with a practical question and does not respond to the feeling named.",
      "seen_in": 3, "out_of": 3, "example_conversation_ids": ["conv-case-101", "conv-case-102", "conv-case-103"]},
@@ -40,9 +41,10 @@ CRITIC_ANSWERS = [
     {"found": False, "reason": "The replies reflect the feeling and ask one question; nothing clear stands out."},
 ]
 RESEARCHER_ANSWERS = [
-    {"queries": [q], "sources": [{"url": f"https://example.org/{i}", "title": "Guide",
+    {"queries": [q], "sources": [{"url": f"https://example.org/{i}", "title": "Counselling skills guide",
                                   "technique": "Reflect the feeling before asking anything practical."}]}
-    for i, q in enumerate(["counselling skills first session listening", "active listening before problem solving",
+    for i, q in enumerate(["counselling skills first session listening",
+                           "active listening before problem solving counselling",
                            "single suggestion counselling technique", "collaborative language counselling skills",
                            "reflecting feelings counselling skills"], 1)
 ]
@@ -50,11 +52,14 @@ PROPOSER_ANSWERS = [
     {"action": "add", "rule_text": "In your first reply ask one open question and suggest nothing yet, because "
                                    "advice that comes before understanding rarely fits.",
      "summary": "Add a rule to ask before suggesting."},
-    {"action": "reword", "rule_id": "C15", "rule_text": "After a short answer, reflect instead of asking again.",
-     "summary": "Shorten C15."},
-    {"action": "reword", "rule_id": "C1", "rule_text": "Begin by reflecting what the person said and ask one open "
-                                                       "question before any suggestion, because they need to feel heard.",
-     "summary": "Fold asking first into C1; unlike edit-r04 it does not ban suggestions outright."},
+    {"action": "reword", "rule_id": "C15",
+     "rule_text": "Between questions, give a short reflection, because a run of questions feels like an interview.",
+     "summary": "Shorten C15 and make it apply to every reply."},
+    # A good answer that explains itself by naming the reverted edit must still pass.
+    {"action": "reword", "rule_id": "C1",
+     "rule_text": "Begin by reflecting what the person said and ask one open question before any suggestion, "
+                  "because they need to feel heard.",
+     "summary": "Fold asking first into C1. Unlike edit-r04, which removed C5 and was reverted, this keeps C5."},
     {"action": "reword", "rule_id": "C5", "rule_text": "Offer at most one suggestion in a reply and stop there, "
                                                        "because a list is hard to follow when spoken.",
      "summary": "Make C5 a firm limit of one suggestion."},
@@ -64,6 +69,60 @@ PROPOSER_ANSWERS = [
 ]
 ANSWERS = {"critic": (CriticOutput, CRITIC_ANSWERS), "researcher": (ResearcherOutput, RESEARCHER_ANSWERS),
            "proposer": (ProposerOutput, PROPOSER_ANSWERS)}
+
+# Bad answers. Every case must reject each one (spec section 1, "every case must be able to fail").
+OFF_TOPIC_RULE = {"rule_text": "Speak slowly and clearly, because a robot voice can be hard to follow.",
+                  "summary": "Slow the speaking pace."}
+
+
+def empty_answers(agent, good):
+    if agent == "critic":
+        return [{"found": True}, {"found": False}]
+    if agent == "researcher":
+        return [{"queries": [], "sources": []}]
+    return [{"action": good["action"], "rule_id": good.get("rule_id"), "summary": ""},
+            {"action": good["action"], "rule_id": good.get("rule_id"), "rule_text": "  ", "summary": "  "},
+            {"action": "remove", "rule_id": good.get("rule_id") or "C1", "summary": ""}]
+
+
+def off_topic_answers(agent, good):
+    if agent == "critic":
+        return [{**good, "found": True, "name": "uses-clinical-jargon", "reason": "",
+                 "description": "Uses clinical terms the person would not understand."},
+                {**good, "found": True, "name": "prescribes-medication", "reason": "",
+                 "description": "Recommends medication doses to the person."}]
+    if agent == "researcher":
+        return [{"queries": ["cheap flights to lisbon in spring"],
+                 "sources": [{"url": "https://travel.example.com/lisbon", "title": "Lisbon on a budget",
+                              "technique": "Book midweek flights."}]}]
+    return [{**good, **OFF_TOPIC_RULE}]
+
+
+C3_TIMES_50 = "Ask one question at a time." * 50
+WRONG_KIND = {  # proposer: an edit of the wrong kind for each case
+    "proposer-01": [{"action": "remove", "rule_id": "C1", "summary": "Remove C1 to make the helper ask first."}],
+    "proposer-02": [
+        {"action": "add", "rule_text": "Reflect more than you ask, because questions pile up.", "summary": "Add."},
+        {"action": "reword", "rule_id": "C3", "rule_text": C3_TIMES_50, "summary": "Lengthen C3."},
+        {"action": "reword", "rule_id": "C15", "summary": "Lengthen C15 with a reflection.",
+         "rule_text": "When the person goes quiet or gives a short answer, give them room with a short reflection "
+                      "instead of a new question, and reflect often, because a run of questions can feel like an "
+                      "interview."}],
+    "proposer-03": [{"action": "remove", "rule_id": "C5", "summary": "Remove C5 again, so the helper asks first."}],
+    "proposer-04": [{"action": "add", "rule_text": "Never offer more than one suggestion, because lists confuse.",
+                     "summary": "Add a second rule against lists of suggestions."}],
+    "proposer-05": [{"action": "reword", "rule_id": "S2", "summary": "Soften S2 for medication questions.",
+                     "rule_text": "When asked about medication, say a doctor can answer, and keep listening, "
+                                  "because the feeling still matters."}],
+}
+
+
+def answer(agent, data):
+    return ANSWERS[agent][0].model_validate(data)
+
+
+def misses(agent, case, data):
+    return [line for met, line in try_agent.judge(answer(agent, data), case["expect"]) if not met]
 
 
 def scripted(agent, answers=None):
@@ -88,8 +147,8 @@ def test_every_case_validates_and_is_unsigned(agent):
     for c in cases:
         FILES[agent].model_validate(c["input"])
         expect = c["expect"]
-        assert set(expect) <= {"must_mention", "must_not_mention", "fields"}
-        assert any(expect.get(k) for k in ("must_mention", "must_not_mention", "fields")), c["case_id"]
+        assert set(expect) <= set(try_agent.EXPECT_KEYS)
+        assert any(expect.values()), c["case_id"]
         assert c["reviewed_by"] is None
         assert c["what_it_tests"].strip()
 
@@ -103,18 +162,105 @@ def test_critic_cases_cover_the_spec():
     repeats = [c for c in cases if c["expect"].get("fields", {}).get("same_as_pattern_id")]
     assert repeats and all(c["expect"]["fields"]["same_as_pattern_id"] in
                            {p["id"] for p in c["input"]["earlier_patterns"]} for c in repeats)
+    for c in cases:  # found true needs a name and description; found false needs a reason
+        needed = {"name", "description"} if c["expect"]["fields"]["found"] else {"reason"}
+        assert needed <= set(c["expect"].get("non_empty", [])), c["case_id"]
 
 
 def test_researcher_and_proposer_cases_cover_the_spec():
     assert any(c["input"].get("earlier_queries") for c in load("researcher"))
-    assert all(set(c["input"]) >= {"pattern"} for c in load("researcher"))
+    for c in load("researcher"):
+        assert {"queries", "sources"} <= set(c["expect"].get("non_empty", [])), c["case_id"]
     cases = load("proposer")
-    assert any(c["input"]["at_length_limit"] for c in cases)
     assert any(e["outcome"] == "reverted" and e["pattern_id"] == c["input"]["pattern"]["id"]
                for c in cases for e in c["input"]["earlier_edits"])
     for c in cases:  # the flag matches the policy text, as build_input would compute it
         assert c["input"]["at_length_limit"] == at_length_limit(c["input"]["policy_text"]), c["case_id"]
         parse_policy(c["input"]["policy_text"])
+    limited = [c for c in cases if c["input"]["at_length_limit"]]
+    assert limited
+    for c in limited:  # only remove or reword, and a rewording shorter than every rule it may touch
+        expect = c["expect"]
+        assert set(expect["one_of"]["action"]) <= {"remove", "reword"}
+        rules = parse_policy(c["input"]["policy_text"]).conversation
+        for rule_id in expect["one_of"]["rule_id"]:
+            assert expect["max_chars"]["rule_text"] < len(rules[rule_id])
+
+
+# Every case can fail, and a good answer that explains itself still passes.
+
+def _cases_with_good_answers(agent):
+    return list(zip(load(agent), ANSWERS[agent][1]))
+
+
+@pytest.mark.parametrize("agent", FILES)
+def test_good_answers_meet_every_expectation(agent):
+    for case, good in _cases_with_good_answers(agent):
+        assert misses(agent, case, good) == [], case["case_id"]
+
+
+@pytest.mark.parametrize("agent", FILES)
+def test_an_empty_answer_misses_every_case(agent):
+    for case, good in _cases_with_good_answers(agent):
+        for bad in empty_answers(agent, good):
+            assert misses(agent, case, bad), (case["case_id"], bad)
+
+
+@pytest.mark.parametrize("agent", FILES)
+def test_an_answer_about_something_else_misses_every_case(agent):
+    for case, good in _cases_with_good_answers(agent):
+        for bad in off_topic_answers(agent, good):
+            assert misses(agent, case, bad), (case["case_id"], bad)
+
+
+def test_an_edit_of_the_wrong_kind_misses_every_proposer_case():
+    assert set(WRONG_KIND) == {c["case_id"] for c in load("proposer")}
+    for case in load("proposer"):
+        for bad in WRONG_KIND[case["case_id"]]:
+            assert misses("proposer", case, bad), (case["case_id"], bad)
+
+
+def test_an_empty_researcher_answer_exits_1(capsys):
+    llm = scripted("researcher", [{"queries": [], "sources": []}] * 5)
+    assert run("researcher", llm=llm, search=FakeSearch({})) == 1
+    out = capsys.readouterr().out
+    assert "EMPTY non_empty queries" in out and "0 of 5 cases met their expectations" in out
+
+
+def test_lengthening_a_rule_at_the_length_limit_exits_1(capsys):
+    bad = {"action": "reword", "rule_id": "C3", "rule_text": C3_TIMES_50, "summary": "x"}
+    assert run("proposer", "--case", "proposer-02", llm=scripted("proposer", [bad])) == 1
+    out = capsys.readouterr().out
+    assert "TOO LONG max_chars.rule_text 1350 characters, limit 171" in out
+    assert 'NOT ONE OF one_of.rule_id "C3" in ["C15"]' in out
+    assert "0 of 1 cases met their expectations" in out
+
+
+def test_naming_the_reverted_edit_passes_and_repeating_it_fails(capsys):
+    assert run("proposer", "--case", "proposer-03", llm=scripted("proposer", [PROPOSER_ANSWERS[2]])) == 0
+    assert run("proposer", "--case", "proposer-03", llm=scripted("proposer", WRONG_KIND["proposer-03"])) == 1
+    assert 'NOT ONE OF one_of.action "remove" in ["add", "reword"]' in capsys.readouterr().out
+
+
+# The three expectation kinds added after the first check.
+
+def test_non_empty_one_of_and_max_chars_lines():
+    expect = {"non_empty": ["summary", "rule_text"], "one_of": {"action": ["reword"]}, "max_chars": {"rule_text": 5}}
+    lines = try_agent.judge(ProposerOutput(action="add", rule_text="too long", summary=" "), expect)
+    assert [line for met, line in lines if not met] == [
+        "EMPTY non_empty summary", 'NOT ONE OF one_of.action "add" in ["reword"]',
+        "TOO LONG max_chars.rule_text 8 characters, limit 5"]
+
+
+def test_max_chars_on_null_text_needs_an_allowed_removal():
+    removal = ProposerOutput(action="remove", rule_id="C3", summary="Remove C3.")
+    allowed = {"one_of": {"action": ["remove", "reword"]}, "max_chars": {"rule_text": 50}}
+    assert all(met for met, _ in try_agent.judge(removal, allowed))
+    not_allowed = {"one_of": {"action": ["reword"]}, "max_chars": {"rule_text": 50}}
+    assert [line for met, line in try_agent.judge(removal, not_allowed) if not met][-1].startswith("TOO LONG")
+    reword_without_text = ProposerOutput(action="reword", rule_id="C3", summary="x")
+    assert not all(met for met, _ in try_agent.judge(reword_without_text, allowed))
+    assert not all(met for met, _ in try_agent.judge(removal, {"max_chars": {"rule_text": 50}}))
 
 
 # 2. --dry-run exits 0 and prints every case ID.
@@ -149,7 +295,8 @@ def test_answers_that_meet_expectations_exit_0(agent, capsys):
     out = capsys.readouterr().out
     n = len(load(agent))
     assert f"{n} of {n} cases met their expectations" in out
-    assert "MISSING" not in out and "PRESENT" not in out and "DIFFERENT" not in out
+    for word in ("MISSING", "PRESENT", "DIFFERENT", "EMPTY", "NOT ONE OF", "TOO LONG"):
+        assert word not in out
     schema = ANSWERS[agent][0]
     assert llm.prompts[schema] == [try_agent.render(agent, FILES[agent].model_validate(c["input"]))
                                    for c in load(agent)]
@@ -165,13 +312,11 @@ def test_a_missed_must_mention_exits_1_and_says_missing(capsys):
 
 
 def test_present_and_different_lines(capsys):
-    answer = {"action": "add", "rule_text": "Never give any suggestion in the first three replies.", "summary": "x"}
-    assert run("proposer", "--case", "proposer-03", llm=scripted("proposer", [answer])) == 1
-    assert 'PRESENT must_not_mention "never give any suggestion in the first three replies"' in capsys.readouterr().out
-    assert run("proposer", "--case", "proposer-04", llm=scripted("proposer", [PROPOSER_ANSWERS[0]])) == 1
-    out = capsys.readouterr().out
-    assert 'DIFFERENT fields.rule_id expected "C5", got null' in out
-    assert 'PRESENT must_not_mention "\\"action\\":\\"add\\""' in out
+    assert run("proposer", "--case", "proposer-05", llm=scripted("proposer", WRONG_KIND["proposer-05"])) == 1
+    assert 'PRESENT must_not_mention "\\"rule_id\\":\\"S"' in capsys.readouterr().out
+    wrong_rule = {"action": "reword", "rule_id": "C6", "rule_text": "Offer one suggestion only.", "summary": "x"}
+    assert run("proposer", "--case", "proposer-04", llm=scripted("proposer", [wrong_rule])) == 1
+    assert 'DIFFERENT fields.rule_id expected "C5", got "C6"' in capsys.readouterr().out
 
 
 def test_no_retry_first_answer_is_shown_even_when_it_fails_the_agents_checks(capsys):
@@ -208,7 +353,7 @@ def test_researcher_searches_through_the_given_search():
     assert search.calls == RESEARCHER_ANSWERS[1]["queries"]
 
 
-# 4. A case file that does not validate gives 2.
+# 4. A case file that cannot be read or does not validate gives 2, with no traceback.
 
 @pytest.mark.parametrize("mutate", [
     lambda cs: cs[0]["input"].pop("conversations"),
@@ -216,6 +361,10 @@ def test_researcher_searches_through_the_given_search():
     lambda cs: cs[0].pop("reviewed_by"),
     lambda cs: cs[1].update(case_id=cs[0]["case_id"]),
     lambda cs: cs[0]["expect"].update(must_mention="conv-hand-001"),
+    lambda cs: cs[0]["expect"].update(non_empty="name"),
+    lambda cs: cs[0]["expect"].update(one_of={"found": True}),
+    lambda cs: cs[0]["expect"].update(max_chars={"name": "ten"}),
+    lambda cs: cs[0]["expect"].update(unknown_kind=[]),
 ])
 def test_a_case_file_that_does_not_validate_exits_2(mutate, tmp_path, capsys):
     cases = load("critic")
@@ -226,10 +375,18 @@ def test_a_case_file_that_does_not_validate_exits_2(mutate, tmp_path, capsys):
     assert capsys.readouterr().err.strip()
 
 
-def test_unreadable_file_wrong_agent_and_unknown_case_exit_2(tmp_path):
-    (tmp_path / "x.json").write_text("not json")
-    assert run("critic", "--dry-run", path=tmp_path / "x.json") == 2
+@pytest.mark.parametrize("content", [b"not json", b"\xff[]", b'["\xe9"]', b"[1, 2]", b"{}", b"null", b"[]"])
+def test_a_file_that_cannot_be_read_exits_2_without_a_traceback(content, tmp_path, capsys):
+    path = tmp_path / "x.json"
+    path.write_bytes(content)
+    assert run("critic", "--dry-run", path=path) == 2
+    err = capsys.readouterr().err
+    assert err.strip() and "Traceback" not in err
+
+
+def test_missing_file_wrong_agent_and_unknown_case_exit_2(tmp_path):
     assert run("critic", "--dry-run", path=tmp_path / "missing.json") == 2
+    assert run("critic", "--dry-run", path=tmp_path) == 2  # a directory
     assert run("critic", "--dry-run", path=CASES / "proposer.json") == 2
     assert run("judge", "--dry-run", path=CASES / "critic.json") == 2
     assert run("critic", "--dry-run", "--case", "critic-99") == 2

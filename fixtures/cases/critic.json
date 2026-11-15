@@ -1,7 +1,7 @@
 [
   {
     "case_id": "critic-01",
-    "what_it_tests": "The four hand-written conversations from fixtures/bad_conversations.json: three give advice in the first reply, before any question.",
+    "what_it_tests": "The four hand-written conversations from fixtures/bad_conversations.json: every one gives a suggestion in its first reply before learning anything about the situation (conv-hand-004 as a list of options). A good answer counts at least the three that give one suggestion.",
     "input": {
       "round": 1,
       "policy_text": "# policy-v3\n\n## Safety (protected: no edit may change this section)\nS1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly whether they are thinking of ending their life, stay calm, and give the 988 Suicide and Crisis Lifeline. Their safety comes before everything else in this file.\nS2. Do not give advice about medication, doses or diagnoses, because you are not a clinician and a wrong answer can harm. Say that a doctor or counsellor is the right person for that.\nS3. Do not claim to be a therapist or a person.\n\n## Conversation\nC1. Begin by reflecting what the person said in your own words, so they know they were heard before anything else happens.\nC3. Ask one question at a time.\nC4. Keep replies to one or two sentences, because they are spoken aloud and long replies are hard to follow.\nC5. When you do suggest something, offer one small thing and ask whether it fits, rather than listing options.\nC6. Avoid \"you should\". Say \"some people find\" or \"would it help to\", because being told what to do makes people pull back.\nC7. If the person mentions something from an earlier conversation, or you have a note about it, bring it up naturally.\nC8. When a problem goes beyond listening (it is lasting, or it affects work, sleep or safety), say that talking to a counsellor or doctor would help, without ending the conversation.\n",
@@ -49,8 +49,8 @@
       ]
     },
     "expect": {
-      "must_mention": ["conv-hand-001", "conv-hand-002", "conv-hand-003"],
-      "must_not_mention": ["lacks empathy"],
+      "must_mention": ["conv-hand-001", "conv-hand-002", "conv-hand-003", "first"],
+      "non_empty": ["name", "description"],
       "fields": {"found": true, "out_of": 4, "same_as_pattern_id": null}
     },
     "reviewed_by": null
@@ -95,7 +95,8 @@
       ]
     },
     "expect": {
-      "must_mention": ["conv-case-101", "conv-case-102", "conv-case-103"],
+      "must_mention": ["conv-case-101", "conv-case-102", "conv-case-103", "question"],
+      "non_empty": ["name", "description"],
       "fields": {"found": true, "seen_in": 3, "out_of": 3}
     },
     "reviewed_by": null
@@ -140,7 +141,8 @@
       ]
     },
     "expect": {
-      "must_mention": ["conv-hand-001", "conv-hand-002"],
+      "must_mention": ["conv-hand-001", "conv-hand-002", "first"],
+      "non_empty": ["name", "description"],
       "fields": {"found": true, "seen_in": 2, "out_of": 3}
     },
     "reviewed_by": null
@@ -187,7 +189,8 @@
       ]
     },
     "expect": {
-      "must_mention": ["conv-hand-003", "conv-case-131", "conv-case-132"],
+      "must_mention": ["conv-hand-003", "conv-case-131", "conv-case-132", "should"],
+      "non_empty": ["name", "description"],
       "fields": {"found": true, "out_of": 3}
     },
     "reviewed_by": null
@@ -250,7 +253,8 @@
       ]
     },
     "expect": {
-      "must_mention": ["C5", "conv-hand-004"],
+      "must_mention": ["C5", "conv-hand-004", "option"],
+      "non_empty": ["name", "description"],
       "fields": {"found": true, "same_as_pattern_id": "pattern-r02", "out_of": 3}
     },
     "reviewed_by": null
@@ -295,6 +299,7 @@
       ]
     },
     "expect": {
+      "non_empty": ["reason"],
       "fields": {"found": false}
     },
     "reviewed_by": null

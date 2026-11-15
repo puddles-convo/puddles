@@ -29,19 +29,35 @@ OUTPUTS: dict[str, type[BaseModel]] = {"critic": CriticOutput, "researcher": Res
                                        "proposer": ProposerOutput}
 SYSTEMS = {"critic": critic.SYSTEM, "researcher": researcher.SYSTEM, "proposer": proposer.SYSTEM}
 CASE_KEYS = {"case_id", "what_it_tests", "input", "expect", "reviewed_by"}
-EXPECT_KEYS = ("must_mention", "must_not_mention", "fields")
+EXPECT_KEYS = ("must_mention", "must_not_mention", "fields", "non_empty", "one_of", "max_chars")
 
 
 class CaseFileError(ValueError):
     pass
 
 
+def _check_expect(expect: Any, where: str) -> None:
+    if not isinstance(expect, dict) or not expect or set(expect) - set(EXPECT_KEYS):
+        raise CaseFileError(f"{where}: expect needs at least one of {list(EXPECT_KEYS)} and nothing else")
+    for key in ("must_mention", "must_not_mention", "non_empty"):
+        if key in expect and not (isinstance(expect[key], list) and all(isinstance(s, str) for s in expect[key])):
+            raise CaseFileError(f"{where}: expect.{key} must be a list of strings")
+    if "fields" in expect and not isinstance(expect["fields"], dict):
+        raise CaseFileError(f"{where}: expect.fields must be an object")
+    one_of = expect.get("one_of", {})
+    if not isinstance(one_of, dict) or not all(isinstance(v, list) and v for v in one_of.values()):
+        raise CaseFileError(f"{where}: expect.one_of must map each field to a non-empty list of values")
+    max_chars = expect.get("max_chars", {})
+    if not isinstance(max_chars, dict) or not all(type(n) is int and n >= 0 for n in max_chars.values()):
+        raise CaseFileError(f"{where}: expect.max_chars must map each field to a whole number of characters")
+
+
 def load_cases(agent: str, path: Path) -> list[dict[str, Any]]:
-    """Read and validate a whole case file, so a bad case stops the run before any call is made."""
-    try:
-        raw = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        raise CaseFileError(f"cannot read {path}: {e}") from e
+    """Read and validate a whole case file, so a bad case stops the run before any call is made.
+
+    Raises on anything wrong with the file; `main` turns every such failure into exit code 2.
+    """
+    raw = json.loads(path.read_bytes().decode("utf-8"))
     if not isinstance(raw, list) or not raw:
         raise CaseFileError(f"{path} must hold a non-empty JSON list of cases")
     seen: set[str] = set()
@@ -56,14 +72,7 @@ def load_cases(agent: str, path: Path) -> list[dict[str, Any]]:
         if cid in seen:
             raise CaseFileError(f"{where}: case_id {cid} is used twice")
         seen.add(cid)
-        expect = case["expect"]
-        if not isinstance(expect, dict) or not expect or set(expect) - set(EXPECT_KEYS):
-            raise CaseFileError(f"{where} ({cid}): expect needs at least one of {list(EXPECT_KEYS)} and nothing else")
-        for key in ("must_mention", "must_not_mention"):
-            if key in expect and not (isinstance(expect[key], list) and all(isinstance(s, str) for s in expect[key])):
-                raise CaseFileError(f"{where} ({cid}): expect.{key} must be a list of strings")
-        if "fields" in expect and not isinstance(expect["fields"], dict):
-            raise CaseFileError(f"{where} ({cid}): expect.fields must be an object")
+        _check_expect(case["expect"], f"{where} ({cid})")
         try:
             inp = INPUTS[agent].model_validate(case["input"])
         except ValidationError as e:
@@ -110,6 +119,23 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
         met = name in values and got == wanted
         detail = f"== {json.dumps(wanted)}" if met else f"expected {json.dumps(wanted)}, got {json.dumps(got)}"
         lines.append((met, f"{'ok' if met else 'DIFFERENT'} fields.{name} {detail}"))
+    for name in expect.get("non_empty", []):
+        got = values.get(name)
+        met = not (got is None or got == [] or (isinstance(got, str) and not got.strip()))
+        lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))
+    one_of = expect.get("one_of", {})
+    for name, allowed in one_of.items():
+        got = values.get(name, "(no such field)")
+        met = name in values and got in allowed
+        lines.append((met, f"{'ok' if met else 'NOT ONE OF'} one_of.{name} {json.dumps(got)} in {json.dumps(allowed)}"))
+    for name, limit in expect.get("max_chars", {}).items():
+        got = values.get(name)
+        if isinstance(got, str):
+            met, detail = len(got) <= limit, f"{len(got)} characters, limit {limit}"
+        else:  # null or missing meets it only for an allowed removal, which has no text
+            met = "remove" in one_of.get("action", []) and values.get("action") == "remove"
+            detail = f"{json.dumps(got)} for {json.dumps(values.get('action'))}, limit {limit}"
+        lines.append((met, f"{'ok' if met else 'TOO LONG'} max_chars.{name} {detail}"))
     return lines
 
 
@@ -135,10 +161,10 @@ def main(argv: Sequence[str] | None = None, llm: LLM | None = None,
     if args.agent not in INPUTS:
         print(f"unknown agent {args.agent!r}: choose critic, researcher or proposer", file=sys.stderr)
         return 2
-    try:
+    try:  # one boundary: whatever stops the file being read or validated is exit 2, never a traceback
         cases = load_cases(args.agent, args.case_file)
-    except CaseFileError as e:
-        print(str(e), file=sys.stderr)
+    except Exception as e:
+        print(f"cannot use {args.case_file}: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     if args.case:
         cases = [c for c in cases if c["case_id"] == args.case]

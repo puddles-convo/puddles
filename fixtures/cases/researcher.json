@@ -1,7 +1,7 @@
 [
   {
     "case_id": "researcher-01",
-    "what_it_tests": "One pattern and no earlier queries: the sources it keeps must not be forums.",
+    "what_it_tests": "One pattern and no earlier queries: it must search, keep counselling sources, and keep no forums.",
     "input": {
       "pattern": {
         "id": "pattern-r03",
@@ -10,6 +10,8 @@
       }
     },
     "expect": {
+      "non_empty": ["queries", "sources"],
+      "must_mention": ["counsel"],
       "must_not_mention": ["reddit.com", "quora.com"]
     },
     "reviewed_by": null
@@ -25,13 +27,15 @@
       },
       "earlier_queries": [
         "exploring before advising counselling skills",
-        "open questions in counselling"
+        "how to ask open questions before giving advice in counselling"
       ]
     },
     "expect": {
+      "non_empty": ["queries", "sources"],
+      "must_mention": ["counsel"],
       "must_not_mention": [
         "exploring before advising counselling skills",
-        "open questions in counselling",
+        "how to ask open questions before giving advice in counselling",
         "reddit.com",
         "quora.com"
       ]
@@ -49,13 +53,15 @@
       },
       "earlier_queries": [
         "how long should a counsellor's responses be",
-        "reflective listening techniques"
+        "reflective listening techniques for new counsellors"
       ]
     },
     "expect": {
+      "non_empty": ["queries", "sources"],
+      "must_mention": ["counsel"],
       "must_not_mention": [
         "how long should a counsellor's responses be",
-        "reflective listening techniques",
+        "reflective listening techniques for new counsellors",
         "reddit.com",
         "quora.com"
       ]
@@ -72,13 +78,15 @@
         "description": "Tells the person what they should do, with \"you should\", instead of inviting them to consider it."
       },
       "earlier_queries": [
-        "avoiding directive language in counselling"
+        "avoiding directive language when counselling clients"
       ],
       "older_queries_summary": "(3 older queries for other patterns are not shown)"
     },
     "expect": {
+      "non_empty": ["queries", "sources"],
+      "must_mention": ["counsel"],
       "must_not_mention": [
-        "avoiding directive language in counselling",
+        "avoiding directive language when counselling clients",
         "reddit.com",
         "quora.com"
       ]
@@ -99,6 +107,8 @@
       ]
     },
     "expect": {
+      "non_empty": ["queries", "sources"],
+      "must_mention": ["counsel"],
       "must_not_mention": [
         "exploring before advising counselling skills",
         "reddit.com",
