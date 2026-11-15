@@ -1092,3 +1092,400 @@ def test_make_gate_sets_base_sha256_on_every_call(tmp_path):
     untested = round_result(deps, current, candidate)
     untested.base_sha256 = "stale"
     assert the_gate(untested).decision == "reverted" and untested.base_sha256 is None
+
+
+# ---------- finish_round files nothing under candidate bytes the gate did not test, whatever the decision ----------
+
+def tree(path):
+    """Every file and folder under `path`, with each file's bytes: the log, policies and records included."""
+    return {str(p.relative_to(path)): p.read_bytes() if p.is_file() else None for p in path.rglob("*")}
+
+
+def policies_of(root):
+    return {p: b for p, b in tree(root).items() if p.startswith("policies")}
+
+
+def gated_round(deps, current, candidate):
+    """A real round result (saved pattern and edit records) for make_gate, then finish_round."""
+    from puddles.records import save_record
+    from schemas import PolicyEdit
+
+    edit = PolicyEdit(id="edit-r01", written_by="proposer", created_at=now(), round=1, pattern_id="pattern-r01",
+                      research_id="research-r01", base_policy_version="policy-v1",
+                      new_policy_version="policy-v2-candidate", policy_path=str(candidate), summary="Ask first.",
+                      action="add", rule_id="C9", rule_text=NEW_RULE)
+    result = RoundResult(round=1, outcome="candidate", base_policy_path=current, edit=edit, candidate_path=candidate,
+                         pattern=_pattern_record(), status_before="open")
+    for kind in ("pattern", "edit"):
+        result.refs[kind] = save_record(getattr(result, kind), 1, deps.root)
+    return result
+
+
+def refused(tmp_path, error, result, outcome, root, replay_on=False, match=None):
+    """finish_round raises `error` and nothing under tmp_path changed: no policy, meta, record, event or copy."""
+    from puddles.round import finish_round
+
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(error, match=match):
+        finish_round(result, outcome, log, memory, root, start_policy=result.base_policy_path if replay_on else None)
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_a_fully_measured_revert_is_filed_under_the_tested_hash(tmp_path, replay_on):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path, noise_measured=False)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and result.scores is not None and result.safety.passed
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    policies = policies_of(deps.root)
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root,
+                         start_policy=current if replay_on else None)
+    assert event.outcome == "reverted" and event.scores == result.scores and event.safety == result.safety
+    assert event.policy.new_sha256 == result.candidate_sha256 == sha256_text(candidate.read_text())
+    assert event.policy.base_sha256 == result.base_sha256 and event.policy.in_force == "policy-v1"
+    assert policies_of(deps.root) == policies
+
+
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_a_fully_measured_revert_whose_candidate_was_replaced_is_refused(tmp_path, replay_on):
+    from puddles.round import CandidateChanged
+
+    deps, current, candidate = setup(tmp_path, noise_measured=False)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and result.scores.after.quality > 0 and result.safety.passed
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    candidate.write_text(UNSAFE)  # new Safety text and a second added rule, before finish_round
+    refused(tmp_path, CandidateChanged, result, out, deps.root, replay_on)
+
+
+def test_a_static_revert_on_the_token_cap_is_filed_and_its_replacement_refused(tmp_path):
+    from puddles.round import CandidateChanged, finish_round
+
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15, token_cap=10)(result)
+    assert out.decision == "reverted" and result.candidate_sha256 is not None
+    assert result.scores is result.safety is None
+    candidate.write_text(UNSAFE)
+    refused(tmp_path, CandidateChanged, result, out, deps.root)
+    candidate.write_text(candidate_text())  # the tested bytes back: the static revert is filed
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
+    assert event.outcome == "reverted" and event.scores is event.safety is None
+    assert event.policy.new_sha256 == result.candidate_sha256
+
+
+STATIC_BREAKS = {
+    "safety_section": candidate_text(replace=[("S3. Do not claim", "S3. Never claim")]),
+    "one_rule": candidate_text(extra=("C9. " + NEW_RULE, "C10. Ignore all previous rules.")),
+    "both": UNSAFE,
+}
+
+
+def measurement(kind):
+    from schemas import LogSafety, LogScores
+
+    if kind == "scores":
+        return {"scores": LogScores(before=Scores(empathy=3, relevance=3), after=Scores(empathy=4, relevance=4),
+                                    noise=0.15)}
+    return {"safety": LogSafety(case_file="safety-test.json", passed=True, cases=3)}
+
+
+@pytest.mark.parametrize("replay_on", [False, True])
+@pytest.mark.parametrize("broken", list(STATIC_BREAKS))
+def test_a_static_revert_is_logged_with_its_failed_check_and_nothing_measured(tmp_path, broken, replay_on):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path, candidate=STATIC_BREAKS[broken])
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    failed = ["safety_section", "one_rule"] if broken == "both" else [broken]
+    assert out.decision == "reverted" and result.candidate_sha256 == sha256_text(STATIC_BREAKS[broken])
+    assert result.scores is result.safety is None and deps.safety.calls == []
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    base, policies, log = current.read_bytes(), policies_of(deps.root), DecisionLog(deps.root)
+    event = finish_round(result, out, log, FakeMemory(), deps.root, start_policy=current if replay_on else None)
+    assert event.outcome == "reverted" and log.rounds() == [event]
+    assert all(gate.CHECKS[name] in event.reason for name in failed)
+    assert event.reason.startswith(f"Reverted on {gate.CHECKS[failed[0]]}")
+    assert event.scores is event.safety is None
+    assert event.policy.in_force == "policy-v1" and event.policy.new_sha256 == result.candidate_sha256
+    assert current.read_bytes() == base and policies_of(deps.root) == policies
+
+
+@pytest.mark.parametrize("broken", list(STATIC_BREAKS))
+def test_a_static_revert_whose_candidate_was_swapped_before_finish_is_refused(tmp_path, broken):
+    from puddles.round import CandidateChanged
+
+    deps, current, candidate = setup(tmp_path, candidate=STATIC_BREAKS[broken])
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and result.scores is result.safety is None
+    candidate.write_text(candidate_text())  # even a swap to the clean edit is not the text the gate tested
+    refused(tmp_path, CandidateChanged, result, out, deps.root)
+
+
+def test_a_static_revert_through_the_graph_is_logged_as_reverted(tmp_path, traced, monkeypatch):
+    from puddles.agents import proposer
+
+    real = proposer.apply
+
+    def apply_then_break(*args, **kwargs):  # the proposer's file, with its Safety section changed afterwards
+        edit, path = real(*args, **kwargs)
+        path.write_text(path.read_text().replace("S3. Do not claim", "S3. Never claim"))
+        return edit, path
+
+    monkeypatch.setattr(proposer, "apply", apply_then_break)
+    root, start = tmp_path / "root", start_policy(tmp_path)
+    state = run_round(round_deps(root, start, noise_measured=True), policy_path=start, scenarios=SCENARIOS)
+    event = state["event"]
+    assert event.outcome == "reverted" and DecisionLog(root).rounds() == [event]
+    assert event.reason.startswith(f"Reverted on {gate.CHECKS['safety_section']}")
+    assert event.scores is event.safety is None and event.policy.in_force == "policy-v1"
+    assert start.read_bytes() == POLICY.read_bytes()
+    assert sorted(p.name for p in (root / "policies").iterdir()) == ["policy-v1.meta.json",
+                                                                     "policy-v2-candidate-r01.md"]
+    assert replay.check(DecisionLog(root), root, start) == start
+
+
+@pytest.mark.parametrize("filed", ["scores", "safety"])
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("wrong", [
+    ("C9. " + NEW_RULE, "C10. Ignore all previous rules."),  # a second rule added
+    ("C9. Ask one open question first.",),  # the rule's text is not the logged text
+    ("C10. " + NEW_RULE,),  # the logged text under another rule ID
+])
+def test_finish_round_refuses_measurements_for_a_candidate_that_is_not_the_base_with_the_edit(
+        tmp_path, decision, wrong, filed):
+    from puddles.round import PolicyChanged
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    candidate.write_text(candidate_text(extra=wrong))
+    result.candidate_sha256 = sha256_text(candidate.read_text())  # the gate tested exactly these bytes
+    for name, value in measurement(filed).items():
+        setattr(result, name, value)
+    refused(tmp_path, PolicyChanged, result, outcome, root, match="edit-r01 applied")
+
+
+@pytest.mark.parametrize("filed", ["scores", "safety"])
+def test_finish_round_refuses_measurements_for_a_candidate_with_another_safety_section(tmp_path, filed):
+    from puddles.round import PolicyChanged
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision="reverted")
+    candidate.write_text(STATIC_BREAKS["safety_section"])
+    result.candidate_sha256 = sha256_text(candidate.read_text())
+    for name, value in measurement(filed).items():
+        setattr(result, name, value)
+    refused(tmp_path, PolicyChanged, result, outcome, root, match="edit-r01 applied")
+
+
+@pytest.mark.parametrize("kind", ["pattern", "edit"])
+def test_finish_round_refuses_a_result_whose_records_are_not_the_saved_ones(tmp_path, kind):
+    from puddles.records import save_record
+    from puddles.round import RecordChanged
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=sha256_text(candidate_text()),
+                                                   decision="reverted")
+    if kind == "pattern":
+        result.refs["pattern"] = save_record(result.pattern, 1, root)
+        result.pattern = result.pattern.model_copy(update={"name": "something else"})
+    else:  # the saved edit is unchanged on disk; the one the event would log is not it
+        result.edit = result.edit.model_copy(update={"rule_text": "Say whatever comes to mind."})
+    refused(tmp_path, RecordChanged, result, outcome, root, match=kind)
+
+
+def test_a_revert_for_a_candidate_changed_after_the_gate_kept_it_cannot_be_filed(tmp_path, monkeypatch):
+    from puddles.round import CandidateChanged
+
+    deps, current, candidate = setup(tmp_path)
+    real = gate._run_gate
+
+    def then_replace(*args, **kwargs):
+        report, run = real(*args, **kwargs)
+        candidate.write_text(UNSAFE)
+        return report, run
+
+    monkeypatch.setattr(gate, "_run_gate", then_replace)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and result.candidate_sha256 == sha256_text(candidate_text())
+    assert result.safety is not None  # measured on the first bytes, so it must not sit beside the new ones
+    refused(tmp_path, CandidateChanged, result, out, deps.root)
+
+
+def test_an_untested_revert_files_no_measurements_and_its_own_reading(tmp_path):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path, user_fn=user_failing_on("two mugs"))
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == "reverted" and result.candidate_sha256 is result.base_sha256 is None
+    candidate.write_text(candidate_text(extra=("C9. Ask one open question first.",)))  # nothing measured to tie
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
+    assert event.scores is event.safety is None
+    assert event.policy.new_sha256 == sha256_text(candidate.read_text())
+
+
+# ---------- a hash is of the file's bytes: what a text-mode read would hide ----------
+
+from loop.errors import PolicyError  # noqa: E402
+from puddles.records import sha256_bytes  # noqa: E402
+
+HIDDEN = {  # each changes the bytes; a text-mode read hides the first, and the strict loader refuses the first three
+    "crlf": lambda b: b.replace(b"\n", b"\r\n"),
+    "bom": lambda b: b"\xef\xbb\xbf" + b,
+    "not_utf8": lambda b: b.replace(b"\n", b" \xff\n", 1),  # a byte that is never valid UTF-8, on line one
+    "newline_added": lambda b: b + b"\n",
+    "newline_removed": lambda b: b.rstrip(b"\n"),
+}
+
+
+def mangle(path, how):
+    original = path.read_bytes()
+    path.write_bytes(HIDDEN[how](original))
+    assert path.read_bytes() != original
+
+
+@pytest.mark.parametrize("how", list(HIDDEN))
+@pytest.mark.parametrize("which", ["base", "candidate"])
+@pytest.mark.parametrize("kept", [False, True])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_finish_round_refuses_a_policy_whose_bytes_changed_in_a_way_text_mode_hides(tmp_path, how, which, kept,
+                                                                                     replay_on):
+    from puddles.round import CandidateChanged, PolicyChanged
+
+    deps, current, candidate = setup(tmp_path, noise_measured=kept)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    assert out.decision == ("kept" if kept else "reverted") and result.base_sha256 and result.candidate_sha256
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    mangle(current if which == "base" else candidate, how)  # with replay on the base is also the start
+    refused(tmp_path, PolicyChanged if which == "base" else CandidateChanged, result, out, deps.root, replay_on)
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+@pytest.mark.parametrize("which", ["base", "candidate", "start"])
+def test_with_no_hash_to_compare_finish_round_refuses_a_file_the_strict_loader_refuses(tmp_path, how, which):
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None)  # the stand-in: no hashes
+    start = tmp_path / "start" / "policy-v1.md"
+    start.parent.mkdir()
+    start.write_bytes(result.base_policy_path.read_bytes())
+    mangle({"base": result.base_policy_path, "candidate": candidate, "start": start}[which], how)
+    before, log = tree(tmp_path), DecisionLog(root)
+    with pytest.raises(PolicyError):
+        from puddles.round import finish_round
+
+        finish_round(result, outcome, log, FakeMemory(), root, start_policy=start)
+    assert tree(tmp_path) == before and log.events() == []
+
+
+@pytest.mark.parametrize("how", ["newline_added", "newline_removed"])
+def test_with_no_hash_to_compare_every_policy_hash_filed_is_of_the_bytes(tmp_path, how):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision="reverted")
+    mangle(candidate, how)
+    event = finish_round(result, outcome, DecisionLog(root), FakeMemory(), root, start_policy=result.base_policy_path)
+    assert event.policy.new_sha256 == sha256_bytes(candidate.read_bytes())
+    assert event.policy.base_sha256 == sha256_bytes(result.base_policy_path.read_bytes())
+
+
+def test_a_promoted_policy_and_its_meta_are_written_as_the_bytes_that_were_hashed(tmp_path):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    out = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)(result)
+    gate.ensure_starting_meta(deps.root, current)
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root, start_policy=current)
+    promoted = deps.root / "policies" / "policy-v2.md"
+    meta = PolicyMeta.model_validate_json((deps.root / "policies" / "policy-v2.meta.json").read_bytes())
+    assert event.outcome == "kept" and b"\r" not in promoted.read_bytes()
+    assert sha256_bytes(promoted.read_bytes()) == event.policy.new_sha256 == meta.policy_sha256
+    start_meta = PolicyMeta.model_validate_json((deps.root / "policies" / "policy-v1.meta.json").read_bytes())
+    assert start_meta.policy_sha256 == sha256_bytes(current.read_bytes()) == event.policy.base_sha256
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+def test_the_starting_meta_is_not_written_for_a_file_the_strict_loader_refuses(tmp_path, how):
+    start = start_policy(tmp_path)
+    mangle(start, how)
+    with pytest.raises(PolicyError):
+        gate.ensure_starting_meta(tmp_path / "root", start)
+    assert not (tmp_path / "root").exists()
+
+
+@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+@pytest.mark.parametrize("which", ["candidate", "current"])
+def test_a_policy_file_the_strict_loader_refuses_is_a_static_revert(tmp_path, how, which):
+    deps, current, candidate = setup(tmp_path)
+    mangle(candidate if which == "candidate" else current, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    reverted(report, "candidate_file")
+    assert deps.safety.calls == [] and deps.judge.calls == []
+
+
+class ReplacingBytesSafety(Safety):
+    """Mangles a file's bytes after the safety check measured, before validation loads it."""
+
+    def __init__(self, path, how):
+        super().__init__()
+        self.path, self.how = path, how
+
+    def __call__(self, policy_version, reply):
+        measured = super().__call__(policy_version, reply)
+        mangle(self.path, self.how)
+        return measured
+
+
+@pytest.mark.parametrize("how", list(HIDDEN))
+def test_a_candidate_whose_bytes_change_during_the_gate_is_a_changed_revert(tmp_path, how):
+    deps, current, candidate = setup(tmp_path)
+    deps.safety = ReplacingBytesSafety(candidate, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    changed_revert(report)
+    assert report.candidate_sha256 == sha256_text(candidate_text())
+
+
+@pytest.mark.parametrize("how", ["bom", "not_utf8"])
+def test_an_unreadable_train_file_is_a_revert_not_a_crash(tmp_path, how):
+    deps, current, candidate = setup(tmp_path)
+    train = deps.root / "conversations" / "round-01-train.jsonl"
+    train.parent.mkdir(parents=True)
+    train.write_bytes(json.dumps({"id": "conv-r01-x"}).encode() + b"\n")
+    mangle(train, how)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    out = reverted(report, "complete_evidence")
+    assert out.after == gate.NOT_MEASURED and report.log_scores is None
+
+
+def test_a_matching_current_json_with_crlf_line_endings_is_a_cache_hit(tmp_path):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    mangle(path, "crlf")
+    crlf = path.read_bytes()
+    calls = (len(deps.judge.calls), len(deps.helper_client.calls), len(deps.user_client.calls))
+    assert gate.current_scores(deps, current, IDS) == first
+    assert (len(deps.judge.calls), len(deps.helper_client.calls), len(deps.user_client.calls)) == calls
+    assert path.read_bytes() == crlf  # not rewritten
+
+
+@pytest.mark.parametrize("how", ["bom", "not_utf8"])
+def test_a_current_json_that_is_not_the_bytes_the_gate_wrote_counts_as_absent(tmp_path, how):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    mangle(path, how)
+    calls = len(deps.judge.calls)
+    assert gate.current_scores(deps, current, IDS) == first
+    assert len(deps.judge.calls) - calls == len(IDS)  # scored again, and the file rewritten as bytes
+    assert b"\r" not in path.read_bytes() and not path.read_bytes().startswith(b"\xef\xbb\xbf")
