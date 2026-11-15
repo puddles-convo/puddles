@@ -262,10 +262,9 @@ def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
     if not path.exists():
         return None
     try:
-        raw = path.read_bytes().decode("utf-8")
-        if path.read_text(encoding="utf-8") != raw:  # carriage returns, or a file that moved: not what was written
-            return None
-        data = json.loads(raw)
+        # JSON, not a policy: nothing is hashed from these bytes and line endings carry no meaning,
+        # so any are accepted. A file that does not decode or parse counts as absent.
+        data = json.loads(path.read_bytes().decode("utf-8"))
         if not isinstance(data, dict) or "scores" not in data or any(name not in data for name in key):
             return None
         if any(data[name] != value for name, value in key.items()):

@@ -1467,7 +1467,19 @@ def test_an_unreadable_train_file_is_a_revert_not_a_crash(tmp_path, how):
     assert out.after == gate.NOT_MEASURED and report.log_scores is None
 
 
-@pytest.mark.parametrize("how", ["crlf", "bom", "not_utf8"])
+def test_a_matching_current_json_with_crlf_line_endings_is_a_cache_hit(tmp_path):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    mangle(path, "crlf")
+    crlf = path.read_bytes()
+    calls = (len(deps.judge.calls), len(deps.helper_client.calls), len(deps.user_client.calls))
+    assert gate.current_scores(deps, current, IDS) == first
+    assert (len(deps.judge.calls), len(deps.helper_client.calls), len(deps.user_client.calls)) == calls
+    assert path.read_bytes() == crlf  # not rewritten
+
+
+@pytest.mark.parametrize("how", ["bom", "not_utf8"])
 def test_a_current_json_that_is_not_the_bytes_the_gate_wrote_counts_as_absent(tmp_path, how):
     deps, current, _ = setup(tmp_path)
     first = gate.current_scores(deps, current, IDS)
