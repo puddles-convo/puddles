@@ -166,7 +166,7 @@ curl -s -X POST $B/sessions/sess-0007/end -H "Authorization: Bearer $T"
 
 ### The same in Python
 
-Every call handles a lost connection, a timeout, an unexpected status and an answer that is not JSON; a turn with no usable answer speaks the stored offline line. The start and turn calls time out after 35 s; the end call sets no timeout, for the reason in section 7. A start that gets `409 user_busy` is retried with a short pause for up to about a minute, then the offline line is spoken. The end call runs on its own thread, a normal (not daemon) thread kept in a table with one entry per person: the next session for that person waits for it, and `finish_all()` joins every one before the process exits or the service shuts down, so no end request is cut off. `speak` is yours: it sends the text to text-to-speech and must not print, log or trace it.
+Every call handles a lost connection, a timeout, an unexpected status and an answer that is not JSON; a turn with no usable answer speaks the stored offline line. The start and turn calls time out after 35 s; the end call sets no timeout, for the reason in section 7. A start that gets `409 user_busy` is retried with a short pause for up to about a minute, then the offline line is spoken. The end call runs on its own thread, a normal (not daemon) thread kept in a table with one entry per person: the next session for that person waits for it, and `finish_all()` joins every one before the process exits or the service shuts down, so no end request is cut off. `speak` is yours: it sends the text to text-to-speech and must not print, log or trace it. `ask_consent` is yours too: it asks the person both questions and returns their answers.
 
 ```python
 import logging
@@ -215,6 +215,8 @@ def start(user_id: str, remember_me: bool, consent_for_training: bool) -> str | 
 
 
 def turn(session_id: str, heard: str) -> dict:
+    if not heard.strip():
+        return {}  # speech-to-text heard nothing: say nothing and keep listening (section 6, 422)
     status, data = call(f"/sessions/{session_id}/turns", {"text": heard})
     log.info("turn %s: %s %s fixed=%s", session_id, status, data.get("error"), data.get("fixed_handoff_response"))
     if status == 200 and isinstance(data.get("text"), str):
@@ -245,11 +247,27 @@ def finish_all() -> None:
         thread.join()
 
 
-sid = start("user-01", remember_me=False, consent_for_training=False)  # the person's two answers, asked
-if sid:
-    for heard in ["Work has been really stressful lately.", "Some days I just want to die."]:
-        turn(sid, heard)
-    end_in_background("user-01", sid)
+def ask_consent() -> tuple[bool, bool]:
+    """Yours: ask the person both questions and return (remember_me, consent_for_training). Never assume."""
+    raise NotImplementedError
+
+
+def converse(user_id: str, heard_lines: list[str]) -> None:
+    sid: str | None = None
+    for heard in heard_lines:
+        if sid is None:  # no live session: ask both questions and start one before this turn
+            remember_me, consent_for_training = ask_consent()
+            sid = start(user_id, remember_me, consent_for_training)
+            if sid is None:
+                continue  # start spoke the offline line; this turn is not sent
+        data = turn(sid, heard)
+        if data.get("error") == "session_not_found":
+            sid = None  # the offline line was spoken; the failed turn is never sent again
+    if sid is not None:
+        end_in_background(user_id, sid)
+
+
+converse("user-01", ["Work has been really stressful lately.", "Some days I just want to die."])
 finish_all()  # in your brain: on shutdown, not after every session
 ```
 
@@ -291,7 +309,7 @@ speak: the offline line
 start returned: None
 ```
 
-The client speaks the offline line for every turn it cannot use; what to do next (start a new session, alert, retry) is in the error table in section 6. On `404 session_not_found` that means: speak the offline line for that turn, and start a new session before the next turn. (The run above predates the `user_busy` retry in `start`; that path was not part of it.)
+The client speaks the offline line for every turn it cannot use; what to do next (start a new session, alert, retry) is in the error table in section 6. On `404 session_not_found` that means: speak the offline line for that turn, drop the session ID, and before the next turn ask both consent questions again and start a new session; the failed turn is never sent again. `converse` does this. A turn whose text is empty or only whitespace is not sent and nothing is spoken. (The run above predates the `user_busy` retry in `start`, the empty-input check in `turn`, and `converse`; those paths were not part of it.)
 
 ## 5. What to do with each turn's response
 
@@ -312,10 +330,10 @@ Errors are JSON with an `error` code; none repeats what was sent.
 |---|---|---|---|
 | 401 | `unauthorized` | token missing, wrong or malformed | Do not retry. Speak the offline line, and alert: the brain's configuration is wrong. |
 | 404 | `not_found` | not one of the routes | A bug in the brain's URL. Speak the offline line, log it. |
-| 404 | `session_not_found` | the session never existed, was ended, or was ended by the idle sweep | Speak the offline line for that turn. Before the next turn, start a new session (ask the two consent questions again). |
+| 404 | `session_not_found` | the session never existed, was ended, or was ended by the idle sweep | Speak the offline line for that turn and drop the session ID. Before the next turn, start a new session (ask the two consent questions again). Never send the failed turn again. |
 | 405 | `method_not_allowed` | the HTTP method is wrong for that route | A bug in the brain's request; fix it. Speak the offline line if something must be said. |
 | 409 | `session_exists` | that `session_id` is live, or (with training consent) already on disk | Start again without `session_id`, so the service makes one. |
-| 409 | `user_busy` | this person already has a live session, or the last one is still ending | Wait for that session's end call to return, then start. An end the client never saw finish (a slow socket close, a crashed process) gives the same 409, so retry the start with a short pause for up to about a minute, then speak the offline line. The service frees the person only when that end finishes, which has no fixed limit, or, for a session no end was ever sent for, when the idle sweep ends it after 15 minutes without activity. |
+| 409 | `user_busy` | this person already has a live session, or the last one is still ending | Wait for that session's end call to return, then start. Retrying is safe: a start refused with `user_busy` made no session. An end the client never saw finish (a slow socket close, a crashed process) gives the same 409, but only while the service still holds that session; so retry the start with a short pause for up to about a minute, then speak the offline line. A session no end was sent for is released only when a sweep has finished ending it, and there is no guaranteed time for that. |
 | 422 | `invalid_request` | the body is wrong; `fields` names the fields at fault | A brain bug, except for empty text (for example speech-to-text heard nothing): say nothing and keep listening. Never fix a consent field by guessing. |
 | 429 | `too_many_sessions` | 64 sessions are live | Speak the offline line; retry the start shortly. |
 | 503 | `policy_unavailable` | the policy file cannot be read | Speak the offline line; alert. No session was made. |
@@ -332,7 +350,7 @@ Store it on the device, because with no connection nothing can be fetched.
 ## 7. Timing
 
 - **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn. The crisis checker's deadline is 5 s. Normal turns take 1 to 2 s on `gpt-6-luna` (section 8a has today's measurements).
-- **The end call needs a long timeout and must run in the background.** Ending runs the note-taker, and the note store waits up to 300 s for past.dev to confirm each note. In this morning's real runs the end calls took up to 50.3 s (a session that wrote four notes), 3.6 s and 2.3 s for two others, 1.4 to 3.3 s for the pilot sessions, and 64 ms for a session with no turns. So never give the end call the 35 s turn timeout: allow at least 300 s for each note the session may write, or no timeout at all, as the client in section 4 does, and never let the person's next turn wait on it.
+- **The end call must run in the background, with no timeout.** Ending runs the note-taker, and the note store waits up to 300 s for past.dev to confirm each note. In this morning's real runs the end calls took up to 50.3 s (a session that wrote four notes), 3.6 s and 2.3 s for two others, 1.4 to 3.3 s for the pilot sessions, and 64 ms for a session with no turns. So run the end call in the background with no timeout, as the client in section 4 does. 300 s per note is only the default budget for polling past.dev, which the polling requests themselves can run past, and it leaves out the rest of the work the end does. The same person's next session must wait until the end has finished.
 - **Next session for the same person only after the end returns.** Until then a new start for that `user_id` gets `409 user_busy`. A different person can start at once.
 - **Idle sessions** become eligible to be ended after 900 s (15 minutes) without activity, and are ended, notes and all, when the next sweep reaches them (`scripts.serve` sweeps every 30 s; endings are run one after another, so a sweep can take a while). A session with a turn running is not idle. A turn after the end gets `404 session_not_found`. A session that is already ending holds its person until the end finishes; there is no guaranteed release at 15 minutes.
 
@@ -353,9 +371,9 @@ Store it on the device, because with no connection nothing can be fetched.
 
 Each of these was seen in saved real runs on 15 November 2026 or follows from the current code, and is how today's build behaves. The denial example was seen in the persona pilot that morning (`results/persona-pilot/` on the `persona-pilot` branch; the laid-off persona with notes on, session 2, turn 6): "No. I'm not thinking about ending my life." got the fixed response because the keyword `ending my life` matched while the checker said `none`. None comes with a promise of a fix.
 
-- **A request to forget, made in the same message as a crisis disclosure, is dropped.** Since pull request #77 the robot keeps no note about a crisis: the note-taker is not shown any turn that got a fixed crisis response, neither the person's message nor the reply, and its instructions forbid notes about thoughts of suicide or self-harm, a plan or means to harm oneself or someone else, or being in danger. (Before the fix, a real run stored "They disclosed suicidal thoughts and a plan for this weekend.", and the next session's ordinary turns got the fixed crisis response.) Because the whole turn is left out, a forget request inside that same message never reaches the note-taker; one made in an ordinary turn of the same session is still acted on.
+- **A request to forget, made in a turn that got a fixed crisis response, is dropped.** Since pull request #77 the note-taker is not shown any turn that got a fixed crisis response, neither the person's message nor the reply, so a forget request inside such a turn never reaches it; the session's other turns are still shown, and a forget request in one of them is still acted on. The note-taker's instructions forbid notes about thoughts of suicide or self-harm, a plan or means to harm oneself or someone else, or being in danger, but the code does not enforce that rule on what the note-taker writes, and it does not remove crisis notes already stored. (Before the fix, a real run stored "They disclosed suicidal thoughts and a plan for this weekend.", and the next session's ordinary turns got the fixed crisis response.)
 - **"No, I'm not thinking about ending my life" gets the fixed crisis response.** The keyword check matches the phrase, and a keyword match forces the crisis response whatever the checker says.
-- **Replies can be short.** The helper's draft asks for at most 80 tokens (the default in `loop/helper.py`) and is trimmed back to its last complete sentence, so a draft that hits the limit loses its unfinished end. Since pull request #77 an abbreviation's full stop (`U.S.`, `e.g.`, `etc.`) ends a sentence only when a capital letter follows or the text ends, and a title's (`Dr.`, `Mrs.`) never does mid-text, so a reply no longer ends on a fragment such as "In the U.S.". If the draft holds no complete sentence, the incomplete reply is still returned as it is. Fixed responses go through neither step.
+- **Replies can be short.** The helper's draft asks for at most 80 tokens (the default in `loop/helper.py`) and is trimmed back to its last complete sentence, so a draft that hits the limit loses its unfinished end. Since pull request #77 an abbreviation's full stop (`U.S.`, `e.g.`, `etc.`) ends a sentence only when a capital letter follows or the text ends, and a title's (`Dr.`, `Mrs.`) never does mid-text, so the recorded draft that ended on the unfinished clause "In the U.S." now loses that clause. A reply can still end on "In the U.S." when that full stop ends the draft or is followed by a word starting with a capital letter. If the draft holds no complete sentence, the incomplete reply is still returned as it is. Fixed responses go through neither step.
 - **Latency per turn, measured over HTTP:** client wall time had a median of 1203.5 ms and a maximum of 1748 ms. Wall time minus the service's own `total` had a median of 2 ms, but that difference does not isolate the HTTP overhead.
 
 ## 9. A two-minute check before the robot is plugged in
@@ -404,7 +422,7 @@ The second turn holds `want to die`, a phrase from `safety/keywords-v1.txt`: it 
 
 - `policy_version` is that of the policy you started with (`policy-v2` with section 3's command).
 - Turn 1's `text` is the helper's own reply, not the line above, and `checker`, `helper` and `total` are real milliseconds (about 1 to 2 s in total).
-- Turn 2 is still a fixed crisis response with `fixed_handoff_response` true and `keyword_matched` true, but which one follows the checker. When it says crisis, as it did for the same kind of message in this morning's HTTP run, `risk` is `"crisis"`, `category` is `"self"`, and `text` is the fixed `self` response ("I'm really glad you told me that. ..."), not the `unsure` one shown above. The code uses the `unsure` response only when the checker gives no crisis category, as the fake checker does. `checker` is a real time, and `helper` can be `-1` or a time.
+- Turn 2 is still a fixed crisis response with `fixed_handoff_response` true and `keyword_matched` true, but which one follows the checker. When it says crisis, as it did for the same kind of message in this morning's HTTP run, `risk` is `"crisis"`, `category` is `"self"`, and `text` is the fixed `self` response ("I'm really glad you told me that. ..."), not the `unsure` one shown above. With a keyword match, a check that answered crisis picks the response for its category (`self`, `danger` or `unsure`); a check that answered anything else, or gave no usable answer, picks `unsure`, as the fake checker's `none` does, and when the check did not answer, `risk` and `category` are `null`. `checker` is a real time, and `helper` can be `-1` or a time.
 - The health check, the `401`, the start, the end and the final `404` look the same.
 
 Then run the Python client from section 4 against it with your `speak`: it should speak the helper's reply, then the crisis response, and log `end ...: 200`. Stop the service with Ctrl-C.
