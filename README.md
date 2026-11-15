@@ -4,7 +4,7 @@ A support-conversation helper that improves its own behaviour, built at the SF A
 
 The helper listens, reflects, asks questions, suggests coping techniques and points people to professional help. It does not diagnose or treat.
 
-**Status:** this README is the agreed design. No pipeline code is in this repo yet. Scores, counts and sources in the examples are illustrative.
+**Status:** this README is the agreed design. The memory layer and the critic, researcher and proposer (steps 4 to 6) are in [`puddles/`](puddles/); see [Running the training agents](#running-the-training-agents). The rest of the pipeline is not built yet. Scores, counts and sources in the examples are illustrative.
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
 - The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
@@ -25,6 +25,7 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 8. [How training and inference connect](#8-how-training-and-inference-connect)
 9. [Data](#9-data)
 10. [Robot side](#10-robot-side)
+- [Running the training agents](#running-the-training-agents)
 
 ## 1. Training steps
 
@@ -241,6 +242,28 @@ Every entry, in either past.dev memory, has the same shape:
 | `identity` | The agent that produced it: `critic`, `researcher`, `proposer`, `gatekeeper` or `note-taker`. |
 | `audience` | Who may read it: `training-agents`, or one person's private audience. |
 | `metadata` | The item type, the round, and a pointer to the full record file with its hash. |
+
+### What past.dev holds and what the repo holds
+
+| Kept in the repo (the authority) | Copied into past.dev, audience `training-agents` |
+|---|---|
+| `log/decisions.jsonl`: one `round` event per round, plus a `memory_copy` event per copy | Nothing from the log itself, only the records it points to |
+| `records/round-NN/pattern-rNN.json`, written by the critic | One sentence per failure pattern, identity `critic` |
+| `records/round-NN/research-rNN.json`, written by the researcher, plus the raw Exa results beside it | One sentence per research note: technique and source URL, identity `researcher` |
+| `records/round-NN/edit-rNN.json` and `policies/policy-vN-candidate.md`, written by the proposer | One sentence per edit: action, rule ID and summary, identity `proposer` |
+| `records/round-NN/gate-rNN.json` and the promoted `policies/policy-vN.md` | One sentence per outcome: kept or reverted and why, identity `gatekeeper` |
+| `log/memory_reads.jsonl`: which agent recalled which record IDs | Nothing |
+| Conversations, scores, the simulated user's scenarios and the policy text | Nothing |
+
+Each copy goes in only after the round is in the log, and is polled until past.dev reports it `completed`; a copy still processing after 60 s is logged `pending` and resent at the start of the next round. A recall only tells an agent which record IDs are relevant: the agent loads those records from their files and drops any whose hash does not match the log. The simulated user, the helper and the judge never get a past.dev client.
+
+Who reads what, in [`puddles/agents/`](puddles/agents/):
+
+| Agent | Reads from memory | Written by |
+|---|---|---|
+| Critic | Earlier patterns and their outcomes | Critic, gatekeeper |
+| Researcher | Earlier research notes and their queries | Researcher |
+| Proposer | Why earlier edits were kept or reverted | Gatekeeper |
 
 ### Who is in control
 
@@ -484,6 +507,33 @@ These run with the stock model first, so that the merge changes nothing but conf
 - Latency: median and p95 from end of speech to first sound, recorded.
 
 Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
+
+## Running the training agents
+
+Python 3.10 or later. Keys come from the environment and are never committed.
+
+```bash
+pip install -r requirements.txt
+python -m pytest                                   # offline: scripted model, Exa and memory
+PAST_API_KEY=past_sk_... python -m scripts.pastdev_smoke   # task B1: write one record and read it back
+```
+
+A live round needs `PAST_API_KEY`, `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL` and `EXA_API_KEY`. Until the gatekeeper (J7) exists, `--gate` picks a stand-in outcome, which the log and memory label as a stand-in. Use a separate past.dev project for these runs so they stay out of the team's memory.
+
+```bash
+python -m scripts.run_round --root runs/demo --gate reverted   # round 1, on fixtures/bad_conversations.json
+python -m scripts.run_round --root runs/demo --gate kept       # round 2 recalls round 1
+```
+
+Each run ends by printing, for every record, the agent that wrote it and the agents that later read it from memory. [`tests/test_memory_wiring.py`](tests/test_memory_wiring.py) checks the same thing over two rounds offline.
+
+| Module | What it does |
+|---|---|
+| `puddles/memory.py` | past.dev client (ingest, poll, recall, audience setup), memory sentences, recall to verified records |
+| `puddles/agents/critic.py`, `researcher.py`, `proposer.py` | Build each input from the log and memory, call the model, check the output, retry once, make the record |
+| `puddles/policy.py` | Parse the policy and apply one edit in code; the Safety section is never touched |
+| `puddles/decision_log.py` | A minimal reader and appender for the log until A5 (#13) lands |
+| `puddles/round.py` | Steps 4 to 6 with direct handoffs, then the log entry and the copies into memory |
 
 ## Limits
 
