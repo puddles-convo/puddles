@@ -32,6 +32,8 @@ Hand-written cases for tuning the three training agents' prompts (stage 2, lane 
 - The answer's JSON is the compact form (`model_dump_json()`), so a phrase such as `"rule_id":"S` has no spaces.
 - `fields` compares a top-level field of the answer exactly; `null` matches a field that is empty.
 - `non_empty`: each field must be there and not be null, `""`, spaces or `[]` (printed `EMPTY` otherwise). `one_of`: the field's value must be in the list (`NOT ONE OF`). `max_chars`: the field must be text of at most that many characters (`TOO LONG`); null text meets it only when `one_of` allows `remove` and the answer is a removal.
+- Blank means null, empty or spaces; a list or object is blank when everything in it is blank, so `["  "]` is as empty as `[]`. Every proposer case lists `rule_text` in `non_empty`; for an answer that removes a rule, in a case whose `one_of` allows `remove`, that line is not applied.
+- **A case whose expectations cannot fail does not load** (exit code 2): an empty list or object under any key, or a blank phrase or field name anywhere in `expect`, is refused even when other checks in the same case are real.
 - **Every case must be able to fail.** An empty answer, an answer about something else, and for the proposer an edit of the wrong kind each miss at least one expectation; `tests/test_try_agent.py` checks this for every case. A `must_not_mention` names something harmful to say (a forum as a source, an edit to an S rule, an earlier query run again), never a phrase a good answer might quote.
 
 ### What a reviewer should look at first

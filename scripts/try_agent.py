@@ -36,9 +36,38 @@ class CaseFileError(ValueError):
     pass
 
 
+def blank(value: Any) -> bool:
+    """Null, empty or spaces; a list or object is blank when everything in it is blank."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, list):
+        return all(blank(v) for v in value)
+    if isinstance(value, dict):
+        return all(blank(v) for v in value.values())
+    return False
+
+
+def _vacuous(expect: dict[str, Any]) -> list[str]:
+    """Entries that could never reject an answer: an empty list or object under any key, a blank phrase or field."""
+    found = []
+    for key, value in expect.items():
+        if isinstance(value, (list, dict)) and not value:
+            found.append(f"expect.{key} is empty")
+        elif isinstance(value, list):
+            found += [f"expect.{key} holds a blank entry" for v in value if isinstance(v, str) and not v.strip()][:1]
+        elif isinstance(value, dict):
+            found += [f"expect.{key} names a blank field" for k in value if not k.strip()][:1]
+    return found
+
+
 def _check_expect(expect: Any, where: str) -> None:
+    """One check of the whole expect: every entry can reject an answer, so the case can fail."""
     if not isinstance(expect, dict) or not expect or set(expect) - set(EXPECT_KEYS):
         raise CaseFileError(f"{where}: expect needs at least one of {list(EXPECT_KEYS)} and nothing else")
+    if vacuous := _vacuous(expect):
+        raise CaseFileError(f"{where}: an expectation that cannot fail: {'; '.join(vacuous)}")
     for key in ("must_mention", "must_not_mention", "non_empty"):
         if key in expect and not (isinstance(expect[key], list) and all(isinstance(s, str) for s in expect[key])):
             raise CaseFileError(f"{where}: expect.{key} must be a list of strings")
@@ -119,11 +148,14 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
         met = name in values and got == wanted
         detail = f"== {json.dumps(wanted)}" if met else f"expected {json.dumps(wanted)}, got {json.dumps(got)}"
         lines.append((met, f"{'ok' if met else 'DIFFERENT'} fields.{name} {detail}"))
-    for name in expect.get("non_empty", []):
-        got = values.get(name)
-        met = not (got is None or got == [] or (isinstance(got, str) and not got.strip()))
-        lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))
     one_of = expect.get("one_of", {})
+    allowed_removal = "remove" in one_of.get("action", []) and values.get("action") == "remove"
+    for name in expect.get("non_empty", []):
+        if name == "rule_text" and allowed_removal:  # a removal has no replacement text
+            lines.append((True, f"ok non_empty {name} (not applied to a removal)"))
+            continue
+        met = name in values and not blank(values[name])
+        lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))
     for name, allowed in one_of.items():
         got = values.get(name, "(no such field)")
         met = name in values and got in allowed
@@ -133,7 +165,7 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
         if isinstance(got, str):
             met, detail = len(got) <= limit, f"{len(got)} characters, limit {limit}"
         else:  # null or missing meets it only for an allowed removal, which has no text
-            met = "remove" in one_of.get("action", []) and values.get("action") == "remove"
+            met = allowed_removal
             detail = f"{json.dumps(got)} for {json.dumps(values.get('action'))}, limit {limit}"
         lines.append((met, f"{'ok' if met else 'TOO LONG'} max_chars.{name} {detail}"))
     return lines

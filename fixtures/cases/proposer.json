@@ -58,7 +58,7 @@
     "expect": {
       "one_of": {"action": ["remove", "reword"], "rule_id": ["C15"]},
       "max_chars": {"rule_text": 171},
-      "non_empty": ["summary"],
+      "non_empty": ["rule_text", "summary"],
       "must_mention": ["reflect"]
     },
     "reviewed_by": null
@@ -126,7 +126,7 @@
     "expect": {
       "one_of": {"action": ["reword", "remove"]},
       "fields": {"rule_id": "C5"},
-      "non_empty": ["summary"],
+      "non_empty": ["rule_text", "summary"],
       "must_mention": ["suggest"]
     },
     "reviewed_by": null

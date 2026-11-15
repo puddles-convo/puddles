@@ -77,9 +77,10 @@ OFF_TOPIC_RULE = {"rule_text": "Speak slowly and clearly, because a robot voice 
 
 def empty_answers(agent, good):
     if agent == "critic":
-        return [{"found": True}, {"found": False}]
+        return [{"found": True}, {"found": False}, {**good, "name": "  ", "description": "", "reason": " "}]
     if agent == "researcher":
-        return [{"queries": [], "sources": []}]
+        return [{"queries": [], "sources": []},
+                {"queries": ["  "], "sources": [{"url": " ", "title": "", "technique": "  "}]}]
     return [{"action": good["action"], "rule_id": good.get("rule_id"), "summary": ""},
             {"action": good["action"], "rule_id": good.get("rule_id"), "rule_text": "  ", "summary": "  "},
             {"action": "remove", "rule_id": good.get("rule_id") or "C1", "summary": ""}]
@@ -240,6 +241,87 @@ def test_naming_the_reverted_edit_passes_and_repeating_it_fails(capsys):
     assert run("proposer", "--case", "proposer-03", llm=scripted("proposer", [PROPOSER_ANSWERS[2]])) == 0
     assert run("proposer", "--case", "proposer-03", llm=scripted("proposer", WRONG_KIND["proposer-03"])) == 1
     assert 'NOT ONE OF one_of.action "remove" in ["add", "reword"]' in capsys.readouterr().out
+
+
+# Second check: blank replacement text, and expectations that cannot fail.
+
+@pytest.mark.parametrize("case_id, bad", [
+    ("proposer-02", {"action": "reword", "rule_id": "C15", "rule_text": "",
+                     "summary": "Shorten C15 so the helper uses reflections."}),
+    ("proposer-02", {"action": "reword", "rule_id": "C15", "rule_text": "   ",
+                     "summary": "Shorten C15 so the helper uses reflections."}),
+    ("proposer-04", {"action": "reword", "rule_id": "C5", "rule_text": None,
+                     "summary": "Tighten the limit to one suggestion per reply."}),
+    ("proposer-04", {"action": "reword", "rule_id": "C5", "rule_text": " \t ",
+                     "summary": "Tighten the limit to one suggestion per reply."}),
+])
+def test_a_blank_rewording_exits_1(case_id, bad, capsys):
+    assert run("proposer", "--case", case_id, llm=scripted("proposer", [bad])) == 1
+    out = capsys.readouterr().out
+    assert "EMPTY non_empty rule_text" in out and "0 of 1 cases met their expectations" in out
+
+
+@pytest.mark.parametrize("text", [None, "", "   "])
+def test_every_proposer_case_rejects_blank_text_for_add_and_reword(text):
+    for case, good in _cases_with_good_answers("proposer"):
+        for action in set(case["expect"]["one_of"]["action"]) - {"remove"}:
+            bad = {**good, "action": action, "rule_id": None if action == "add" else good.get("rule_id") or "C1",
+                   "rule_text": text}
+            assert "EMPTY non_empty rule_text" in misses("proposer", case, bad), (case["case_id"], action)
+
+
+@pytest.mark.parametrize("case_id, removal", [
+    ("proposer-02", {"action": "remove", "rule_id": "C15", "summary": "Remove C15; C3 and reflections cover it."}),
+    ("proposer-04", {"action": "remove", "rule_id": "C5", "summary": "Remove C5, whose wording invites suggestions."}),
+])
+def test_an_allowed_removal_needs_no_rule_text(case_id, removal):
+    case = next(c for c in load("proposer") if c["case_id"] == case_id)
+    assert misses("proposer", case, removal) == []
+
+
+def test_a_removal_where_none_is_allowed_still_needs_rule_text():
+    case = load("proposer")[0]
+    removal = {"action": "remove", "rule_id": "C1", "summary": "x"}
+    assert "EMPTY non_empty rule_text" in misses("proposer", case, removal)
+
+
+def test_blank_critic_and_researcher_fields_are_empty():
+    lines = misses("critic", load("critic")[0], {**CRITIC_ANSWERS[0], "name": "  ", "description": ""})
+    assert "EMPTY non_empty name" in lines and "EMPTY non_empty description" in lines
+    lines = misses("critic", load("critic")[5], {"found": False, "reason": "   "})
+    assert "EMPTY non_empty reason" in lines
+    blank_research = {"queries": ["  ", ""], "sources": [{"url": " ", "title": "", "technique": "  "}]}
+    lines = misses("researcher", load("researcher")[0], blank_research)
+    assert "EMPTY non_empty queries" in lines and "EMPTY non_empty sources" in lines
+
+
+@pytest.mark.parametrize("value, is_blank", [
+    (None, True), ("", True), (" \n", True), ([], True), (["", " "], True), ({}, True), ({"a": " ", "b": None}, True),
+    ([{"url": " ", "technique": ""}], True), ("x", False), ([" ", "x"], False), (0, False), (False, False),
+])
+def test_blank(value, is_blank):
+    assert try_agent.blank(value) is is_blank
+
+
+@pytest.mark.parametrize("expect", [
+    {"must_mention": []}, {"must_not_mention": []}, {"non_empty": []}, {"fields": {}}, {"one_of": {}},
+    {"max_chars": {}}, {"must_mention": [""]}, {"must_mention": ["   "]}, {"must_not_mention": [" "]},
+    {"non_empty": [""]}, {"non_empty": ["name", " "]}, {"one_of": {"action": []}}, {"one_of": {" ": ["x"]}},
+    {"max_chars": {"": 10}}, {"fields": {" ": True}},
+    {"fields": {"found": False}, "must_mention": []},  # one real check does not excuse a vacuous one
+    {"fields": {"found": False}, "must_mention": ["conv-hand-001", ""]},
+])
+def test_an_expectation_that_cannot_fail_exits_2(expect, tmp_path, capsys):
+    cases = load("critic")
+    cases[5]["expect"] = expect
+    path = tmp_path / "vacuous.json"
+    path.write_text(json.dumps(cases))
+    llm = scripted("critic", [CriticOutput(found=False)] * 6)
+    assert run("critic", path=path, llm=llm) == 2
+    assert run("critic", "--dry-run", path=path) == 2
+    err = capsys.readouterr().err
+    assert err.strip() and "Traceback" not in err
+    assert llm.prompts[CriticOutput] == []  # refused before any call
 
 
 # The three expectation kinds added after the first check.
