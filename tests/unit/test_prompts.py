@@ -82,3 +82,15 @@ def test_simulated_user_messages_start_with_begin_and_swap_roles():
         {"role": "user", "content": "h1"},
         {"role": "assistant", "content": "u2"},
     ]
+
+
+def test_helper_prompt_guides_state_aim_and_boundaries():
+    """The live helper reads the person's state, picks one aim, and keeps to its limits."""
+    text = render_helper_system(POLICY)
+    for phrase in ("main feeling", "rising, steady or easing", "Heard:", "Steadier:", "Understood:",
+                   "Next step:", "go back to an earlier aim", "Never diagnose",
+                   "follow the Safety section of the policy", "the policy wins", "at most about 40 words"):
+        assert phrase in text
+    # The guidance comes before the policy, and the helper is never told a risk level.
+    assert text.index("Heard:") < text.index("<policy ")
+    assert "risk" not in text.lower() and "crisis" not in text.lower()
