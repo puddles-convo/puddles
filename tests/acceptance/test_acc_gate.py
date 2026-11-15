@@ -569,32 +569,110 @@ def test_one_helperless_conversation_cannot_hide_among_measured_ones(case, monke
 
 
 @pytest.mark.parametrize("with_replay", [False, True])
-def test_infinite_noise_cannot_leave_an_unreadable_round_log(case, with_replay):
-    """A failed gain check must not poison the root with a non-round-trippable event."""
+@pytest.mark.parametrize("noise", [float("inf"), float("-inf"), float("nan"), -1.0],
+                         ids=["inf", "negative-inf", "nan", "negative"])
+def test_infinite_noise_cannot_leave_an_unreadable_round_log(case, with_replay, noise):
+    """Every invalid noise is refused before measurement, and a later round still finishes."""
     case.deps.noise_measured = True
     ensure_starting_meta(case.root, case.base)
     result = candidate_result(case)
     for kind in ("pattern", "edit"):
         result.refs[kind] = save_record(getattr(result, kind), result.round, case.root)
-    adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=float("inf"))
+    adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=noise)
     outcome = adapter(result)
-    assert outcome.decision == "reverted"
+    assert outcome.decision == "reverted" and not adapter.last_report.would_keep
+    assert adapter.last_report.failed == ["complete_evidence"]
+    assert "noise" in outcome.reason.lower() and "candidate was not tested" in outcome.reason.lower()
+    assert outcome.before == outcome.after == NOT_MEASURED
+    assert adapter.last_report.log_scores is result.scores is result.safety is None
+    assert not case.deps.judge.calls and not case.deps.safety.calls
+    assert not case.deps.helper_client.calls and not case.deps.user_client.calls
+    assert not (case.root / "scores/current.json").exists()
     memory, log = FakeMemory(), DecisionLog(case.root)
     memory.ensure_training_audience()
-    before = tree_snapshot(case.root)
-    error = None
-    try:
-        event = round_api.finish_round(result, outcome, log, memory, case.root,
-                                       start_policy=case.base if with_replay else None)
-    except Exception as exc:
-        error = exc
-    # Either refuse before writing, or file a readable reverted event. A later round must work.
-    rounds = log.rounds()
-    if error is not None:
-        assert tree_snapshot(case.root) == before, f"Refusal left partial writes: {error}"
-    else:
-        assert rounds == [event] and event.outcome == "reverted" and log.next_round() == 4
+    event = round_api.finish_round(result, outcome, log, memory, case.root,
+                                   start_policy=case.base if with_replay else None)
+    assert log.rounds() == [event] and event.outcome == "reverted" and log.next_round() == 4
+    assert event.scores is event.safety is None
     assert replay.check(log, case.root, case.base) == case.base
+    next_result = candidate_result(case, round_=4)
+    # Even a rejected add reserves its rule ID: the next genuine proposal must use C4.
+    next_result.candidate_path = write_policy(
+        case.root / "policies/policy-v3-candidate.md", "policy-v3-candidate",
+        BASE_RULES + ADDED_RULE.replace("C3.", "C4."))
+    next_result.edit = next_result.edit.model_copy(update={
+        "rule_id": "C4", "new_policy_version": "policy-v3-candidate",
+        "policy_path": str(next_result.candidate_path.relative_to(case.root)),
+    })
+    for kind in ("pattern", "edit"):
+        next_result.refs[kind] = save_record(getattr(next_result, kind), 4, case.root)
+    next_adapter = make_gate(case.deps, validation_scenario_ids=["a", "b", "c"], noise=0.1)
+    next_outcome = next_adapter(next_result)
+    next_event = round_api.finish_round(next_result, next_outcome, log, memory, case.root,
+                                        start_policy=case.base if with_replay else None)
+    assert [r.round for r in log.rounds()] == [3, 4] and next_event.outcome == "reverted"
+    assert "quality_gain" in next_adapter.last_report.failed and log.next_round() == 5
+    assert replay.check(log, case.root, case.base) == case.base
+
+
+@pytest.mark.parametrize("noise", [float("inf"), float("-inf"), float("nan"), -1.0])
+def test_invalid_noise_in_run_gate_is_refused_before_any_measurement(case, noise):
+    case.deps.noise_measured = True
+    # GateInput itself refuses negative/NaN; exercise the public function's same guard too.
+    inp = case.inp.model_copy(update={"noise": noise})
+    report = run_gate(inp, case.deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert report.log_scores is report.log_safety is None and report.outcome.after == NOT_MEASURED
+    assert "noise" in report.outcome.reason.lower()
+    assert not case.deps.judge.calls and not case.deps.safety.calls
+    assert not case.deps.helper_client.calls and not case.deps.user_client.calls
+    assert report.candidate_sha256 is None
+    assert_report(report, case.root)
+
+
+@pytest.mark.parametrize("api", ["run_gate", "make_gate_finish"])
+@pytest.mark.parametrize("field", ["empathy", "relevance", "quality", "emotion_change"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_baseline_fields_are_not_written_or_handed_on(case, api, field, value):
+    case.deps.noise_measured = True
+    before = Scores(empathy=3, relevance=3, quality=3, emotion_change=1).model_copy(update={field: value})
+    case.inp.current_scores = before
+    checked = rejected_followup(case, api, cached_before=before)
+    report = checked.report
+    if api == "run_gate":
+        assert report.failed == ["complete_evidence"] and report.log_scores is None
+    else:
+        assert report.failed == ["quality_gain"] and len(case.deps.judge.calls) == 6
+        assert report.log_scores.before.quality == report.log_scores.after.quality == 4
+    # Strict JSON rendering must preserve the actual numbers, without converting NaN/inf to null.
+    for model in (report.outcome, report.log_scores, report.log_safety, checked.event):
+        if model is not None:
+            json.dumps(model.model_dump(mode="python"), default=str, allow_nan=False)
+
+
+@pytest.mark.parametrize("field", ["empathy", "relevance", "emotion_before", "emotion_after"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_judge_record_cannot_be_filed_as_complete_evidence(case, field, value):
+    """A typed but mutable judge result must not bypass the rule at the score-file write."""
+    class NonfiniteJudge(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            if record.scenario_id == "b":
+                setattr(answer.score, field, value)
+            return answer
+
+    case.deps.judge = NonfiniteJudge()
+    try:
+        evidence = score_policy(case.deps, case.candidate, ["a", "b", "c"], 3, VALIDATION_TAG)
+    except GateError:
+        pass  # A refusal before saving is also safe; the gate converts it to an unmeasured revert.
+    else:
+        assert not evidence.complete and evidence.scores is None
+    path = case.root / "scores/round-03-validation.jsonl"
+    if path.exists():
+        for raw in rows(path):
+            ScoreRecord.model_validate(raw)
+            json.dumps(raw, allow_nan=False)
 
 
 # 1. Runner: training/validation identity separation, with legacy IDs preserved.
