@@ -50,6 +50,19 @@ def blank(value: Any) -> bool:
     return False
 
 
+def blank_answer(value: Any) -> bool:
+    """`blank`, on an answer's values as the output model defines them: a model is blank when any field the
+    model requires (no default) is blank, at any depth; a field with a default is never looked at, since its
+    owner made it optional, whether the answer gave it or not (case-files.md, section 1). So a source whose
+    `quote` or `title` is "" is not blank, and one whose `url` or `technique` is "" is."""
+    if isinstance(value, BaseModel):
+        return any(blank_answer(getattr(value, name))
+                   for name, info in type(value).model_fields.items() if info.is_required())
+    if isinstance(value, (list, tuple)):
+        return not value or any(blank_answer(v) for v in value)
+    return blank(value)
+
+
 def _not_applied(name: str, values: dict[str, Any], allowed_removal: bool) -> Optional[str]:
     """Why a non_empty line does not apply to this answer, or None when it does."""
     # A removal has no replacement text. Only null or "" count as none: the proposer's check and apply_edit
@@ -148,9 +161,6 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
     """One (met, line) per expectation."""
     text = answer.model_dump_json().lower()
     values = answer.model_dump(mode="json")
-    # The blank test is on the answer as the model gave it, at every depth: an optional field it left out
-    # and the model filled with its default is not there to be empty (case-files.md, section 1).
-    given = answer.model_dump(mode="json", exclude_unset=True)
     lines = []
     for phrase in expect.get("must_mention", []):
         met = phrase.lower() in text
@@ -169,7 +179,8 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
         if why := _not_applied(name, values, allowed_removal):
             lines.append((True, f"ok non_empty {name} ({why})"))
             continue
-        met = name in given and not blank(given[name])  # a field named here must still be given
+        # A field named here must be there and not blank, optional or not; below it, only required fields count.
+        met = name in type(answer).model_fields and not blank_answer(getattr(answer, name))
         lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))
     for name, allowed in one_of.items():
         got = values.get(name, "(no such field)")
