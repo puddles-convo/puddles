@@ -148,7 +148,8 @@ def extras_for(record: Record, log: DecisionLog, root: Path) -> dict:
         edit = load_record(ref, PolicyEdit, root) if ref else None
         event = next((r for r in log.rounds() if r.round == record.round), None)
         return {"rule_id": edit.rule_id if edit else None, "summary": edit.summary if edit else "",
-                "noise": event.scores.noise if event and event.scores else None}
+                "noise": event.scores.noise if event and event.scores else None,
+                "safety_cases": event.safety.cases if event and event.safety else None}
     return {}
 
 

@@ -34,7 +34,8 @@ def test_parse_skips_unrated_rows_and_keeps_helper_strategies():
 
 def test_kept_edit_is_replay_valid_and_reverted_one_leaves_policy(tmp_path):
     train = dataset("train", 120, low_without_reassurance=True)
-    lines = run(tmp_path, START, 3, 0, FakeMemory(), train, dataset("validation", 60, True))
+    memory = FakeMemory()
+    lines = run(tmp_path, START, 3, 0, memory, train, dataset("validation", 60, True))
     log = DecisionLog(tmp_path)
     rounds = log.rounds()
     assert rounds[0].outcome == "kept" and rounds[0].pattern.name == "no-reassurance"
@@ -44,6 +45,8 @@ def test_kept_edit_is_replay_valid_and_reverted_one_leaves_policy(tmp_path):
     assert "C9." in (tmp_path / "policies" / "policy-v2.md").read_text()
     assert all(r.pattern is None or r.pattern.name != "no-reassurance" for r in rounds[1:])
     assert len(lines) == len(rounds)
+    kept = memory.entries["gate-r01"].content
+    assert "All safety cases passed" not in kept and "No conversations or safety cases were run" in kept
 
     flat = tmp_path / "flat"
     run(flat, START, 1, 0, FakeMemory(), train, dataset("validation", 60, False))
