@@ -261,6 +261,11 @@ def read_policy_text(path: Path, expected_sha256: Optional[str] = None,
     return text
 
 
+def gate_report_path(root: Path, round_: int) -> Path:
+    """The report `puddles.gate.make_gate` writes for every round it is called on."""
+    return Path(root) / "scores" / f"round-{round_:02d}-gate.json"
+
+
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
                  root: Path, start_policy: Optional[Path] = None, scores: Optional[LogScores] = None,
                  safety: Optional[LogSafety] = None) -> RoundEvent:
@@ -283,13 +288,21 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     `scores` and `safety` are for a caller with a gate of its own (scripts/dataset_rounds.py). A
     round that went through `make_gate` (any of `result.scores`, `result.safety`,
     `result.base_sha256`, `result.candidate_sha256` set) refuses them with ValueError before
-    anything is read or written. Otherwise they go into the event exactly as given; finish_round
+    anything is read or written. So does a round whose `<root>/scores/round-NN-gate.json` exists,
+    whatever the four fields hold: `make_gate` writes that file on every return, so clearing the
+    fields does not make a gated round ungated (a caller that deletes the file has gone beyond
+    what one process can check). Otherwise they go into the event exactly as given; finish_round
     does not tie them to any file's contents, and the caller answers for them.
     """
     gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
-    if gated and (scores is not None or safety is not None):
-        raise ValueError(f"round {result.round} went through the gate; its measurements cannot be replaced by "
-                         "the caller's scores or safety; nothing was written")
+    if scores is not None or safety is not None:
+        if gated:
+            raise ValueError(f"round {result.round} went through the gate; its measurements cannot be replaced "
+                             "by the caller's scores or safety; nothing was written")
+        report = gate_report_path(root, result.round)
+        if report.exists():
+            raise ValueError(f"the real gate ran for round {result.round} ({report} exists); its measurements "
+                             "cannot be replaced by the caller's scores or safety; nothing was written")
     # ---- read each file once, as its bytes, and check what was measured against those bytes ----
     base_text = read_policy_text(
         result.base_policy_path, result.base_sha256 if gate is not None else None,

@@ -148,6 +148,9 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
     """One (met, line) per expectation."""
     text = answer.model_dump_json().lower()
     values = answer.model_dump(mode="json")
+    # The blank test is on the answer as the model gave it, at every depth: an optional field it left out
+    # and the model filled with its default is not there to be empty (case-files.md, section 1).
+    given = answer.model_dump(mode="json", exclude_unset=True)
     lines = []
     for phrase in expect.get("must_mention", []):
         met = phrase.lower() in text
@@ -166,7 +169,7 @@ def judge(answer: BaseModel, expect: dict[str, Any]) -> list[tuple[bool, str]]:
         if why := _not_applied(name, values, allowed_removal):
             lines.append((True, f"ok non_empty {name} ({why})"))
             continue
-        met = name in values and not blank(values[name])
+        met = name in given and not blank(given[name])  # a field named here must still be given
         lines.append((met, f"{'ok' if met else 'EMPTY'} non_empty {name}"))
     for name, allowed in one_of.items():
         got = values.get(name, "(no such field)")

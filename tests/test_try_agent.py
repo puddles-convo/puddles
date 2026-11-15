@@ -402,6 +402,14 @@ ALLOWED = {
         'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
     ("proposer-04 removal", "rule_text", '""'):
         'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
+    **{(f"researcher-0{n}", "sources[0].title", REMOVED):
+       'Source.title is optional (default ""): a title the answer leaves out is not a blank (case-files.md, '
+       'section 1); one given as "", "   " or null still fails'
+       for n in range(1, 6)},
+    **{(f"critic-0{n}", "evidence", '"   "'):
+       "evidence is version 4's optional reasoning field; no critic case names it in non_empty, so a blank one "
+       "empties nothing a case checks"
+       for n in range(1, 7)},
 }
 
 
@@ -411,6 +419,16 @@ def _paths(value, path=()):
     for key, child in items:
         yield path + (key,)
         yield from _paths(child, path + (key,))
+
+
+def _holds(data, path):
+    """Whether the answer as given has a value at `path`."""
+    for p in path:
+        if isinstance(data, dict) and p in data or isinstance(data, list) and isinstance(p, int) and p < len(data):
+            data = data[p]
+        else:
+            return False
+    return True
 
 
 def _label(path):
@@ -436,15 +454,20 @@ def test_no_null_blank_or_missing_leaf_passes_unless_allowed(capsys):
     used, unexpected = set(), []
     for agent, case, good, name in PASSING:
         schema = ANSWERS[agent][0]
-        base = schema.model_validate(good).model_dump(mode="json")  # every field, defaults included
+        # Mutated: the answer as given, since a default it leaves out is not given (case-files.md, section 1).
+        # Walked: every field, defaults included, so a field the answer left out is also tried given blank.
+        parsed = schema.model_validate(good)
+        base, full = parsed.model_dump(mode="json", exclude_unset=True), parsed.model_dump(mode="json")
         assert misses(agent, case, base) == [], name
-        for path in _paths(base):
+        for path in _paths(full):
             for new in HOW:
+                if new is REMOVED and not _holds(base, path):
+                    continue  # nothing to remove: the answer does not give it
                 try:
                     mutated = schema.model_validate(_mutate(base, path, new))
                 except ValidationError:
                     continue  # the agent's output model refuses it: the script's call fails and the case is not met
-                if mutated.model_dump(mode="json") == base:
+                if mutated.model_dump(mode="json") == full:
                     continue  # the same answer (e.g. removing a field that holds its default)
                 key = (name, _label(path), HOW[new])
                 search = FakeSearch({}) if agent == "researcher" else None
@@ -647,3 +670,37 @@ def test_model_that_cannot_be_built_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(llm_module, "OpenAILLM", no_model)
     assert run("critic") == 2
     assert "PUDDLES_AGENT_MODEL" in capsys.readouterr().err
+
+
+# A field the answer did not give is not a blank (case-files.md, section 1): version 4's Source.quote.
+
+@pytest.mark.parametrize("quote, code", [
+    (None, 0),  # left out: the model fills in "", which is not the answer's to be empty
+    ("", 1), ("   ", 1),  # given blank: sources is empty, as before
+    ("Reflect the feeling first, then ask.", 0),
+])
+@pytest.mark.parametrize("n", range(5))
+def test_a_researcher_source_without_quote_passes_and_a_blank_quote_fails(n, quote, code, capsys):
+    good = copy.deepcopy(RESEARCHER_ANSWERS[n])
+    if quote is not None:
+        good["sources"][0]["quote"] = quote
+    answer_ = ResearcherOutput.model_validate(good)
+    case_id = load("researcher")[n]["case_id"]
+    assert run("researcher", "--case", case_id, llm=scripted("researcher", [answer_]), search=FakeSearch({})) == code
+    out = capsys.readouterr().out
+    assert ("EMPTY non_empty sources" in out) == (code == 1)
+
+
+def test_the_five_good_researcher_answers_pass_with_quote_left_out(capsys):
+    assert all("quote" not in s for a in RESEARCHER_ANSWERS for s in a["sources"])
+    assert run("researcher", search=FakeSearch({}), llm=scripted("researcher")) == 0
+    assert "5 of 5 cases met their expectations" in capsys.readouterr().out
+
+
+def test_a_non_empty_field_left_to_its_default_is_not_given():
+    """A field named directly in non_empty must be given, even when the model fills it with a default."""
+    lines = try_agent.judge(CriticOutput.model_validate({"found": False}), {"non_empty": ["reason"]})
+    assert lines == [(False, "EMPTY non_empty reason")]
+    lines = try_agent.judge(CriticOutput.model_validate({"found": False, "reason": "Nothing stands out."}),
+                            {"non_empty": ["reason"]})
+    assert lines == [(True, "ok non_empty reason")]
