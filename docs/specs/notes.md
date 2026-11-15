@@ -24,7 +24,7 @@ env -u PYTHONPATH MLFLOW_DISABLE_AGENT_HINT=1 /Users/moamen/Documents/puddles-ru
 ```
 puddles/inference/note_store.py     new
 puddles/inference/notes.py          new
-docs/agents/i5-note-taker.md        changed: only the sentence of the system message that says what to return
+docs/agents/i5-note-taker.md        changed: the last paragraph of the system message, and the opening of section 4
 tests/test_inference_notes.py       new: the implementer's tests
 tests/acceptance/test_acc_notes.py  new: written from this file alone, by someone else
 ```
@@ -33,7 +33,7 @@ tests/acceptance/test_acc_notes.py  new: written from this file alone, by someon
 
 [docs/memory.md](../memory.md), section 10, leaves three things open. This spec settles them for now, in the way that is simplest to undo:
 
-1. **Where a note's sentence is read from.** The store keeps each live note's full `UserNote` in a file of its own beside the index. A recall from past.dev is still made as the person and filtered through the index; a live note the recall did not return is filled in from the file. past.dev is a searchable copy.
+1. **Where a note's sentence is read from.** The store keeps each live note's full `UserNote` in `notes.json`, beside the index. A recall from past.dev is still made as the person and filtered through the index; a live note the recall did not return is filled in from the file. past.dev is a searchable copy.
 2. **Where the index is stored.** Under the store's root: `<root>/notes/<user_id>/index.json`.
 3. **Deleting from past.dev.** The store talks to past.dev through the `UserMemory` protocol below. The real client's `delete` and `ensure_audience` follow the documented past.dev API (https://past.dev/docs/memory-api). **If the documentation cannot be read, or has no such call, the method raises `NotImplementedError` with a message that says so. Do not guess an endpoint.**
 
@@ -75,7 +75,7 @@ class NoteStore:
 
 ### Who is who
 
-- `check_user_id` returns the ID if it matches `[a-z0-9][a-z0-9-]*`, is at most 64 characters, and is not one of `puddles.memory.TRAINING_IDENTITIES`, `note-taker` or `project`. Anything else raises `ValueError`. Every method that takes a `user_id` checks it first, so a user ID can never name a path outside the root or a training identity.
+- `check_user_id` returns the ID if it matches `[a-z0-9][a-z0-9-]*`, is at most 33 characters (past.dev allows an audience name 40, and the audience is `person-<user_id>`), and is not one of `puddles.memory.TRAINING_IDENTITIES`, `note-taker` or `project`. Anything else raises `ValueError`. Every method that takes a `user_id` checks it first, so a user ID can never name a path outside the root or a training identity.
 - A person's audience is `person-<user_id>`. Its identities are exactly `[user_id, "note-taker"]`. The person's own identity for a recall is `user_id`.
 - `ensure_person` calls `memory.ensure_audience(audience_for(user_id), [user_id, NOTE_TAKER])`. Every method that reads or writes past.dev for a person calls it first.
 
@@ -84,27 +84,27 @@ class NoteStore:
 | File | Holds |
 |---|---|
 | `index.json` | The `LiveNoteIndex`. Only notes listed here reach the helper. |
-| `notes.json` | `{note_id: UserNote}` for the notes on the index, and no others |
+| `notes.json` | `{note_id: UserNote}` for the notes on the index. Between a `write` and the `save_index` that follows it, it also holds the new note that is not yet on the index. |
 | `counter.json` | `{"next": N}`: the next note number. A number is never used twice, even after a delete. |
 | `pending_deletes.json` | A list of note IDs that are off the index and that past.dev has not yet confirmed deleted |
 
 Every file is written to a temporary file in the same folder and then renamed over the old one.
 
 - `index` returns an empty index for a person with no file.
-- `save_index` writes `index.json`, and removes from `notes.json` every note that is not on the index it was given. A `LiveNoteIndex` over a limit cannot be built, so it cannot be saved.
-- `next_note_id` returns `note-<user_id with the hyphens removed>-<NNN>`, three digits or more, starting at 001, and moves the counter on.
+- `save_index` writes `index.json`, and removes from `notes.json` every note that is not on the index it was given. **Every note it removes this way is added to `pending_deletes.json`,** so a note that was written but never reached the index (a crash between the two) is still deleted from past.dev. A `LiveNoteIndex` over a limit cannot be built, so it cannot be saved.
+- `next_note_id` returns `note-<user_id>-<NNN>`, with the user ID exactly as it is, three digits or more, starting at 001, and moves the counter on. The user ID is not shortened or changed in any way: `user-01` and `user01` are two people and must never share a note ID, because past.dev stores and deletes by that ID. (The example IDs in the agent's file, `note-user01-004`, are older than this rule.)
 
 ### Reading
 
 - `expire` takes off the index every `follow_up` whose expiry day has passed: `today` is later than `due_date + FOLLOW_UP_EXPIRY_DAYS` days, or than `last_confirmed + FOLLOW_UP_EXPIRY_DAYS` days when it has no due date. It saves the index, deletes those notes with `delete`, and returns their IDs.
-- `live_notes` calls `expire` first. Then it recalls as the person (`memory.recall(RECALL_QUERY, identity=user_id)`), and keeps only results whose source ID is on the index. **A note that is off the index is never returned, even while past.dev still holds it.** A note on the index that the recall did not return is taken from `notes.json`. Each `ExistingNote` has the fact from `notes.json`, and the kind and dates from the index. The order is the index's.
+- `live_notes` calls `expire` first. Then it recalls as the person (`memory.recall(RECALL_QUERY, identity=user_id)`), and keeps only results whose source ID is on the index. **A note that is off the index is never returned, even while past.dev still holds it.** A note on the index that the recall did not return is taken from `notes.json`. A recall that raises, or an audience that cannot be set up, is ignored here: the facts are in `notes.json`. Each `ExistingNote` has the fact from `notes.json`, and the kind and dates from the index. The order is the index's.
 - `helper_notes` is the facts of `live_notes`, in the same order. It is what goes into `loop.helper.helper_reply(..., user_notes=...)`.
 
 ### Writing
 
-- `write(note)` checks that `note.id` is not already in `notes.json`, sends one `MemoryEntry` and waits for it. The entry: `id` is the note's ID; `content` is `{date}: {fact}` with the date as in `15 Nov 2026`, taken from `last_confirmed`; `label` is `note-taker: user note`; `identity` is `note-taker`; **`audience` is the person's audience, on every write**; `metadata` is `{"type": "user_note", "kind", "user_id", "session_id"}`. If past.dev does not confirm the write within the wait, or raises, `write` raises `puddles.memory.PastError` and the note is in neither file. When it is confirmed the note is added to `notes.json`. It does not touch the index.
+- `write(note)` checks that `note.id` is not already in `notes.json`, sends one `MemoryEntry` and waits for it. The entry: `id` is the note's ID; `content` is `{date}: {fact}` with the date as in `15 Nov 2026`, taken from `last_confirmed`; `label` is `note-taker: user note`; `identity` is `note-taker`; **`audience` is the person's audience, on every write**; `metadata` is `{"type": "user_note", "kind", "user_id", "session_id"}`. If past.dev does not confirm the write within the wait, or raises, `write` raises `puddles.memory.PastError` and the note is in neither file. If past.dev had already accepted the entry (an ingestion ID came back) before the wait failed, the note's ID is added to `pending_deletes.json`, because past.dev may still store it. When it is confirmed the note is added to `notes.json`. It does not touch the index.
 - `take_off` removes the IDs from the index and from `notes.json`, adds them to `pending_deletes.json`, and saves. From this moment the helper cannot see them. An ID that is not on the index is ignored.
-- `delete` calls `memory.delete(note_id)` for each ID, up to `delete_attempts` times each, until it returns true. An exception from `memory.delete` counts as a failed attempt. A confirmed ID is taken out of `pending_deletes.json`. It returns the IDs that are still not confirmed; they stay in `pending_deletes.json`. It never raises for a failed delete. Every call to `delete` also retries the IDs already pending for that person.
+- `delete` first takes the IDs off the index (`take_off`), so nothing can be deleted while it is still visible. It then calls `memory.delete(note_id)` for each ID, up to `delete_attempts` times each, until it returns true. An exception from `memory.delete` counts as a failed attempt. A confirmed ID is taken out of `pending_deletes.json`. It returns the IDs that are still not confirmed; they stay in `pending_deletes.json`. It never raises for a failed delete. Every call to `delete` also retries the IDs already pending for that person.
 
 ## 2. `puddles/inference/notes.py`
 
@@ -141,12 +141,12 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
 
 ### The model's answer
 
-- A list cannot be asked for through `LLM.structured`, so the answer is a `NoteTakerOutput`. It is a new output format; it lives in this module until it is agreed on issue #1. The only change to the system message in `docs/agents/i5-note-taker.md` is its last paragraph, which now asks for a JSON object with `forget_everything` (true only if the person asked the robot to forget everything about them) and `actions`.
+- A list cannot be asked for through `LLM.structured`, so the answer is a `NoteTakerOutput`. It is a new output format; it lives in this module until it is agreed on issue #1. The only change to the system message in `docs/agents/i5-note-taker.md` is its last paragraph, which now asks for a JSON object with `forget_everything` (true only if the person asked the robot to forget everything about them) and `actions`. Section 4 of that file ("Output") is brought into line: its first sentences say the answer is an object with those two fields.
 - `build_input`: `existing_notes` is `store.live_notes(user_id, today)`, `may_add_notes` is `remember_me`, `today` is the ISO date.
 - `render_user` follows the user message in the agent's file: every kind is shown with its count and its limit, the empty ones too.
 - `check` returns the problems, an empty list when there are none:
   - a `replace`, `confirm` or `delete` with no `note_id`, or with a `note_id` that is not one of `inp.existing_notes`. **A note ID that is unknown, or that belongs to another person, is refused**;
-  - an `add` or `replace` with no `kind` or no `fact`, or with a fact that is empty;
+  - an `add` or `replace` with no `kind` or no `fact`, or with a fact that is empty or only spaces;
   - an `add` that has a `note_id`;
   - the same `note_id` named by two actions.
 - `run` is `puddles.llm.call_checked` around `llm.structured(SYSTEM, render_user(inp) + feedback, NoteTakerOutput)`: a failed check is retried once with the reasons, and a second failure raises `puddles.llm.AgentFailed`.
@@ -155,7 +155,7 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
 
 **It always runs, whatever the person answered, because forgetting must always work.** `today` and `now` default to the clock.
 
-1. `build_input`, then `run`. If `run` raises `AgentFailed`, it returns a result with `failed=True` and the reason. **Nothing is changed: no note added, none lost.**
+1. `build_input`, then `run`. If `run` raises (`AgentFailed`, or any other exception from the model), it returns a result with `failed=True` and the reason. **Nothing is changed: no note added, none lost.** Follow-ups that had expired come off in `build_input`, before the model is asked; that is expiry, not a change by the note-taker, and it stands when the answer fails.
 2. Which actions are kept:
    - with `remember_me` false, every `add`, `replace` and `confirm` is dropped. Deletes are kept;
    - with `forget_everything` true, every existing note is deleted, and every `add`, `replace` and `confirm` from this session is dropped;
@@ -168,7 +168,9 @@ def take_notes(store: NoteStore, llm: LLM, *, user_id: str, session_id: str, tur
    4. `store.delete(...)` for every note that came off. The IDs it returns go into `undeleted`.
 5. Returns the `NotesResult`.
 
-`take_notes` raises nothing for a model or a past.dev failure. After it returns, the index never names a note that was not written and is never over a limit.
+`replaced` lists the old notes that came off because of a replace, whether or not the new note's write then succeeded. The order of the IDs in each list of the result is not fixed.
+
+`take_notes` raises nothing for a model or a past.dev failure, including an audience that cannot be set up and a recall that raises. After it returns, the index never names a note that was not written and is never over a limit.
 
 ## 3. Tests
 
