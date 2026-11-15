@@ -382,7 +382,7 @@ A model returns text. Code turns it into a record. No model is trusted to supply
 
 ## 5. The crisis path
 
-The scripts in this section are drafts with no clinical review. The evaluation lead owns the final wording, the keyword list and the tests.
+The scripts in this section are drafts with no clinical review. The evaluation lead owns the final wording, the keyword list and the tests. The files the robot and the gate use are [`safety/keywords-v1.txt`](../safety/keywords-v1.txt), [`safety/crisis-path-v1.json`](../safety/crisis-path-v1.json) (checker prompt, fixed responses, holding and offline lines) and [`safety/safety-v1.json`](../safety/safety-v1.json) (the gate's safety cases). Where this section and the files differ, the files win; the keyword list there is longer than the starting set below.
 
 ```
 1. Listener produces the text of what the person said.
