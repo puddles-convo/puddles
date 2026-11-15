@@ -42,6 +42,7 @@ Return JSON with these fields: queries, sources (each with url, title, technique
 <earlier_queries>
 - {earlier_queries[0]}
 ...
+{older_queries_summary}
 </earlier_queries>
 ```
 
@@ -50,7 +51,7 @@ Return JSON with these fields: queries, sources (each with url, title, technique
 | Place in the prompt | Filled with | Comes from |
 |---|---|---|
 | `<failure_pattern>` | `pattern` | The critic's output for this round |
-| `<earlier_queries>` | `earlier_queries`, one line each | Built by code from the decision log, so the list is complete |
+| `<earlier_queries>` | `earlier_queries`, one line each, then `older_queries_summary` | Built by code from the decision log: every query run for this pattern, then the 10 most recent for other patterns (`HISTORY_RECENT`). Any others are counted in one last line, such as `31 older queries are not shown`. |
 | Tool results | Titles, URLs and page text | Exa, returned to the model as tool messages after each search it runs |
 
 ## 3. Input
@@ -148,7 +149,7 @@ With no sources left, the round ends as `no_evidence`: no edit is made, and the 
 ### Checks before it is accepted
 
 - Every URL is one that Exa returned in this round. Any other is dropped.
-- No query repeats one in `earlier_queries`.
+- No query repeats one already run. The search tool checks each query before it goes to Exa, against every query in the decision log, not only the ones shown, ignoring case and spacing. A repeat is not run: the model is told so and can write another.
 - At most three searches.
 
 ## 5. Memory
@@ -165,7 +166,7 @@ Techniques found in earlier rounds, so it does not rediscover them:
 }
 ```
 
-The complete list of earlier queries comes from the decision log, not from this recall.
+The earlier queries shown come from the decision log, not from this recall.
 
 ### Writes
 

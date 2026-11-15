@@ -23,12 +23,12 @@ The fixed instructions. They are the same on every call.
 ```
 You are reviewing one round of support conversations to find the single most important way the helper is failing. Your finding goes to a researcher and then to someone who will change the helper's policy, so it has to be specific enough to act on and to check later.
 
-You are given the lowest-scoring conversations from this round in full, with the judge's scores and notes; the current policy; and the list of patterns found in earlier rounds with what happened to each.
+You are given the lowest-scoring conversations from this round in full, with the judge's scores and notes; the current policy; and patterns found in earlier rounds with what happened to each. That list holds every pattern that has a rule, and the unsolved ones most like this round's notes or most recent. A last line counts any that are not shown.
 
 1. Read the conversations themselves, not only the notes.
 2. Name the one pattern that explains the most low scores. A pattern is something the helper does, or fails to do, at a point you can identify, such as "gives suggestions in its first reply". "Lacks empathy" is too vague to act on.
 3. Count how many of the conversations you were given show it, and list their IDs. Count them; do not estimate.
-4. If it is the same as an earlier pattern, reuse that pattern's ID and say so. If that pattern is marked fixed, say what the existing rule failed to prevent.
+4. If it is the same as a pattern on the list, give that pattern's ID in same_as_pattern_id. If that pattern is marked fixed, say what the existing rule failed to prevent.
 5. If nothing clear stands out, return found: false with a one-sentence reason. Do not invent a pattern.
 
 Return JSON with these fields: found, name, description, seen_in, out_of, example_conversation_ids, same_as_pattern_id, reason.
@@ -42,8 +42,9 @@ Return JSON with these fields: found, name, description, seen_in, out_of, exampl
 </current_policy>
 
 <earlier_patterns>
-- {id}: {name}, {status}, rule {rule_id}
+- {id}: {name}, {status}, rule {rule_id}, seen in {sightings} rounds
 ...
+{older_patterns_summary}
 </earlier_patterns>
 
 <from_memory>
@@ -67,9 +68,18 @@ Return JSON with these fields: found, name, description, seen_in, out_of, exampl
 | Place in the prompt | Filled with | Comes from |
 |---|---|---|
 | `<current_policy>` | `policy_text` | The policy file in force |
-| `<earlier_patterns>` | `earlier_patterns`, one line each | Built by code from the decision log, so the list is complete |
-| `<from_memory>` | `from_memory`, one line each | Memory: a recall finds relevant record IDs, and code loads those records from their files |
+| `<earlier_patterns>` | `earlier_patterns`, one line for each pattern, then `older_patterns_summary` | Built by code from the decision log, within the budget below |
+| `<from_memory>` | `from_memory`, one line each, five at most | Memory: a recall finds relevant record IDs, and code loads those records from their files |
 | `<conversations>` | `conversations`: about ten of the lowest-scoring, in full | This round's conversation records and the judge's scores |
+
+### How much history it is shown
+
+The decision log keeps every pattern. The prompt carries a budgeted view of it, so it does not grow with every round:
+
+- One line for each pattern, however many rounds it was seen in.
+- Always shown: every `fixed` or `recurring` pattern. Each of these has a rule in the policy, and the policy's token cap limits how many rules there are, so this part stays small. Seeing them all is what lets the critic say that an existing rule failed.
+- `open` patterns are the part that can grow, because a pattern with no kept edit stays open. Shown: every open pattern the recall found, then the 10 most recently seen (`HISTORY_RECENT` in `schemas.py`).
+- Any other open patterns are counted in one last line, such as `14 older open patterns are not shown`.
 
 ## 3. Input
 
@@ -160,7 +170,7 @@ Format: `CriticOutput` in [`schemas.py`](../../schemas.py).
 | `seen_in` | number | How many of the given conversations show it |
 | `out_of` | number | How many conversations it was given |
 | `example_conversation_ids` | list | At least two, taken from the input |
-| `same_as_pattern_id` | ID or null | Set when this is an earlier pattern seen again |
+| `same_as_pattern_id` | ID or null | The ID of a pattern on the list, when this is that pattern seen again |
 | `reason` | text | Why nothing was found, when `found` is false |
 
 Example:
@@ -183,7 +193,11 @@ Example:
 
 ### What code does with it
 
-Code adds the round and an ID (`pattern-r03`, or the earlier pattern's ID on a recurrence) and saves a `FailurePattern`:
+Code adds the round and a new ID for this sighting (`pattern-r03`), and saves a `FailurePattern`.
+
+- **Every sighting gets its own ID, a recurrence included.** No record is overwritten, and each copy to memory is confirmed on its own.
+- **A pattern's identity is the ID of its first sighting.** A later sighting carries it in `same_as_pattern_id`: seen again in round 7, the record is `pattern-r07` with `same_as_pattern_id` set to `pattern-r03`.
+- **Everything about a pattern is keyed by that identity** (`FailurePattern.pattern_id`): its status, its line in `<earlier_patterns>`, and the `pattern_id` on research notes and edits.
 
 ```json
 {
@@ -215,6 +229,7 @@ With `found: false` the round ends as `no_pattern`: no research and no edit.
 - `seen_in` is not larger than `out_of`, and `out_of` equals the number of conversations given.
 - Every example ID is one of the conversations given.
 - `same_as_pattern_id`, if set, is an ID in `earlier_patterns`.
+- If `same_as_pattern_id` is not set, code compares the name with every pattern in the decision log, shown or not. A pattern with the same name is treated as a recurrence of it.
 
 ## 5. Memory
 
@@ -230,7 +245,7 @@ Earlier patterns and what happened to them. The recall is built from the judge's
 }
 ```
 
-The recall only finds which records are relevant. What goes into `<from_memory>` is loaded from the record files.
+The recall only finds which records are relevant. What goes into `<from_memory>` is loaded from the record files, five at most (`FROM_MEMORY_LIMIT`). Any earlier pattern the recall finds is also put on the `<earlier_patterns>` list, so an old pattern that has dropped off the recent list can still be recognised as the same one.
 
 ### Writes
 
@@ -241,6 +256,8 @@ Template for `content`:
 ```
 Failure pattern {id}, {name}, round {round}: {description} Seen in {seen_in} of the {out_of} lowest-scoring conversations reviewed.
 ```
+
+On a recurrence the sentence ends with `Same pattern as {same_as_pattern_id}.`
 
 ```json
 {

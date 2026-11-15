@@ -2,16 +2,19 @@
   {
     "action": "replace",
     "note_id": "note-user01-002",
+    "kind": "goals",
     "fact": "Has decided not to go back to work yet; does not feel ready."
   },
   {
     "action": "add",
     "note_id": null,
+    "kind": "situation",
     "fact": "On short-term disability and worried about losing their job."
   },
   {
     "action": "add",
     "note_id": null,
+    "kind": "what_helps",
     "fact": "Slow breathing (in for four, out for six) helps a bit when the worry gets bad."
   }
 ]

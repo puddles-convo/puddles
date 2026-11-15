@@ -4,11 +4,15 @@
   "existing_notes": [
     {
       "note_id": "note-user01-002",
-      "fact": "8 Nov 2026: planning to go back to work next week."
+      "kind": "goals",
+      "fact": "Planning to go back to work next week.",
+      "last_confirmed": "2026-11-08"
     },
     {
       "note_id": "note-user01-003",
-      "fact": "8 Nov 2026: works in a warehouse."
+      "kind": "situation",
+      "fact": "Works in a warehouse.",
+      "last_confirmed": "2026-11-08"
     }
   ],
   "turns": [

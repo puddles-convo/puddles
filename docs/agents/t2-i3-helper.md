@@ -46,7 +46,7 @@ The conversation is sent as ordinary chat messages: the person's lines as `user`
 |---|---|---|
 | `{policy_version}` | `policy_version` | The name of the policy file in force |
 | `{policy_text}` | The whole policy file | Read from `POLICY_PATH` at the start of the session; never changes mid-conversation |
-| `{user_notes}` | `user_notes`, one per line | Robot: user memory, fetched once at session start. Training: the fixed sentence shown in the prompt |
+| `{user_notes}` | `user_notes`, one per line, in order of kind. At most 23, because each kind of note has a limit. | Robot: user memory, fetched once at session start. Training: the fixed sentence shown in the prompt |
 | Chat messages | `turns` | The conversation so far |
 
 ## 3. Input
@@ -95,13 +95,13 @@ The helper is not given the crisis checker's risk level. It starts drafting befo
 ### Checks before it is accepted
 
 - The reply is not empty.
-- A reply over the length cap is cut at the last full sentence.
+- A reply that stops mid-sentence, because it reached the length cap, is cut back to its last full sentence.
 
 ## 5. Memory
 
 ### Reads
 
-**Robot only.** Notes about this person, fetched once at the start of the session and filtered through the brain's index of live notes, so a corrected or forgotten note cannot come back.
+**Robot only.** Notes about this person, fetched once at the start of the session and filtered through the brain's index of live notes, so a corrected or forgotten note cannot come back. Expired follow-ups are taken off the index first. The [note-taker](i5-note-taker.md) keeps each kind of note within its limit, so this block never holds more than 23 notes.
 
 ```json
 {

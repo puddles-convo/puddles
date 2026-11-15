@@ -2,7 +2,9 @@
 
 Where the shared memory sits, how memory turns into policy, how a model's output becomes a record, and the crisis path. Each agent's prompt, input and output are in its own file under [agents/](agents/README.md).
 
-This is a first draft to build from. Scores, counts and sources in the examples are illustrative. Formats named in `code` are in `schemas.py`; section 8 lists what version 2 added. The summary tables and step diagrams are in the [README](../README.md); this document has the detail behind them.
+This is a first draft to build from. Scores, counts and sources in the examples are illustrative. Formats named in `code` are in `schemas.py`; section 8 lists what versions 2 and 3 added. The summary tables and step diagrams are in the [README](../README.md); this document has the detail behind them.
+
+> **Anything about memory: go to [memory.md](memory.md).** It is the one place that describes the memory end to end: the levels, what each agent reads and writes, when each level is updated and how, the formats, what is built, and what is still undecided. Read it before you use, change or add to the memory, and make a memory change there first. The memory parts of this document are kept for the detail around them; if the two disagree, memory.md is right and this document needs fixing.
 
 ## 1. Where the memory sits
 
@@ -158,10 +160,10 @@ Each entry is a readable sentence, which is the part past.dev searches. The sent
 
 ### User memory
 
-| Note ID | What the entry says |
-|---|---|
-| note-user01-004 | 15 Nov 2026: on short-term disability and worried about losing their job. |
-| note-user01-005 | 15 Nov 2026: slow breathing (in for four, out for six) helps a bit when the worry gets bad. |
+| Note ID | Kind | What the entry says |
+|---|---|---|
+| note-user01-004 | `situation` | 15 Nov 2026: on short-term disability and worried about losing their job. |
+| note-user01-005 | `what_helps` | 15 Nov 2026: slow breathing (in for four, out for six) helps a bit when the worry gets bad. |
 
 ## 3. From memory to policy
 
@@ -319,6 +321,7 @@ Run as code at the end of every round. If any step fails, the loop stops and rep
    - `open`: no active rule is linked to it. Either none was ever kept, or the rule that fixed it was later removed, which reopens it.
    - `recurring`: the critic named it again while its rule is active.
    - Reverted edits are listed against the pattern as failed attempts, whatever its status.
+   - A status belongs to a pattern, not to a sighting. Each time the critic names a pattern it is saved as a new record with its own ID, and a later sighting points to the first one through `same_as_pattern_id`. The first sighting's ID is the pattern's identity, and every sighting that shares it counts as one pattern.
 
    Open and recurring patterns, most frequent first, are the proposer's to-do list.
 
@@ -327,7 +330,7 @@ Run as code at the end of every round. If any step fails, the loop stops and rep
 Memory is a copy, so it can be late, missing or wrong. Three measures make that harmless:
 
 - **Recall finds; the record files supply.** A recall is used only to find which record IDs are relevant. What the agent is then shown is loaded from the files under `records/` by ID and checked against the hash in the log. So a stale or altered memory entry cannot put wrong content in front of an agent. An ID with no record file is dropped and the mismatch is logged.
-- **Lists that must be complete come from the log.** The edits already tried, and each pattern's status, are built by code from the replay and handed to the critic and proposer.
+- **History lists come from the log, within a budget.** The edits already tried, the searches already run and each pattern's status are built by code from the replay. The researcher and the proposer are shown everything about the pattern in hand, then the 10 most recent others (`HISTORY_RECENT`), then one line counting the rest. The critic is shown every pattern that has a rule, which the policy's token cap keeps few, and the unsolved ones most like this round's failures or most recent. The log keeps everything, and the checks for a repeated edit or search run against all of it, so the budget limits what a model reads, not what code knows.
 - **Every copy is confirmed, within limits.** After a write, code polls past.dev's ingestion status for up to 60 seconds, then appends a `memory_copy` event saying `confirmed` or `pending`. Pending copies are retried at the start of the next round. After three attempts the loop stops and reports.
 
 So a memory entry can be missing or stale without the policy or an agent's input being wrong, and the log shows which copies are outstanding.
@@ -345,8 +348,9 @@ So a memory entry can be missing or stale without the policy or an agent's input
 
 - **Forgetting always works, whatever they answered.** If the person asks the robot to forget something, or everything, the matching notes are deleted even when they said no to being remembered. In that case the note-taker runs but may only delete.
 - **Forgetting overrides remembering.** If the person asked the robot to forget everything, code clears their index of live notes and ignores every add or replace from that session. Nothing they asked to have forgotten is written back as a new note.
-- **The brain keeps the list of live notes.** For each person it holds a small index of the note IDs that are current. This index, not past.dev, decides what the helper sees: only notes whose IDs are on it go into the prompt.
+- **The brain keeps the list of live notes.** For each person it holds a small index of the notes that are current, with each one's kind and dates. This index, not past.dev, decides what the helper sees: only notes whose IDs are on it go into the prompt.
 - **A corrected note replaces the old one.** The note-taker sees the existing notes with their IDs and says which to replace or delete. The old ID comes off the index at once, and the data point is then deleted from past.dev, with retries. An out-of-date note therefore cannot reach the helper even if past.dev still returns it for a while.
+- **The notes are bounded.** Every note has one of six kinds (`situation`, `people`, `what_helps`, `goals`, `follow_up`, `preferences`), and each kind has a limit: 23 notes for one person at most. When a kind is over its limit, code drops the note that has gone longest without being confirmed, before the index is saved. A note is confirmed when the person says the same thing again, which updates its date without rewriting it. A follow-up expires 14 days after its date. So the notes are a short picture of the person now, not a history, and the helper's prompt does not grow with the number of sessions. The limits are in the [note-taker's file](agents/i5-note-taker.md).
 - **Notes go into the helper's prompt** in their own block after the policy. They are facts about someone, not instructions about how to behave.
 - **Notes never become policy on their own.** If many people react badly to the same thing, it shows up in the scores of their consented sessions, the critic names it as a pattern, and it takes the normal route through the gate.
 
@@ -354,7 +358,9 @@ So a memory entry can be missing or stale without the policy or an agent's input
 
 - How past.dev behaves in practice: how long ingestion takes, whether attached metadata comes back on recall, and how quickly a deleted data point disappears. These come from reading its API description and are untested. The design above does not depend on the last two.
 - The noise level, and therefore the gate's threshold.
-- Matching a recurrence to an earlier pattern relies on the critic reusing the pattern's ID. That is fragile and needs a look once real patterns exist.
+- Recognising a recurrence still rests on the critic judging that two failures are the same one. A recurrence no longer reuses an ID, so nothing is overwritten when it gets this wrong, but a pattern renamed by the critic is still counted as new. A fixed list of pattern names learned from ESConv would make this firmer: see [research/memory/00-summary.md](research/memory/00-summary.md), section 3.
+- The six kinds of note and their limits are our own choice. No source tested them, and they should be tuned on real sessions.
+- The index says which notes are live, but their sentences are read back from past.dev by a search, which is not guaranteed to return every one. Keeping the sentence in the index as well would close this, at the cost of holding the notes in two places.
 
 ## 4. From model output to record
 
@@ -369,7 +375,7 @@ A model returns text. Code turns it into a record. No model is trusted to supply
 | Researcher | JSON: queries used and sources kept | Round, `pattern_id`; drops any URL Exa did not return |
 | Proposer | JSON: one edit | Edit ID, versions and hashes; builds the new policy file from the edit |
 | Crisis checker | A line of level, category and reason | Wrapped as `CheckedMessage` |
-| Note-taker | JSON: a list of note actions | `user_id`, `session_id`, note IDs, today's date; updates the index of live notes |
+| Note-taker | JSON: a list of note actions | `user_id`, `session_id`, note IDs, today's date; applies the limit for each kind; updates the index of live notes |
 
 - Every JSON reply is validated against its format. An invalid reply is retried once, then the step is logged as failed.
 - The proposer does not write the whole policy file. It returns the one edit, and code applies it. This is what guarantees the Safety section and every other rule are untouched.
@@ -444,14 +450,14 @@ Each agent has its own file with its prompt, where the input goes in it, its inp
 
 ## 8. What was added to `schemas.py`
 
-`schemas.py` is at version 2 and now holds every format used in this document. Each has an example file in `examples/`, and all of them validate. They are still a proposal to settle under issue #1.
+`schemas.py` is at version 3 and holds every format used in this document. Each has an example file in `examples/`, and all of them validate. They are still a proposal to settle under issue #1.
 
 | Addition | Model | Why |
 |---|---|---|
 | Action, rule ID and rule text on an edit | `PolicyEdit`, `ProposerOutput` | So the log can be replayed into the expected policy |
 | The two log events and the pointer to a record file | `RoundEvent`, `MemoryCopyEvent`, `RecordRef` | For the checks in section 3 |
 | Round outcomes `no_pattern` and `no_evidence` | `RoundEvent` | Rounds that end without an edit |
-| "Nothing found" and recurrence from the critic | `CriticOutput`, `FailurePattern` | The early-ending branch, and reusing a pattern's ID |
+| "Nothing found" and recurrence from the critic | `CriticOutput`, `FailurePattern` | The early-ending branch, and pointing a recurrence at the pattern's first sighting |
 | A list of queries | `ResearchNote`, `ResearcherOutput` | Version 1 had a single `query` |
 | The scenario, with `openness` | `Scenario` | Used by the simulated user |
 | A crisis `category` | `CheckedMessage` | Chooses the fixed response |
@@ -463,3 +469,16 @@ Each agent has its own file with its prompt, where the input goes in it, its inp
 | The gatekeeper's input | `GateInput` | Scores, noise and the cap in one place |
 | One past.dev entry | `MemoryEntry` | The shape in the README, section 5 |
 | What each agent is given | `SimulatedUserInput`, `HelperInput`, `CriticInput`, `ResearcherInput`, `ProposerInput`, `CrisisCheckerInput`, `NoteTakerInput` | The input side of each agent file |
+
+### What version 3 changed
+
+Version 3 puts a bound on what grows. The reasons are in [research/memory/00-summary.md](research/memory/00-summary.md).
+
+| Change | Model | Why |
+|---|---|---|
+| A kind, a last-confirmed date and an optional due date on every note | `UserNote`, `ExistingNote`, `NoteKind` | So notes can be limited and expired by code |
+| A limit for each kind of note, and the expiry of follow-ups | `NOTE_CAPS`, `FOLLOW_UP_EXPIRY_DAYS` | One person's notes stay the same size |
+| A `confirm` action, and a kind on add and replace | `NoteAction` | "Still true" updates a date without rewriting the note |
+| The index holds each live note's kind and dates, not only its ID | `LiveNote`, `LiveNoteIndex` | Limits and expiry need no search |
+| Every sighting of a pattern has its own ID, and a recurrence points to the first sighting | `FailurePattern.pattern_id`, `LogPattern`, `PatternBrief.sightings` | A recurrence used to reuse the earlier record's ID |
+| A budget on the history lists in prompts, with a line counting what is not shown | `HISTORY_RECENT`, `FROM_MEMORY_LIMIT`, `CriticInput`, `ResearcherInput`, `ProposerInput`, `EditSummary.pattern_id` | Prompts used to grow with every round |

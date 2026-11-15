@@ -9,6 +9,8 @@ One file per agent. Every file has the same six parts:
 5. **Memory**: what it reads and what it writes, with the entry as it is stored.
 6. **When it goes wrong.**
 
+For anything about the memory as a whole (the levels, when each is updated, the formats, what is still undecided), go to [memory.md](../memory.md). Part 5 of each agent file is that agent's share of it.
+
 ## Training
 
 | Step | Agent | What it does | Has a prompt |

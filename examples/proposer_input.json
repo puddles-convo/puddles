@@ -16,6 +16,7 @@
   "earlier_edits": [
     {
       "id": "edit-r01",
+      "pattern_id": "pattern-r01",
       "action": "reword",
       "rule_id": "C4",
       "outcome": "kept",
@@ -23,6 +24,7 @@
     },
     {
       "id": "edit-r02",
+      "pattern_id": "pattern-r02",
       "action": "add",
       "rule_id": "C5",
       "outcome": "kept",

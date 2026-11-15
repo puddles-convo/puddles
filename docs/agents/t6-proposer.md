@@ -3,7 +3,7 @@
 **Training, step 6**
 
 - Turns the pattern and the technique into exactly one change to the policy.
-- This is the bridge from memory to policy. It is given every earlier edit and its outcome, so it does not repeat one that was reverted.
+- This is the bridge from memory to policy. It is given every earlier edit for this pattern and the most recent others, each with its outcome, so it does not repeat one that was reverted.
 
 |  |  |
 |---|---|
@@ -23,7 +23,7 @@ The fixed instructions. They are the same on every call.
 ```
 You maintain the policy that tells a support helper how to respond. Each round you make exactly one change. The change is then tested, and it is kept only if conversations score better and every safety check still passes.
 
-You are given the current policy, this round's failure pattern, the researcher's sources, and every earlier edit with its outcome.
+You are given the current policy, this round's failure pattern, the researcher's sources, and earlier edits with their outcomes: every edit tried for this pattern, then the most recent edits for other patterns. A last line counts any that are not shown.
 
 - Make one change: add a rule, reword a rule or remove a rule. A single change is what makes the test result mean something.
 - The helper follows the policy literally and speaks its replies aloud. Write a rule as a plain instruction with its reason attached ("..., because ..."), since a rule that carries its reason is applied more sensibly than a bare command.
@@ -52,8 +52,9 @@ Return JSON with these fields: action (add, reword or remove), rule_id (the exis
 </sources>
 
 <earlier_edits>
-- {id}: {action} {rule_id}, {outcome}. {summary}
+- {id} for {pattern_id}: {action} {rule_id}, {outcome}. {summary}
 ...
+{older_edits_summary}
 </earlier_edits>
 ```
 
@@ -65,7 +66,7 @@ Return JSON with these fields: action (add, reword or remove), rule_id (the exis
 | `at_length_limit` | true or false | Worked out by code from the token count of the policy |
 | `<failure_pattern>` | `pattern`, with its status | The critic's output; the status comes from replaying the decision log |
 | `<sources>` | `sources`, one line each | The researcher's output |
-| `<earlier_edits>` | `earlier_edits`, one line each | Built by code from the decision log, so the list is complete; memory adds the detail |
+| `<earlier_edits>` | `earlier_edits`, one line each, then `older_edits_summary` | Built by code from the decision log: every edit tried for this pattern, then the 10 most recent for other patterns (`HISTORY_RECENT`). Any others are counted in one last line, such as `23 older edits are not shown: 9 kept, 14 reverted`. Memory adds the detail. |
 
 ## 3. Input
 
@@ -90,6 +91,7 @@ Format: `ProposerInput` in [`schemas.py`](../../schemas.py). Example: [`examples
   "earlier_edits": [
     {
       "id": "edit-r01",
+      "pattern_id": "pattern-r01",
       "action": "reword",
       "rule_id": "C4",
       "outcome": "kept",
@@ -97,6 +99,7 @@ Format: `ProposerInput` in [`schemas.py`](../../schemas.py). Example: [`examples
     },
     {
       "id": "edit-r02",
+      "pattern_id": "pattern-r02",
       "action": "add",
       "rule_id": "C5",
       "outcome": "kept",
@@ -153,7 +156,7 @@ Code gives a new rule the next unused ID, applies the one edit to the current po
 
 - `rule_id` names an existing rule for a reword or removal, and is null for an addition.
 - The rule is not one whose ID starts with `S`.
-- The edit is not the same as one that was reverted, unless the summary says what is different.
+- The edit is not the same as one that was reverted, unless the summary says what is different. Code compares against every reverted edit in the decision log, not only the ones shown.
 - At the length limit, the action is a removal or a rewording that makes the rule shorter.
 
 ## 5. Memory
@@ -170,7 +173,7 @@ The detail behind earlier edits for this pattern:
 }
 ```
 
-The complete list of earlier edits comes from the decision log. The recall finds related records, which code then loads from their files.
+The earlier edits shown come from the decision log. The recall finds related records, which code then loads from their files.
 
 ### Writes
 

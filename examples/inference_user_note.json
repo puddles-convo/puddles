@@ -7,5 +7,7 @@
   ],
   "user_id": "user-01",
   "session_id": "sess-0007",
-  "fact": "On short-term disability; worried about losing their job."
+  "kind": "situation",
+  "fact": "On short-term disability; worried about losing their job.",
+  "last_confirmed": "2026-11-15"
 }

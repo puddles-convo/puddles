@@ -42,7 +42,7 @@ Reply with only what the person says next.
 
 ### Chat messages
 
-The conversation is sent as chat messages with the roles swapped, because this model is playing the person: the helper's lines arrive as `user` messages, and this agent's own earlier lines are `assistant` messages. If there are no turns yet, one `user` message is sent: `(The helper is listening. Begin.)`
+The conversation is sent as chat messages with the roles swapped, because this model is playing the person: the helper's lines arrive as `user` messages, and this agent's own earlier lines are `assistant` messages. The first message is always a `user` message, `(The helper is listening. Begin.)`, so the chat never opens with an `assistant` message, which many model servers reject.
 
 ## 2. Where the input goes in the prompt
 
@@ -53,7 +53,7 @@ The conversation is sent as chat messages with the roles swapped, because this m
 | `{initial_intensity}` | `scenario.initial_intensity` | The scenario; the user's own rating in ESConv |
 | `{problem_type}` | `scenario.problem_type` | The scenario |
 | `{openness}` | `scenario.openness` | Assigned by code when the scenario is loaded, so a share of scenarios are guarded or resistant |
-| Chat messages | `turns` | The conversation so far, roles swapped |
+| Chat messages | The opening message, then `turns` | The conversation so far, roles swapped |
 
 ## 3. Input
 
@@ -100,7 +100,7 @@ Code wraps the line as a `Turn` with `speaker: "user"` and appends it to the con
 ### Checks before it is accepted
 
 - The line is not empty.
-- It is not longer than a few sentences.
+- It is not longer than 80 words.
 - It does not say it is an AI or a simulation.
 
 ## 5. Memory

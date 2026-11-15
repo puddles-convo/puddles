@@ -7,8 +7,9 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 **Status:** this README is the agreed design. No pipeline code is in this repo yet. Scores, counts and sources in the examples are illustrative.
 
 - One file per agent, with its prompt, where the input goes in it, its input and output formats, and its memory reads and writes: [docs/agents/](docs/agents/README.md)
-- The design behind memory, policy and the crisis path: [docs/agents.md](docs/agents.md)
-- Record formats: `schemas.py` (version 2), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+- The memory, end to end, in one file: [docs/memory.md](docs/memory.md). Go there for anything about memory.
+- The design behind policy and the crisis path: [docs/agents.md](docs/agents.md)
+- Record formats: `schemas.py` (version 3), with an example of each in `examples/`. They are a proposal for the team to settle under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
 - The device and its cloud brain: [puddles-stack](https://github.com/puddles-convo/puddles-stack)
 
 ## Contents
@@ -148,7 +149,7 @@ INFERENCE  (2 and 3 start together; RELEASE decides what is spoken)
 | [**3. Helper**](docs/agents/t2-i3-helper.md) | • Drafts the reply, following the policy file<br>• Same model, prompt and code as in training | Notes about this person, once at the start of the session | Nothing | `policy-v4`, the notes ("on short-term disability and worried about losing their job") and the turns so far | `That's a heavy thing to be carrying. What's making you feel the job is at risk right now?` |
 | [**Release**](docs/agents/i3b-release.md) (code, no model) | • Holds all audio until the crisis checker answers<br>• Crisis: fixed response. Checker failed: holding line. Otherwise: the draft. | Nothing | Nothing | The risk level and the helper's draft | The draft, or a fixed response such as "I'm really glad you told me that. Are you thinking about ending your life? ... You can call or text 988 ..." |
 | [**4. Speaker**](docs/agents/i4-speaker.md) (speech model) | • Turns the reply into speech, a sentence at a time | Nothing | Nothing | The reply text | Audio |
-| [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced or deleted | The finished session and the existing notes | `[{"action": "add", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
+| [**5. Note-taker**](docs/agents/i5-note-taker.md) | • After the session, decides what to remember about this person<br>• Adds notes only if the person agreed; can always delete | The existing notes about this person | Notes added, replaced, confirmed or deleted | The finished session and the existing notes | `[{"action": "add", "kind": "what_helps", "fact": "Slow breathing helps a bit when the worry gets bad."}]` |
 
 ## Models
 
@@ -201,7 +202,7 @@ Which model plays each agent. These are starting choices and none has been bench
 | Research note | Training | Researcher | Researcher | What has been searched, and the techniques found |
 | Policy edit | Training | Proposer | Proposer | Every change that was proposed |
 | Gate outcome | Training | Gatekeeper | Critic, Proposer | Which edits were kept or reverted, with the scores and the reason |
-| User note | User | Note-taker | Helper, Note-taker | One fact about one person, to carry into the next conversation |
+| User note | User | Note-taker | Helper, Note-taker | One fact about one person, to carry into the next conversation. Each note has one of six kinds, and one person has 23 notes at most. |
 
 Examples of each:
 
@@ -251,11 +252,13 @@ Every entry, in either past.dev memory, has the same shape:
 ### How the agents manage it together
 
 1. **Within a round, agents hand results straight to each other.** Memory is for learning from earlier rounds, because past.dev writes are queued and its reads are searches.
-2. **In training memory, agents only add.** A later fact, such as a rule being removed, is a new entry that names what it replaces. Older entries stay as history. In user memory, a corrected or forgotten note is deleted.
+2. **In training memory, agents only add.** A later fact, such as a rule being removed, is a new entry that names what it replaces. Older entries stay as history. In user memory, a corrected or forgotten note is deleted, and each kind of note has a limit, so one person's notes stay the same size however many sessions there are.
 3. **A search finds; the record files supply.** A recall is used only to find which records are relevant. What the agent is then shown is loaded from the record files and checked against the hash in the log, so a stale entry cannot mislead it.
-4. **Lists that must be complete come from the log.** The edits already tried, and the status of each pattern, are built by code and handed to the critic and the proposer.
+4. **History lists come from the log, within a budget.** The edits already tried, the searches already run and the status of each pattern are built by code. The researcher and the proposer are shown everything about the pattern in hand and the 10 most recent others, with a count of the rest. The critic is shown every pattern that has a rule, and the unsolved ones most like this round's failures. So a prompt does not grow with every round. The checks for a repeated edit or search run against the whole log.
 5. **Every copy is confirmed.** After a write, code checks that past.dev has finished taking it in, and records that in the log. A copy that does not arrive is retried.
 6. **The two memories never mix.** Training agents cannot read notes about a person, and the helper on the robot cannot read training records.
+
+The reasons for the limits on notes and history lists, and what other systems do, are in [docs/research/memory/00-summary.md](docs/research/memory/00-summary.md).
 
 This meets the past.dev challenge rules: the critic, researcher, proposer and gatekeeper all write; the critic, researcher and proposer all read; and the critic and the proposer both use outcomes the gatekeeper wrote.
 
@@ -348,7 +351,7 @@ Nothing is promoted until the noise has been measured and the safety case file e
 | The critic finds a new pattern | Pattern recorded, status `open` | Nothing yet |
 | An edit for it passes the gate | Outcome `kept`; pattern becomes `fixed` | New version with the rule |
 | An edit for it fails the gate | Outcome `reverted`, listed as a failed attempt | Previous version restored |
-| The pattern shows up again | Pattern becomes `recurring` | The proposer rewords or removes the rule; it does not add another |
+| The pattern shows up again | A new record for this sighting, pointing to the first one; the pattern becomes `recurring` | The proposer rewords or removes the rule; it does not add another |
 | A rule is removed | Outcome `kept` for the removal; its pattern goes back to `open` | New version without the rule |
 
 ### The check that proves they agree
