@@ -59,14 +59,20 @@ def stub_judge(records: list[ConversationRecord], round_: int = 0) -> list[Score
 
 
 def _call_judge(judge: Callable, records: list[ConversationRecord], round_: int) -> list[ScoredConversation]:
-    """Call `deps.judge` with the round number when it takes one (the overnight loop's judge),
-    and without it otherwise (the stage-2 contract the acceptance tests use)."""
+    """Call `deps.judge` as `judge(records, round_)` only when the callback asks for the round by name,
+    and as `judge(records)` (the stage-2 contract the acceptance tests use) otherwise.
+
+    The round is passed when the callback's second positional parameter is named `round_` or `round`
+    (the overnight loop's judge), or when it takes `*args`. In every other case, including a second
+    positional parameter with any other name (an older `judge(records, excluded_ids=...)` keeps its
+    default) and a callback whose signature cannot be read, it is called with the records only."""
     try:
         params = [p for p in inspect.signature(judge).parameters.values()
                   if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)]
     except (TypeError, ValueError):
         params = []
-    takes_round = len(params) >= 2 or any(p.kind is p.VAR_POSITIONAL for p in params)
+    takes_round = (any(p.kind is p.VAR_POSITIONAL for p in params)
+                   or (len(params) >= 2 and params[1].name in ("round_", "round")))
     return judge(records, round_) if takes_round else judge(records)
 
 

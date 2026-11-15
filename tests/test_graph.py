@@ -13,7 +13,7 @@ from loop.run_batch import _fake_helper, _fake_user
 from loop.runner import load_scenarios
 from puddles import tracing
 from puddles.decision_log import DecisionLog
-from puddles.graph import RoundDeps, run_round
+from puddles.graph import RoundDeps, _call_judge, run_round
 from puddles.memory import FakeMemory
 from puddles.policy import parse_policy
 from puddles.round import stand_in_gate
@@ -342,3 +342,60 @@ def test_the_shipped_policy_copied_to_another_folder_is_accepted(tmp_path, trace
     llm.add(CriticOutput, NOT_FOUND)
     state = run_round(make_deps(tmp_path / "root", llm), policy_path=copy, scenarios=SCENARIOS)
     assert state["event"].outcome == "no_pattern"
+
+
+# _call_judge passes the round number only to a callback that asks for it by name.
+
+def test_a_second_parameter_with_another_name_gets_the_records_only():
+    seen = []
+
+    def judge(records, excluded_ids=frozenset()):
+        seen.append((records, excluded_ids))
+        return []
+
+    _call_judge(judge, ["r"], 7)
+    assert seen == [(["r"], frozenset())]
+
+
+def test_a_second_parameter_named_round_underscore_gets_the_round():
+    seen = []
+
+    def judge(records, round_=0):
+        seen.append((records, round_))
+        return []
+
+    _call_judge(judge, ["r"], 7)
+    assert seen == [(["r"], 7)]
+
+
+def test_a_second_parameter_named_round_gets_the_round():
+    seen = []
+
+    def judge(records, round=0):  # noqa: A002 - the name is the contract under test
+        seen.append((records, round))
+        return []
+
+    _call_judge(judge, ["r"], 7)
+    assert seen == [(["r"], 7)]
+
+
+def test_a_star_args_callback_gets_the_records_and_the_round():
+    seen = []
+
+    def judge(*args):
+        seen.append(args)
+        return []
+
+    _call_judge(judge, ["r"], 7)
+    assert seen == [(["r"], 7)]
+
+
+def test_a_records_only_callback_gets_the_records_only():
+    seen = []
+
+    def judge(records):
+        seen.append(records)
+        return []
+
+    _call_judge(judge, ["r"], 7)
+    assert seen == [["r"]]
