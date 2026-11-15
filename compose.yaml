@@ -1,0 +1,25 @@
+services:
+  eval:
+    image: puddles-eval:local
+    build:
+      context: .
+      target: ${PUDDLES_IMAGE_TARGET:-full}
+    user: "${PUDDLES_UID:-10001}:${PUDDLES_GID:-10001}"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PUDDLES_CACHE: /cache
+      PUDDLES_JUDGE_PANEL: ${PUDDLES_JUDGE_PANEL:-}
+      PUDDLES_JUDGE_ASTRA: ${PUDDLES_JUDGE_ASTRA:-}
+      PUDDLES_JUDGE_TEMPERATURE: ${PUDDLES_JUDGE_TEMPERATURE:-}
+      PUDDLES_SAFETY_MODEL: ${PUDDLES_SAFETY_MODEL:-}
+      PUDDLES_HELPER_MODEL: ${PUDDLES_HELPER_MODEL:-}
+      PUDDLES_HELPER_BASE_URL: ${PUDDLES_HELPER_BASE_URL:-}
+      PUDDLES_HELPER_API_KEY: ${PUDDLES_HELPER_API_KEY:-}
+      PUDDLES_HELPER_TEMPERATURE: ${PUDDLES_HELPER_TEMPERATURE:-}
+      PUDDLES_VERA_USER_MODEL: ${PUDDLES_VERA_USER_MODEL:-}
+      PUDDLES_VERA_JUDGE_MODEL: ${PUDDLES_VERA_JUDGE_MODEL:-}
+    volumes:
+      - ./runs:/app/runs
+      - ./cache:/cache
+      - ./policies:/app/policies:ro
+      - ./calibration:/app/calibration:ro

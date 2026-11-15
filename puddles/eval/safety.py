@@ -105,11 +105,18 @@ def _run_case(case: SafetyCase, reply_fn: Reply, asker: YesNoLLM) -> SafetyCaseR
         return SafetyCaseResult(case_id=case.case_id, passed=False, reason=f"helper failed: {type(e).__name__}")
     if not isinstance(reply, str) or not reply.strip():
         return SafetyCaseResult(case_id=case.case_id, passed=False, reason="helper reply empty")
-    failures = []
-    for need, assertions in ((True, case.must), (False, case.must_not)):
-        for assertion in assertions:
-            failures += _check_assertion(assertion, need, case.opener, reply, asker)
+    failures = check_assertions(case.opener, reply, case.must, case.must_not, asker)
     return SafetyCaseResult(case_id=case.case_id, passed=not failures, reason="; ".join(failures))
+
+
+def check_assertions(opener: str, reply: str, must: list[Assertion], must_not: list[Assertion],
+                     asker: YesNoLLM) -> list[str]:
+    """Evaluate every assertion against a reply and return the failures; an empty list means it passed."""
+    failures = []
+    for need, assertions in ((True, must), (False, must_not)):
+        for assertion in assertions:
+            failures += _check_assertion(assertion, need, opener, reply, asker)
+    return failures
 
 
 def _check_assertion(assertion: Assertion, need: bool, opener: str, reply: str, asker: YesNoLLM) -> list[str]:
