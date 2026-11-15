@@ -19,10 +19,13 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 4. [Inference agents](#4-inference-agents)
 5. [The memory](#5-the-memory)
 6. [From memory to policy](#6-from-memory-to-policy)
-7. [Handoffs](#7-handoffs)
-8. [How training and inference connect](#8-how-training-and-inference-connect)
-9. [Data](#9-data)
-10. [Robot side](#10-robot-side)
+7. [The proposer's toolbox](#7-the-proposers-toolbox)
+8. [Handoffs](#8-handoffs)
+9. [How training and inference connect](#9-how-training-and-inference-connect)
+10. [How we measure the result](#10-how-we-measure-the-result)
+11. [Data](#11-data)
+12. [Robot side](#12-robot-side)
+13. [Related work](#13-related-work)
 
 ## 1. Training steps
 
@@ -89,7 +92,7 @@ The agent names link to a file for each one, with its prompt and formats.
 | [**3. Judge**](docs/agents/t3-judge.md) | • Rates each finished conversation<br>• Blind to which policy produced it, and frozen after calibration | Nothing (no access) | Nothing. Its scores go to the critic and the decision log. | The turns of one conversation, with no IDs and no policy version | `{"empathy": 3, "relevance": 2, "emotion_before": 4, "emotion_after": 4, "note": "Suggested HR before asking anything."}` |
 | [**4. Critic**](docs/agents/t4-critic.md) | • Reads the lowest-scoring conversations in full<br>• Names the one failure that explains most of them | Earlier patterns, and what happened to each | The failure pattern | About ten of the lowest-scoring conversations with the judge's notes, and the current policy | `{"found": true, "name": "advice-before-understanding", "seen_in": 2, "out_of": 3}` |
 | [**5. Researcher**](docs/agents/t5-researcher.md) | • Searches Exa for how counsellors handle that pattern<br>• Keeps sources, each with a one-line technique | Searches already run | The sources and techniques | The failure pattern | `{"sources": [{"url": "(from Exa)", "technique": "Ask one open question and reflect the answer before any suggestion."}]}` |
-| [**6. Proposer**](docs/agents/t6-proposer.md) | • Writes exactly one change to the policy<br>• Does not repeat an edit that was reverted | Earlier edits and their outcomes | The proposed edit | The current policy, the pattern and the sources | `{"action": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}` |
+| [**6. Proposer**](docs/agents/t6-proposer.md) | • Picks exactly one action from its [toolbox](#7-the-proposers-toolbox): a harness change or, on escalation, a model update<br>• States a hypothesis and a prediction the gate can check<br>• Does not repeat an action that was reverted | Earlier actions and their outcomes, and the lever scoreboard | The proposed action | The current harness version, the pattern, the sources, the scoreboard and the remaining budget | `{"action": "edit_rule", "args": {"op": "add", "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."}, "hypothesis": "...", "prediction": "relevance +0.2"}` |
 | [**7. Gatekeeper**](docs/agents/t7-gatekeeper.md) (code, no model) | • Tests the candidate on validation conversations and safety cases<br>• Keeps it, or restores the previous policy | Nothing | The outcome, copied from the decision log | The candidate policy, the current scores and the noise level | `{"decision": "kept", "policy_in_force": "policy-v4", "safety_passed": true}` |
 
 ## 3. Inference steps
@@ -227,7 +230,9 @@ This meets the past.dev challenge rules: the critic, researcher, proposer and ga
 
 ## 6. From memory to policy
 
-**The policy** is one plain text file of numbered rules, and it is the only thing that changes how the helper behaves:
+**The harness version** is what changes how the helper behaves: the policy file, the skill cards, the few-shot examples, the strategy rules, the inference setting and, if one has passed the gate, a LoRA adapter. Each is changed only through the proposer's [toolbox](#7-the-proposers-toolbox). This section uses the policy file as the example; every other part follows the same path.
+
+**The policy** is one plain text file of numbered rules:
 
 ```
 S1. If the person mentions wanting to die, hurting themselves or not being around, ask them directly
@@ -284,7 +289,7 @@ Rules starting with `S` are the protected safety rules, which no edit may change
 ### The rules
 
 1. **Memory never changes behaviour directly.** Nothing recalled from training memory goes into the helper's prompt, so no untested lesson reaches a person.
-2. **The only way into the policy is one edit that passed the gate.** The proposer returns a single rule change (add, reword or remove) and code applies it. That guarantees the safety rules and every other rule are untouched.
+2. **The only way into the harness is one action that passed the gate.** The proposer returns a single action from its toolbox and code applies it. That guarantees the safety rules and every other part are untouched.
 3. **The decision log is the authority, and memory is its copy.**
 4. **Every learned rule can be traced back** to its edit, its pattern, its sources and its test result.
 
@@ -302,8 +307,13 @@ keep the candidate only if all of these hold:
   4. every assertion of every safety case passes
   5. quality(candidate) - quality(current) > noise
   6. neither empathy nor relevance on its own fell by more than noise
-otherwise restore the previous policy file exactly
+  7. for a new adapter only: the safety benchmarks (crisis handling, over-refusal)
+     are no worse than with the adapter in force, because fine-tuning can weaken
+     safety behaviour even on harmless data
+otherwise restore the previous harness version exactly
 ```
+
+Condition 2 reads "exactly one action" for the other parts of the harness. The noise measure and the comparison method are proposals under review (see [section 10](#10-how-we-measure-the-result)).
 
 Nothing is promoted until the noise has been measured and the safety case file exists.
 
@@ -331,7 +341,51 @@ Notes about a person work differently. They go into the helper's prompt as facts
 
 The full design, including the log format, consent and forgetting, and the crisis path, is in [docs/agents.md](docs/agents.md).
 
-## 7. Handoffs
+## 7. The proposer's toolbox
+
+The proposer is the research agent of the loop. Each round it picks **one** action, fills in its arguments, and states what it expects to happen. Code carries the action out, the gatekeeper tests it, and the outcome is logged. Every action can be reverted.
+
+**Harness actions** (minutes per try)
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 1 | `edit_rule` | One numbered rule in the policy file: add, reword or remove | `S` safety rules are locked; token cap |
+| 2 | `add_skill_card` | A technique card in the skill library: when to use it, when not to, its steps and its sources. Write, rewrite or retire | Must cite the researcher's Exa sources |
+| 3 | `set_examples` | Which of the loop's own best conversations are used as few-shot examples, and for which situations | Train-split scenarios only |
+| 4 | `set_strategy_rules` | When the helper reflects, asks a question, reassures or suggests | Fixed list of ESConv strategy names; self-disclosure stays banned |
+| 5 | `set_inference` | How a reply is produced: single reply, plan then write, or best-of-N (N ≤ 4) | Stays under the latency cap measured on the robot |
+
+**Model actions** (escalation, about an hour)
+
+| # | Action | What it changes | Limits enforced by code |
+|---|---|---|---|
+| 6 | `build_dataset` | A training set from the loop's own conversations: best replies (SFT) or best and worst pairs (DPO) | Train split only; only conversations from the current harness version, each stamped with the version that produced it |
+| 7 | `train_adapter` | A LoRA fine-tune of the helper on Tinker. Method SFT or DPO, rank 16 or 32, 1 or 2 epochs | At most 2 runs; must start by Sunday 06:00; gate condition 7 applies |
+
+**When to escalate.** Use actions 1 to 5 first. Move to 6 and 7 only when a failure pattern survives two harness fixes, or three rounds in a row end without a kept change.
+
+**What the proposer receives.** The failure pattern and the sources; a lever scoreboard built by code from earlier gate outcomes (for each action: times tried, times kept, average gain, cost); and the remaining budget in rounds, time, spend and training runs.
+
+**What it returns.** An experiment, not only an edit:
+
+```json
+{
+  "action": "set_examples",
+  "args": {"situation": "user rejects a suggestion", "k": 2},
+  "hypothesis": "Rule C5 was kept but the pattern recurs in 9 of 40 conversations; the 9B model follows examples better than abstract rules.",
+  "prediction": "relevance +0.2 on validation; the pattern falls below 4 of 40",
+  "why_this_lever": "edit_rule was tried twice on this pattern: kept once, recurred",
+  "addresses": "pattern-r07"
+}
+```
+
+The gate outcome records whether the prediction came true, so the proposer's calibration across rounds is itself a result.
+
+**Outside the toolbox.** The proposer can never change the judges, the simulated users or scenarios, the test split, the safety cases, the crisis checker and its fixed responses, the gate rule or the budget.
+
+**Build order.** Actions 1 to 3 first, then 6 and 7 as the one escalation path, then 4 and 5 if time allows. The handoff format changes from `PolicyEdit` to an `Intervention` record with one variant per action; that change to `schemas.py` is proposed under [issue #1](https://github.com/puddles-convo/puddles/issues/1).
+
+## 8. Handoffs
 
 What passes directly from one step to the next. Formats are in `schemas.py`.
 
@@ -344,7 +398,7 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 | Judge → Critic | Empathy, relevance and emotion scores, a strategy tag per helper turn, a one-sentence note | `ScoreRecord` ([example](examples/training_H3_score_record.json)) |
 | Critic → Researcher | The failure pattern, or "none found" | `FailurePattern` ([example](examples/training_H4_failure_pattern.json)) |
 | Researcher → Proposer | Sources, each with a one-line technique, or "none found" | `ResearchNote` ([example](examples/training_H5_research_note.json)) |
-| Proposer → Gatekeeper | One edit. Code applies it to make the candidate policy file. | `PolicyEdit` ([example](examples/training_H6_policy_edit.json)) |
+| Proposer → Gatekeeper | One action from the toolbox. Code applies it to make the candidate harness version. | `PolicyEdit` today ([example](examples/training_H6_policy_edit.json)); `Intervention` proposed |
 | Gatekeeper → next round | The policy now in force, and the outcome for the decision log | `GateOutcome` ([example](examples/training_H7_gate_outcome.json)) |
 
 **Inference**
@@ -357,7 +411,7 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 | Release → Speaker | The draft, a fixed response or the holding line | `HelperReply` ([example](examples/inference_H3_helper_reply.json)) |
 | Speaker → Note-taker | The finished session | `ConversationRecord` ([example](examples/inference_H4_session_record.json)) |
 
-## 8. How training and inference connect
+## 9. How training and inference connect
 
 ```
 +--------------------+    policy file that passed the gate    +--------------------+
@@ -367,12 +421,27 @@ What passes directly from one step to the next. Formats are in `schemas.py`.
 +--------------------+   session records, with user consent   +--------------------+
 ```
 
-- **Training to inference:** exactly one thing, the policy file that last passed the gatekeeper. A policy that fails the safety check never reaches a user.
-- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes.
+- **Training to inference:** exactly one thing, the harness version that last passed the gatekeeper (the policy file and, if one passed, the adapter). A version that fails the safety check never reaches a user.
+- **Inference to training:** session records, and only when the user has consented. They use the same conversation record format as training, so the judge can score real sessions without changes. Not planned for the hackathon weekend.
 - **Where inference runs:** the device (stack-chan on an M5Stack CoreS3) captures audio and sends it to the cloud brain in `puddles-stack`, whose README places speech-to-text, the language model and text-to-speech there. The listener, crisis checker, helper and speaker are planned to run in that brain; the device plays the reply.
-- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#10-robot-side).
+- **What the brain needs from this repo:** the current policy file, set through one config value. See [Robot side](#12-robot-side).
 
-## 9. Data
+## 10. How we measure the result
+
+The loop's own judge decides what is kept. The headline result is measured separately, on data and judges the loop never sees, so it cannot be the loop grading itself. This section is a proposal for the team to settle.
+
+| Part | Proposal |
+|---|---|
+| Question | Does the improved harness (and adapter, if kept) make a 9B model a better and still safe support helper, and how much of the gap to a frontier model does it close? |
+| Test data | ESConv test split; CounselBench-Adv as external validation. Neither is used by the loop. |
+| Baselines | (a) the 5-line placeholder policy; (b) a hand-written policy; (c) the loop without Exa, where edits come from the critic alone; (d) a frontier model with the hand-written policy, as the ceiling. More to come. |
+| Held-out jury | Judges from other model families than the helper and the loop's judge, with distinct roles: the person seeking support, a counsellor, a safety reviewer (veto), and a sceptic looking for empty validation and flattery. Each score is reported separately with the agreement between jurors. |
+| Safety | Crisis handling (VERA-MH, once its licence is checked) and over-refusal on harmless messages, before and after every kept adapter. |
+| Uncertainty | Paired comparison on the same scenarios and seeds, with a bootstrap 95% interval on the difference. |
+| Headline | "Quality on the held-out test rose from X to Y (interval), closing Z% of the gap to the frontier ceiling, with no crisis-handling regression." |
+| Also reported | The gap between the loop's judge and the held-out jury, which shows how much the loop learned to please its own judge; the proposer's prediction accuracy; every reverted action. |
+
+## 11. Data
 
 Datasets are loaded at run time and are not committed to this repo.
 
@@ -382,9 +451,9 @@ Datasets are loaded at run time and are not committed to this repo.
 | [CounselBench-Adv](https://huggingface.co/datasets/izi-ano/CounselBench-Adv) | External validation, never seen by the loop | CC BY-NC-ND 4.0 |
 | [VERA-MH](https://github.com/SpringCare/VERA-MH) | Crisis-handling check | Not yet checked |
 
-## 10. Robot side
+## 12. Robot side
 
-The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from section 4 run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
+The robot is a StackChan (M5Stack CoreS3). It cannot run the models, so it is the microphone, speaker and face, and the inference agents from [section 4](#4-inference-agents) run in a cloud brain. The code is in [puddles-stack](https://github.com/puddles-convo/puddles-stack).
 
 ```
 +----------------------------+                          +------------------------------------+
@@ -407,10 +476,10 @@ The robot pair does not wait for training. They build the whole conversation pat
 | Config value | Now | After the merge |
 |---|---|---|
 | `HELPER_URL` | Stock model endpoint | Same endpoint |
-| `HELPER_MODEL` | Stock Qwen3.5-9B | Same, or the fine-tuned adapter if one exists |
+| `HELPER_MODEL` | Stock Qwen3.5-9B | Same, or the LoRA adapter if one passed the gate |
 | `POLICY_PATH` | Five-line placeholder policy | The policy file that passed the gatekeeper |
 
-The policy file is the main thing training produces. A fine-tuned model is optional.
+The policy file is the main thing training produces. An adapter exists only if the proposer escalated to `train_adapter` and the adapter passed the gate.
 
 ### What the robot pair receives and provides
 
@@ -447,6 +516,12 @@ These run with the stock model first, so that the merge changes nothing but conf
 - Latency: median and p95 from end of speech to first sound, recorded.
 
 Tasks: [puddles-stack issues V1 to V9](https://github.com/puddles-convo/puddles-stack/issues?q=is%3Aissue+label%3Avoice-path).
+
+## 13. Related work
+
+- **Karpathy's autoresearch** (March 2026): an agent edits one training script, runs short experiments and keeps only changes that improve the metric. Our loop has the same keep-or-revert shape, applied to a helper's harness and, on escalation, its weights.
+- **Prompt optimisers** such as OPRO and GEPA search over prompts against a score. Our differences: each change is grounded in sources found with Exa, the proposer chooses which lever to use, and safety rules are locked outside the search.
+- **MetaClaw** ([arXiv 2603.17187](https://arxiv.org/abs/2603.17187)) is the closest work: it evolves a skill library without gradients and runs LoRA updates on a scheduler that waits for the user to be idle. It stamps training data with the skill version that produced it, which we adopt in `build_dataset`. Our differences: the proposer decides when to train based on evidence, with a stated hypothesis, and every change, including an adapter, must pass a gate fixed before the run, with safety benchmarks, before it reaches a person.
 
 ## Limits
 
