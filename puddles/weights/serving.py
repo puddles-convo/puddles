@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 from loop.errors import ConfigError
-from loop.llm import ChatClient, FakeClient, OpenAICompatClient
+from loop.llm import USER_AGENT, ChatClient, FakeClient, OpenAICompatClient
 from loop.run_batch import _fake_helper
 
 
@@ -65,7 +65,8 @@ class TinkerAdapterLoader:
         if not sampler_path or not sampler_path.startswith("tinker://"):
             raise RuntimeError(f"{name} has no Tinker sampler checkpoint to serve from")
         return OpenAICompatClient(self.base_url, sampler_path, api_key=self.api_key, timeout=self.timeout,
-                                  extra_body=self.extra_body, max_tokens_param=self.max_tokens_param)
+                                  extra_body=self.extra_body, max_tokens_param=self.max_tokens_param,
+                                  user_agent=USER_AGENT)
 
     def unload(self, name: str) -> None:
         pass  # the checkpoint stays in Tinker storage; nothing is loaded anywhere
@@ -91,7 +92,7 @@ class VLLMAdapterLoader:
                    server_dir=os.environ.get("PUDDLES_ADAPTER_SERVER_DIR", "/adapters"))
 
     def _post(self, path: str, body: dict) -> str:
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
         if self.base.api_key:
             headers["Authorization"] = f"Bearer {self.base.api_key}"
         req = urllib.request.Request(f"{self.base.base_url}/{path}", data=json.dumps(body).encode(),

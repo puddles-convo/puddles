@@ -71,8 +71,12 @@ class TinkerBackend:
     def prompt_tokens(self, system: str, messages: list[dict[str, str]]) -> list[int]:
         chat = [{"role": "system", "content": system}, *messages]
         # enable_thinking=False matches the helper's serving (thinking off); other templates ignore it.
-        return list(self.tok.apply_chat_template(chat, add_generation_prompt=True, tokenize=True,
-                                                 enable_thinking=False))
+        out = self.tok.apply_chat_template(chat, add_generation_prompt=True, tokenize=True, enable_thinking=False)
+        # transformers 5 returns a BatchEncoding (a mapping) here; older releases return the token list.
+        ids = out["input_ids"] if hasattr(out, "keys") else out
+        if ids and isinstance(ids[0], list):
+            ids = ids[0]
+        return [int(t) for t in ids]
 
     def sample(self, prompt_tokens: list[int], system: str, messages: list[dict[str, str]], n: int, *,
                max_tokens: int, temperature: float) -> list[Candidate]:
@@ -90,7 +94,7 @@ class TinkerBackend:
 
         full = prompt + completion
         return types.Datum(model_input=types.ModelInput.from_ints(full[:-1]),
-                           loss_fn_inputs={"target_tokens": full[1:], **inputs})
+                           loss_fn_inputs={"target_tokens": full[1:], **inputs})  # type: ignore[dict-item]
 
     def _ref_sum(self, prompt: list[int], completion: list[int]) -> float:
         from tinker import types

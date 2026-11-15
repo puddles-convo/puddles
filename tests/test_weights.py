@@ -309,6 +309,7 @@ def test_the_tinker_loader_asks_tinker_for_the_checkpoint(monkeypatch):
     path = "tinker://run-1/sampler_weights/adapter-01"
     assert (client.base_url, client.model, client.api_key) == (TINKER_BASE_URL, path, "k")
     assert client.extra_body == {"reasoning_effort": False}
+    assert client.user_agent == "puddles/0.1"  # Cloudflare refuses urllib's default
     with pytest.raises(RuntimeError):
         loader.load("x", None, None)
     monkeypatch.delenv("TINKER_API_KEY")

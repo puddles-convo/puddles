@@ -50,11 +50,12 @@ A training run that crashes is logged `failed` and costs only that run. An error
 ## Settings and keys
 
 - **Settings:** the `[weights]` table in `config/run.toml`. `base_model` must be Tinker's name for the helper's model.
-- **Keys:** `TINKER_API_KEY`. `PUDDLES_TINKER_EXTRA_BODY` (a JSON object) is merged into every request to a Tinker-served adapter. Put the switch that turns the model's thinking off there: Tinker takes `reasoning_effort`, so check which values the model accepts.
+- **Keys:** `TINKER_API_KEY`. `PUDDLES_TINKER_EXTRA_BODY` (a JSON object) is merged into every request to a Tinker-served adapter. Put the switch that turns the model's thinking off there: for Qwen3.5-9B, `{"reasoning_effort": false}`.
 - **Fully on Tinker:** point the helper at Tinker too:
   - `HELPER_URL` = `https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`
   - `HELPER_MODEL` = the base model's Tinker ID
   - `HELPER_API_KEY` = the Tinker key
+  - `HELPER_USER_AGENT` = any name, e.g. `puddles/0.1`, and `HELPER_EXTRA_BODY` = `{"reasoning_effort": false}`
 
   Then no model is hosted by us at all. The judge and the simulated user still need their own endpoints.
 - **With `serve = "vllm"`:**
@@ -64,7 +65,8 @@ A training run that crashes is logged `failed` and costs only that run. An error
 
 ## Not built or not checked
 
-- **Never run on Tinker.** No key was available. The Tinker calls follow the SDK (0.39) and its documentation, and need a 5-step smoke run first. Tinker's OpenAI-compatible endpoint is labelled beta. With `serve = "vllm"`, that run must also check that `build_lora_adapter` and vLLM's LoRA path handle Qwen3.5-9B's layers. Qwen3-8B is the README's fallback.
+- **Tinker smoke run only, not a loop run.** `python -m scripts.weights_smoke` (Qwen/Qwen3.5-9B, 15 Nov) sampled replies, took one DPO and one GRPO step, saved the weights and got a reply from the saved checkpoint through Tinker's chat endpoint, in about 70 seconds. It ranks replies by length, not with the judge, and no full loop with the gate has run on Tinker. Tinker's OpenAI-compatible endpoint is labelled beta.
+- **Tinker gotchas found by that run:** Cloudflare in front of the chat endpoint refuses urllib's default User-Agent (error 1010), so `OpenAICompatClient` takes an optional `user_agent`: Tinker-served adapters send one, and a helper on Tinker needs `HELPER_USER_AGENT` set (any name, e.g. `puddles/0.1`). Unset, requests are byte-for-byte as before. Qwen3.5-9B reasons by default there and takes only `true` or `false` for `reasoning_effort`, so set `PUDDLES_TINKER_EXTRA_BODY='{"reasoning_effort": false}'` (and `HELPER_EXTRA_BODY` the same when the helper runs on Tinker). With `serve = "vllm"`, that run must also check that `build_lora_adapter` and vLLM's LoRA path handle Qwen3.5-9B's layers. Qwen3-8B is the README's fallback.
 - **Safe LoRA:** `safe_lora.py` has the projection and its tests, but it is not applied to exported adapters. That needs the base and instruct weights of the helper's layers.
 - **No safety data mixed into training.** Safety is enforced only by the gate's two safety checks.
 - **Tinker cost isn't metered.** Judge calls made while building data are metered under the gatekeeper.
