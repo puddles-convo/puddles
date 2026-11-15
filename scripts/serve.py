@@ -18,7 +18,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Callable, Mapping, NoReturn, Sequence
+from typing import Callable, Mapping, NoReturn, Sequence, TypeVar
 
 from loop.errors import ConfigError, PolicyError
 from loop.llm import ChatClient
@@ -27,10 +27,10 @@ from puddles.inference import crisis
 from puddles.inference.live import PlainLLM
 from puddles.inference.note_store import FakeUserMemory, NoteStore, PastUserMemory, UserMemory
 from puddles.inference.service import ServiceConfig, create_app
-from puddles.llm import LLM, AgentFailed, OpenAILLM
-from puddles.memory import PastError
+from puddles.llm import LLM, OpenAILLM
 from scripts.chat import FakeNoteTaker, fake_checker, fake_helper
 
+T = TypeVar("T")
 TOKEN_VAR = "PUDDLES_SERVICE_TOKEN"
 NOTES_KEYS = ("PAST_API_KEY", "OPENAI_API_KEY")
 
@@ -43,6 +43,23 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         _print_error(message)
         sys.exit(2)
+
+
+class StartupFailed(ConfigError):
+    """A startup step failed with an exception whose message is not ours to print: only the step and the type."""
+
+    def __init__(self, what: str, exc: BaseException) -> None:
+        super().__init__(f"{what} failed ({type(exc).__name__})")
+
+
+def _step(what: str, fn: Callable[[], T]) -> T:
+    """Run one startup step. ConfigError and PolicyError keep their messages, which this repo writes."""
+    try:
+        return fn()
+    except (ConfigError, PolicyError):
+        raise
+    except Exception as exc:
+        raise StartupFailed(what, exc) from exc
 
 
 def _positive(raw: str) -> float:
@@ -74,8 +91,8 @@ def build_config(args: argparse.Namespace, env: Mapping[str, str]) -> ServiceCon
     if not token:
         raise ConfigError(f"{TOKEN_VAR} is not set")
     policy_path = Path(args.policy)
-    check_policy_file(policy_path)  # refused at startup, not at the first person's session
-    path = crisis.load_path()
+    _step("loading the policy file", lambda: check_policy_file(policy_path))  # refused now, not at a session
+    path = _step("loading the crisis path", crisis.load_path)
     root = Path(args.root)
     notes_root = Path(args.notes_root) if args.notes_root is not None else root
     memory: UserMemory
@@ -104,10 +121,11 @@ def build_config(args: argparse.Namespace, env: Mapping[str, str]) -> ServiceCon
         missing = [name for name in NOTES_KEYS if not env.get(name)]
         if missing:
             raise ConfigError(f"{' and '.join(missing)} not set; the notes need them")
-        client_from_env("HELPER")  # one of each, once, so a missing variable is found now
-        OpenAILLM()
-        PlainLLM.from_env()
-        memory = PastUserMemory()
+        # One of each, once, so a missing variable is found now.
+        _step("building the helper's client", lambda: client_from_env("HELPER"))
+        _step("building the note-taker's model", OpenAILLM)
+        _step("building the note-taker's plain model", PlainLLM.from_env)
+        memory = _step("connecting the notes memory", PastUserMemory)
 
         def client_factory() -> ChatClient:
             return client_from_env("HELPER")
@@ -134,12 +152,12 @@ def main(argv: Sequence[str] | None = None, *, run: Callable[..., None] | None =
     args = _parse(argv)
     try:
         config = build_config(args, os.environ)
-        app = create_app(config)
-    except (ConfigError, PolicyError, OSError, UnicodeDecodeError, ValueError, PastError, AgentFailed) as exc:
-        detail = str(exc)
-        about_file = isinstance(exc, (OSError, UnicodeDecodeError)) and args.policy not in detail
-        where = f"{args.policy}: " if about_file else ""
-        _print_error(f"{where}{type(exc).__name__}: {detail}")
+        app = _step("building the app", lambda: create_app(config))
+    except (ConfigError, PolicyError) as exc:  # messages written by this repo; StartupFailed holds a type name only
+        _print_error(str(exc))
+        return 2
+    except Exception as exc:  # not through _step: say what failed and the type, never the message
+        _print_error(f"startup failed ({type(exc).__name__})")
         return 2
     if run is None:
         import uvicorn

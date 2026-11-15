@@ -320,11 +320,16 @@ class TurnService:
 # ---------- the app ----------
 
 def _authorized(request: Request, token: str) -> bool:
-    values = request.headers.getlist("authorization")
-    if len(values) != 1 or not values[0].startswith(BEARER):
+    """Exactly one Authorization header whose raw bytes are `Bearer <token>` in UTF-8. Never raises."""
+    try:
+        values = [value for name, value in request.headers.raw if name.lower() == b"authorization"]
+        expected = token.encode("utf-8")
+    except Exception:  # a header or token that cannot be compared is a refusal, never an error
         return False
-    sent = values[0][len(BEARER):].encode("utf-8", "surrogateescape")
-    return hmac.compare_digest(sent, token.encode("utf-8"))
+    prefix = BEARER.encode("ascii")
+    if len(values) != 1 or not values[0].startswith(prefix):
+        return False
+    return hmac.compare_digest(values[0][len(prefix):], expected)
 
 
 def _error(status: int, body: dict[str, Any]) -> JSONResponse:

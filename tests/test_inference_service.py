@@ -583,6 +583,105 @@ def test_a_turn_that_raises_gives_the_offline_line_and_keeps_the_session(tmp_pat
     assert PHRASE not in caplog.text and "RuntimeError" in caplog.text
 
 
+# ---------- repair round 1 ----------
+
+@pytest.mark.parametrize("headers", [
+    [(b"Authorization", b"Bearer " + TOKEN.encode() + b"\xc3\xa9")],
+    [(b"Authorization", b"Bearer \xff\xfe" + TOKEN.encode())],
+    [(b"Authorization", f"Bearer {TOKEN}".encode()), (b"Authorization", f"Bearer {TOKEN}".encode())],
+], ids=["utf8-extra", "not-utf8", "two-headers"])
+def test_odd_authorization_headers_are_refused_never_an_error(headers, tmp_path):
+    app = create_app(make_config(tmp_path))
+    body = {"user_id": PERSON, "remember_me": False, "consent_for_training": False}
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.post("/sessions", json=body, headers=headers)
+        assert r.status_code == 401 and r.json() == {"error": "unauthorized"}
+        r = c.post("/sessions", content=b"{", headers=headers + [(b"Content-Type", b"application/json")])
+        assert r.status_code == 401
+    assert app.state.service.live() == []
+
+
+def test_a_token_outside_ascii_is_compared_as_utf8(tmp_path):
+    cfg = make_config(tmp_path)
+    cfg.token = "tök-en"
+    app = create_app(cfg)
+    body = {"user_id": PERSON, "remember_me": False, "consent_for_training": False}
+    with TestClient(app) as c:
+        r = c.post("/sessions", json=body, headers=[(b"Authorization", "Bearer tök-en".encode("utf-8"))])
+        assert r.status_code == 201
+
+    # TestClient re-encodes header values as UTF-8, so the raw bytes are checked on a request made by hand.
+    from fastapi import Request
+
+    from puddles.inference.service import _authorized
+
+    def request(*values: bytes) -> Request:
+        return Request({"type": "http", "headers": [(b"authorization", v) for v in values]})
+
+    assert _authorized(request("Bearer tök-en".encode("utf-8")), "tök-en")
+    assert not _authorized(request("Bearer tök-en".encode("latin-1")), "tök-en")
+    assert not _authorized(request(b"Bearer \xff"), "tök-en")
+    assert not _authorized(request(b"Bearer tok-en"), "tok-en\udcff")   # a token that cannot be encoded
+    assert not _authorized(request(b"Bearer x", b"Bearer x"), "x")
+
+
+def test_a_null_session_id_is_the_same_as_leaving_it_out(tmp_path):
+    import re
+
+    app = create_app(make_config(tmp_path))
+    body = {"user_id": PERSON, "remember_me": False, "consent_for_training": False, "session_id": None}
+    with TestClient(app) as c:
+        r = c.post("/sessions", json=body, headers=AUTH)
+    assert r.status_code == 201 and re.fullmatch(r"sess-\d{14}-[0-9a-f]{8}", r.json()["session_id"])
+
+
+def test_notes_reason_reaches_no_response_and_no_log(tmp_path, caplog):
+    secret = "secret-reason-words"
+
+    class Failing:
+        untraced = True
+
+        def structured(self, *a: Any) -> Any:
+            raise RuntimeError(secret)
+
+    caplog.set_level(logging.DEBUG)
+    app = create_app(make_config(tmp_path, note_llm_for=lambda consent: Failing()))
+    with TestClient(app) as c:
+        start(c, session_id="s1")
+        say(c, "s1", "hello there")
+        r = end(c, "s1")
+    assert r.status_code == 200 and r.json()["notes"]["failed"] is True
+    assert secret not in r.text and secret not in caplog.text
+
+
+@pytest.mark.parametrize("problem", ["crisis-load", "missing-policy", "app"])
+def test_serve_startup_error_names_the_step_and_type_never_the_message(problem, tmp_path, monkeypatch, capsys):
+    import scripts.serve as serve
+
+    monkeypatch.setenv("PUDDLES_SERVICE_TOKEN", TOKEN)
+    policy = tmp_path / f"{TOKEN}.md"            # an OSError message would name this path, token and all
+    policy.write_bytes(POLICY_SRC.read_bytes())
+
+    def broken(*a: Any, **kw: Any) -> Any:
+        raise RuntimeError("cannot go on " + TOKEN)
+
+    if problem == "crisis-load":
+        monkeypatch.setattr(crisis, "load_path", broken)
+    elif problem == "missing-policy":
+        policy.unlink()
+    else:
+        monkeypatch.setattr(serve, "create_app", broken)
+    capsys.readouterr()
+    called: list[bool] = []
+    code = serve.main(["--fake", "--policy", str(policy), "--root", str(tmp_path / "root")],
+                      run=lambda *a, **kw: called.append(True))
+    out = capsys.readouterr()
+    assert code == 2 and called == [] and out.out == ""
+    lines = out.err.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("error: ") and TOKEN not in out.err
+    assert ("RuntimeError" if problem != "missing-policy" else "FileNotFoundError") in lines[0]
+
+
 # ---------- create_app refuses a bad config ----------
 
 @pytest.mark.parametrize("change", [{"token": ""}, {"token": None}, {"max_sessions": 0}, {"idle_timeout_s": 0},
