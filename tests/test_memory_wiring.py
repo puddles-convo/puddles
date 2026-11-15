@@ -6,7 +6,8 @@ import pytest
 
 from puddles.decision_log import DecisionLog
 from puddles.memory import FakeMemory, PastError
-from puddles.round import finish_round, memory_trace, policy_in_force, retry_pending, run_agents, stand_in_gate
+from puddles.replay import policy_in_force
+from puddles.round import finish_round, memory_trace, retry_pending, run_agents, stand_in_gate
 from schemas import CriticOutput, MemoryCopyEvent, ProposerOutput, ResearcherOutput, ScoredConversation
 from tests.fakes import FakeSearch, ScriptedLLM
 
@@ -34,7 +35,7 @@ def test_two_rounds_wire_memory_between_agents(tmp_path):
     llm.add(ProposerOutput, {"action": "add", "rule_text": REVERTED_RULE,
                              "summary": "Hold advice until asked, for advice-before-understanding."})
     r1 = run_agents(1, CONVS, START, log, mem, llm, search, root)
-    finish_round(r1, stand_in_gate(r1, "reverted"), log, mem, root)
+    finish_round(r1, stand_in_gate(r1, "reverted"), log, mem, root, START)
     assert {e.identity for e in mem.entries.values()} == {"critic", "researcher", "proposer", "gatekeeper"}
 
     # Round 2: the same pattern recurs. Each agent first gets a bad answer rejected.
@@ -47,22 +48,27 @@ def test_two_rounds_wire_memory_between_agents(tmp_path):
             {"action": "add", "rule_text": REVERTED_RULE, "summary": "Same again."},
             {"action": "add", "rule_text": "In your first two replies, ask one open question and hold suggestions.",
              "summary": "Ask first instead of withholding advice; unlike edit-r01 it gives the helper a step."})
-    r2 = run_agents(2, CONVS, policy_in_force(root, START), log, mem, llm, search, root)
-    finish_round(r2, stand_in_gate(r2, "kept"), log, mem, root)
+    r2 = run_agents(2, CONVS, policy_in_force(log, root, START), log, mem, llm, search, root)
+    finish_round(r2, stand_in_gate(r2, "kept"), log, mem, root, START)
 
     critic_prompt = llm.prompts[CriticOutput][-1]
-    assert "pattern-r01: advice-before-understanding, open" in critic_prompt  # from the log
+    assert "pattern-r01: advice-before-understanding, open, rule None, seen in 1 rounds" in critic_prompt  # log
     assert "gate-r01: edit edit-r01 was reverted" in critic_prompt  # from memory, written by the gatekeeper
     assert "counselling skills exploring before giving advice" in llm.prompts[ResearcherOutput][-2]
     assert "were run in earlier rounds" in llm.prompts[ResearcherOutput][-1]
     proposer_prompt = llm.prompts[ProposerOutput][-1]
-    assert "edit-r01: add C9, reverted." in proposer_prompt and "Gate: Stand-in gate" in proposer_prompt
+    assert "edit-r01 for pattern-r01: add C9, reverted." in proposer_prompt and "Gate: Stand-in gate" in proposer_prompt
     assert "same edit as edit-r01, which was reverted" in proposer_prompt
 
-    assert r2.pattern.id == "pattern-r01" and r2.edit.rule_id == "C10"
+    assert r2.pattern.id == "pattern-r02" and r2.pattern.same_as_pattern_id == "pattern-r01"
+    assert r2.research.pattern_id == r2.edit.pattern_id == "pattern-r01" and r2.edit.rule_id == "C10"
     assert (root / "policies" / "policy-v4.md").read_text().startswith("# policy-v4\n")
-    assert policy_in_force(root, START).name == "policy-v4.md"
-    assert "pattern-r01-seen-r02" in mem.entries
+    assert policy_in_force(log, root, START).name == "policy-v4.md"
+    assert mem.entries["pattern-r02"].content.endswith("Same pattern as pattern-r01.")
+    assert log.rounds()[-1].pattern.same_as_pattern_id == "pattern-r01"
+    assert (root / "policies" / "policy-v4.meta.json").exists()
+    brief = log.earlier_patterns()
+    assert [(b.id, b.status, b.rule_id, b.sightings) for b in brief] == [("pattern-r01", "fixed", "C10", 2)]
     assert [e.status for e in log.events() if e.event == "memory_copy"] == ["confirmed"] * 8
 
     trace = {(row["record"], row["round"]): row for row in memory_trace(log, root)}

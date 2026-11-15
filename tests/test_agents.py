@@ -29,10 +29,10 @@ def test_critic_retries_once_with_the_failed_checks(tmp_path):
     inp = critic.build_input(1, POLICY, CONVS, log, mem, tmp_path)
     llm = ScriptedLLM()
     llm.add(CriticOutput, {**GOOD, "out_of": 10, "example_conversation_ids": ["conv-made-up"]}, GOOD)
-    out = critic.run(inp, llm)
+    out = critic.run(inp, llm, log)
     assert out.seen_in == 3
     assert "out_of must be 4" in llm.prompts[CriticOutput][1] and "conv-made-up" in llm.prompts[CriticOutput][1]
-    record = critic.to_record(out, inp)
+    record = critic.to_record(out, inp, log)
     assert record.id == "pattern-r01" and record.out_of == 4
 
 
@@ -42,15 +42,15 @@ def test_critic_gives_up_after_two_failures_and_allows_none_found(tmp_path):
     llm = ScriptedLLM()
     llm.add(CriticOutput, {**GOOD, "seen_in": 9}, {**GOOD, "seen_in": 9})
     with pytest.raises(AgentFailed):
-        critic.run(inp, llm)
+        critic.run(inp, llm, log)
     llm.add(CriticOutput, {"found": False, "reason": "No pattern in more than one conversation."})
-    assert critic.to_record(critic.run(inp, llm), inp) is None
+    assert critic.to_record(critic.run(inp, llm, log), inp, log) is None
 
 
 def test_researcher_rejects_urls_exa_did_not_return(tmp_path):
     log, mem = setup(tmp_path)
     inp = critic.build_input(1, POLICY, CONVS, log, mem, tmp_path)
-    pattern = critic.to_record(CriticOutput.model_validate(GOOD), inp)
+    pattern = critic.to_record(CriticOutput.model_validate(GOOD), inp, log)
     search = FakeSearch({"exploring before advice": [{"url": "https://uni.example/skills", "title": "t", "text": "x"}]})
     llm = ScriptedLLM()
     bad = {"queries": ["exploring before advice"],
@@ -58,7 +58,7 @@ def test_researcher_rejects_urls_exa_did_not_return(tmp_path):
     good = {"queries": ["exploring before advice"],
             "sources": [{"url": "https://uni.example/skills", "title": "t", "technique": "Ask one question."}]}
     llm.add(ResearcherOutput, bad, good)
-    out, searches = researcher.run(researcher.build_input(pattern, log, mem, tmp_path), llm, search)
+    out, searches = researcher.run(researcher.build_input(pattern, log, mem, tmp_path), llm, search, log)
     assert [s.url for s in out.sources] == ["https://uni.example/skills"]
     assert "https://invented.example" in llm.prompts[ResearcherOutput][1]
     assert searches[0]["query"] == "exploring before advice"
@@ -67,7 +67,7 @@ def test_researcher_rejects_urls_exa_did_not_return(tmp_path):
 def test_proposer_cannot_touch_safety_and_code_applies_the_edit(tmp_path):
     log, mem = setup(tmp_path)
     inp = critic.build_input(1, POLICY, CONVS, log, mem, tmp_path)
-    pattern = critic.to_record(CriticOutput.model_validate(GOOD), inp)
+    pattern = critic.to_record(CriticOutput.model_validate(GOOD), inp, log)
     research = researcher.to_record(ResearcherOutput.model_validate(
         {"queries": ["q"], "sources": [{"url": "https://u", "technique": "Ask first."}]}), pattern, 1)
     p_in = proposer.build_input(POLICY, pattern, research, log, mem, tmp_path)

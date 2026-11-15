@@ -369,37 +369,28 @@ class LiveNoteIndex(Strict):       # refuses to validate over a limit
 
 ## 9. What is built and what is not
 
-Version 3 is in `schemas.py`, the agent files, the README and the examples. The code under `puddles/` was written against version 2.
+Version 3 is in `schemas.py`, the agent files, the README, the examples and the code under `puddles/`.
 
 | Part | State |
 |---|---|
 | past.dev client: write, poll, recall, audience setup | Built: `puddles/memory.py` |
-| Memory sentences and recall to verified records | Built: `puddles/memory.py` |
-| Record files, the log reader and appender | Built: `puddles/records.py`, `puddles/decision_log.py` |
+| Memory sentences and recall to verified records (at most `FROM_MEMORY_LIMIT`) | Built: `puddles/memory.py` |
+| Record files, the log reader and appender (one `round` event per round) | Built: `puddles/records.py`, `puddles/decision_log.py` |
+| Per-sighting pattern IDs, status keyed by the first sighting, budgeted history lists | Built: `puddles/decision_log.py`, `puddles/agents/` |
 | Critic, researcher and proposer using the log and memory | Built: `puddles/agents/` |
-| End of round: log entry, copies, retry of pending copies | Built: `puddles/round.py` |
+| End of round: log entry, copies, retry of pending and missing copies | Built: `puddles/round.py` |
+| Replay check of the log against the policy file, its Safety section and `.meta.json` | Built: `puddles/replay.py`, run at the start and end of every round |
+| Policy in force taken from the log, with its hash checked | Built: `replay.policy_in_force` |
+| `.meta.json` for each promoted policy | Built: written from the log on promotion |
 | Gatekeeper | Stand-in only. Its entries say so in the log and in memory. |
-| Replay check of the log against the policy file | Not built (issue #13) |
-| `.meta.json` for each policy | Format exists; nothing writes it |
 | Limit validation on the live-note index | Built: `LiveNoteIndex` in `schemas.py` |
 | Note store, note-taker, expiry, the four-step save | Not built (plan stage 4) |
 
-**Where the code on `main` differs from version 3**
+**Restart safety** (`puddles.round.prepare_round`, run before each round):
 
-| Version 3 says | The code does |
-|---|---|
-| Every sighting of a pattern has its own record ID | A recurrence reuses the earlier ID; the memory entry gets a suffix such as `pattern-r03-seen-r07` (`entry_for`) |
-| Status and history are keyed by the first sighting's ID | `DecisionLog.earlier_patterns` keys by the event's own pattern ID, and `finish_round` does not write `same_as_pattern_id` into the log |
-| History lists are budgeted to the relevant items plus 10 | `earlier_edits`, `earlier_queries` and `earlier_patterns` return everything |
-| At most 5 records are loaded after a recall | `recall_records` loads up to 8 |
-| A recurrence sentence ends with `Same pattern as ...` | The critic's sentence has no such ending |
-
-Known weak points in the built code, already listed in the build plan (stage 6):
-
-- The policy in force is chosen by file modification time, not from the log.
-- The promoted policy file is written before the `round` event. A crash between the two leaves a policy the log does not know.
-- A crash after the `round` event and before a copy leaves no `pending` entry, so that copy is never resent.
-- The three-attempt limit is checked before the retry, so the loop stops one round late.
+- A promoted policy file that no `round` event names is removed, with its `.meta.json`, and the round runs again.
+- A record a `round` event points to with no `memory_copy` event is copied then.
+- Pending copies are resent, and the three-attempt limit is checked again after the resend, so the loop stops before the next round.
 
 ## 10. Still to decide
 

@@ -532,7 +532,8 @@ Each run ends by printing, for every record, the agent that wrote it and the age
 | `puddles/memory.py` | past.dev client (ingest, poll, recall, audience setup), memory sentences, recall to verified records |
 | `puddles/agents/critic.py`, `researcher.py`, `proposer.py` | Build each input from the log and memory, call the model, check the output, retry once, make the record |
 | `puddles/policy.py` | Parse the policy and apply one edit in code; the Safety section is never touched |
-| `puddles/decision_log.py` | A minimal reader and appender for the log until A5 (#13) lands |
+| `puddles/decision_log.py` | Reader and appender for the log; builds the budgeted history lists and pattern status |
+| `puddles/replay.py` | The replay check: the log, the policy in force, its Safety section and `.meta.json` must agree |
 | `puddles/round.py` | Steps 4 to 6 with direct handoffs, then the log entry and the copies into memory |
 
 ## Limits
