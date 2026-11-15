@@ -61,9 +61,9 @@ def create_app(config: ServiceConfig) -> fastapi.FastAPI
 
 ### Who may call
 
-Every route except `GET /health` needs the header `Authorization: Bearer <token>`. A request is let through only when the header is present, has that exact form and the token equals `config.token`, compared with `hmac.compare_digest`. Everything else gets `401` and `{"error": "unauthorized"}` before the body is looked at, before any session is looked up and before anything else happens.
+Every route except `GET /health` needs the header `Authorization: Bearer <token>`. A request is let through only when there is exactly one such header, it has that exact form (`Bearer`, one space, the token) and the token equals `config.token`, compared with `hmac.compare_digest` on the UTF-8 bytes of both. A header that cannot be compared, for example one with characters outside ASCII, is a refusal like any other, never an error. Everything else gets `401` and `{"error": "unauthorized"}` before the body is looked at, before any session is looked up and before anything else happens.
 
-`GET /health` returns `200` and `{"status": "ok"}`, and nothing else.
+`GET /health` returns `200` and `{"status": "ok"}`, and nothing else. FastAPI's documentation routes are turned off. A path that is not one of the four routes gets `404` and `{"error": "not_found"}`, and a wrong method `405` and `{"error": "method_not_allowed"}`.
 
 ### Start a session: `POST /sessions`
 
@@ -73,7 +73,7 @@ Request body:
 {"user_id": "user-01", "remember_me": false, "consent_for_training": false, "session_id": "sess-0007"}
 ```
 
-- `user_id`, `remember_me` and `consent_for_training` are required. The two consent answers must be JSON booleans: a string, a number or a missing answer is refused, never read as yes or as no. `session_id` is optional. Any other field is refused.
+- `user_id`, `remember_me` and `consent_for_training` are required. The two consent answers must be JSON booleans: a string, a number or a missing answer is refused, never read as yes or as no. `session_id` is optional, and a `null` is the same as leaving it out. Any other field is refused.
 - `user_id` must pass `note_store.check_user_id`. `session_id`, when given, must pass the check `session_log.session_path` makes, and be at most 64 characters. When it is not given the service makes one: `sess-`, the UTC time as `YYYYMMDDHHMMSS`, `-`, and 8 random hex characters.
 
 In this order, after the body is valid:
@@ -87,7 +87,7 @@ In this order, after the body is valid:
 7. With `consent_for_training` true, `puddles.tracing.setup(tracking_uri=config.mlflow_uri)`. With it false the service makes no MLflow call of its own.
 8. `live.start_notes(store, user_id)` gives the session's `user_notes`. If it raises, the session starts with no notes and `notes_failed` is true.
 
-A refusal at any step leaves no session behind and nothing on disk.
+A refusal at any step leaves no session behind, holds no place for the session ID or the person, and creates or changes no file under `root` or the notes root. What `tracing.setup` itself writes to the MLflow store is not undone.
 
 Response, `201`:
 
@@ -95,7 +95,7 @@ Response, `201`:
 {"session_id": "sess-0007", "policy_version": "policy-v1", "notes_loaded": 2, "notes_failed": false}
 ```
 
-The policy is read once per session, at its start. A policy file that changes afterwards reaches only sessions started later.
+The policy is loaded once per session, at its start, by one call of `check_policy_file`. A policy file that changes afterwards reaches only sessions started later.
 
 ### One turn: `POST /sessions/{session_id}/turns`
 
@@ -132,6 +132,7 @@ The service does what `scripts/chat.py` does at the end: `live.finish_session(se
 - `record` is the `ConversationRecord` as JSON when one was written, which needs `consent_for_training` and at least one turn, and `null` otherwise. `kept` is true exactly when `record` is not `null`.
 - `notes` holds counts, the note IDs not yet confirmed deleted, and whether the notes step failed. Never a note's text and never an error's text.
 - A session that is not live: `404`, `{"error": "session_not_found"}`. Ending twice gives `404` the second time.
+- The end has begun once the service has marked the session as ending, which it does before it waits for anything. A session that is ending is still listed by `live()` and still holds its session ID and its person until the end has finished.
 - **A turn and the end of the same session never overlap.** The end waits for a turn that is running. A turn that arrives once the end has begun gets `404` and reaches no model, also when it arrived while the end was still running.
 
 ### Idle sessions
@@ -148,7 +149,9 @@ Nothing in a request calls `sweep`: a person's turn never waits for another pers
 
 ### What is kept and what is logged
 
-The table in [chat-notes.md](chat-notes.md), section 3, holds for a session of the service, row by row. The service adds no file of its own.
+The table in [chat-notes.md](chat-notes.md), section 3, holds for a session of the service, row by row. The service adds no file of its own. With "remember me" on, a note is on disk by the person's consent, and a note may repeat a fact the person stated; with training use off nothing they typed is anywhere else.
+
+`NotesResult.reason` can hold an exception's message, so it is never put in a response or a log line.
 
 The service logs through `logging.getLogger("puddles.inference.service")`. A log line may hold a session ID, a route, a status, a count and an exception's type name. It never holds the person's text, a reply's text, a note's text, the token or an exception's message. Nothing is printed.
 
@@ -164,10 +167,10 @@ def build_config(args: argparse.Namespace, env: Mapping[str, str]) -> ServiceCon
 def main(argv: Sequence[str] | None = None, *, run: Callable[..., None] | None = None) -> int
 ```
 
-- The token comes from the environment variable `PUDDLES_SERVICE_TOKEN`, with `--fake` too. It is never an argument, and never printed or logged.
+- The token comes from `PUDDLES_SERVICE_TOKEN` in the `env` mapping given to `build_config` (`main` passes `os.environ`), with `--fake` too. The other variables are read from the process environment by the existing constructors. The token is never an argument, and never printed or logged.
 - `--fake`: `client_factory` returns `scripts.chat.fake_helper()` on its first call for a session and `scripts.chat.fake_checker(path)` on its second; the store's memory is `FakeUserMemory`; the note-taker is `scripts.chat.FakeNoteTaker`, wrapped in `tracing.TracedLLM` for a session with consent for training. No keys, no network.
-- Without `--fake`: `client_factory` is `loop.llm.client_from_env("HELPER")`; the memory is `PastUserMemory()`; `note_llm_for(True)` is `puddles.llm.OpenAILLM()` and `note_llm_for(False)` is `live.PlainLLM.from_env()`. The helper's variables, `PAST_API_KEY`, `OPENAI_API_KEY` and `PUDDLES_AGENT_MODEL` are checked before anything listens: one of each client is built once at startup to find a missing variable.
-- A missing token, a missing variable, a policy file that `check_policy_file` refuses at startup, or a crisis path that does not load: one line on standard error starting `error: `, and exit code 2. Nothing listens.
+- Without `--fake`: `client_factory` is a callable that returns `loop.llm.client_from_env("HELPER")`; the memory is `PastUserMemory()`; `note_llm_for(True)` is `puddles.llm.OpenAILLM()` and `note_llm_for(False)` is `live.PlainLLM.from_env()`. The helper's variables, `PAST_API_KEY`, `OPENAI_API_KEY` and `PUDDLES_AGENT_MODEL` are checked before anything listens: one of each client is built once at startup to find a missing variable.
+- A missing token, a missing variable, a policy file that `check_policy_file` refuses at startup, or a crisis path that does not load: one line on standard error starting `error: `, and exit code 2. Nothing listens. The line holds the exception's message only for `ConfigError` and `PolicyError`, whose messages are written by this repo; for any other exception it names what failed and the exception's type, and not its message, which could hold anything, the token included.
 - `main` builds the app, starts a daemon thread that calls `app.state.service.sweep()` every `--sweep-every` seconds, and calls `run(app, host=..., port=...)`, where `run` is `uvicorn.run` unless one is passed. It returns 0 when `run` returns.
 - The default host is `127.0.0.1`. Reaching it from outside the machine is the deployer's decision.
 
