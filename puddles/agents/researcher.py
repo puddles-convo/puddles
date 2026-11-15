@@ -5,7 +5,7 @@ from typing import Callable
 
 from puddles.agents import bullet_lines, system_prompt
 from puddles.decision_log import DecisionLog
-from puddles.llm import LLM, call_checked
+from puddles.llm import LLM, AgentFailed, call_checked
 from puddles.memory import Memory, now, recall_records
 from schemas import FailurePattern, PatternBrief, ResearcherInput, ResearcherOutput, ResearchNote
 
@@ -71,7 +71,10 @@ def run(inp: ResearcherInput, llm: LLM, search: Search,
         if normalise(query) in earlier:
             return [{"error": "this query was run in an earlier round and was not searched again; "
                               "write a different one"}]
-        results = search(query)
+        try:
+            results = search(query)
+        except RuntimeError as exc:  # puddles.exa.search, after Exa failed twice
+            raise AgentFailed(f"the search failed: {exc}") from exc
         log.append({"query": query, "results": results})
         returned.update(r["url"] for r in results)
         searched.add(normalise(query))
