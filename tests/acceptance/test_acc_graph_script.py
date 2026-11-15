@@ -255,8 +255,17 @@ def test_missing_configuration_returns_two_one_stderr_line_and_empty_log(tmp_pat
 def test_without_fake_constructs_documented_dependencies(tmp_path, capsys, monkeypatch):
     # Constructors are replaced before use, so neither keys nor a server are needed.
     monkeypatch.setenv("EXA_API_KEY", "acceptance-placeholder-not-a-real-key")
+    # Preflight prices the replaced Exa boundary before the mocked round.
+    config = tmp_path / "prices.toml"
+    config.write_text("[output_limits]\ndefault = 80\n\n[prices]\nexa_search_usd = 0\n",
+                      encoding="utf-8")
+    monkeypatch.setenv("PUDDLES_CONFIG", str(config))
     exa = importlib.import_module("puddles.exa")
     judge_api = importlib.import_module("puddles.eval.judge")
+    safety_api = importlib.import_module("puddles.eval.safety")
+    # The default real gate now needs safety configuration; the mocked round makes no asks.
+    monkeypatch.setattr(safety_api.OpenAIYesNo, "from_env",
+                        classmethod(lambda cls: SimpleNamespace(model="fake")))
     judge_panel = SimpleNamespace(version="acceptance-judge")
     helper, user = FakeClient([]), FakeClient([])
     probe = "acceptance search probe"

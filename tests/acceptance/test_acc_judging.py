@@ -813,6 +813,16 @@ def test_real_script_constructs_judge_from_env_and_handles_its_valueerror_as_con
     tmp_path, monkeypatch, local_mlflow, script_args, capsys, missing_config,
 ):
     """Catches ignoring judge_from_env, not passing its judge_panel, or starting after missing config."""
+    from puddles.eval import safety as safety_api
+
+    # A real gate now also needs a safety asker; this test never runs its gate.
+    monkeypatch.setattr(safety_api.OpenAIYesNo, "from_env",
+                        classmethod(lambda cls: SimpleNamespace(model="fake")))
+    # Preflight also prices the replaced Exa boundary before the mocked round.
+    config = tmp_path / "prices.toml"
+    config.write_text("[output_limits]\ndefault = 80\n\n[prices]\nexa_search_usd = 0\n",
+                      encoding="utf-8")
+    monkeypatch.setenv("PUDDLES_CONFIG", str(config))
     calls, round_calls = [], []
     panel = ScriptedJudge({})
 

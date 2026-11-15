@@ -385,7 +385,9 @@ def test_the_script_without_fake_builds_the_real_gate_on_the_rounds_judge(tmp_pa
     assert kw == {"validation_scenario_ids": IDS[:2], "noise": 0.2, "token_cap": 700}
     assert isinstance(deps.judge, MeteredJudge) and deps.judge.judge is judge
     assert deps.noise_measured is True and deps.max_turns == 6
-    assert checked[0] == ["fake-safety"] and checked[1].judge_panel is judge
+    # One check before tracing: the round's models as run_round gathers them, the judge's, then the safety model.
+    assert checked[0][-5:] == [*PANEL.judges, PANEL.astra, "fake-safety"]
+    assert checked[1].judge_panel is judge
 
 
 def test_with_the_fallback_judge_and_no_safety_model_the_line_names_puddles_safety_model(
@@ -489,3 +491,24 @@ def test_a_round_killed_inside_the_real_gate_is_simply_run_again(tmp_path, trace
     assert event.round == 1 and event.outcome == "kept"
     assert event.safety.passed is True and event.scores.after.quality == 4.0
     assert DecisionLog(root).rounds() == [event]
+
+
+def test_an_unpriced_fallback_judge_model_is_one_line_before_tracing_and_nothing_under_the_root(
+        tmp_path, monkeypatch, capsys):
+    from scripts import run_graph_round as script
+
+    llm = FakeJudgeLLM(FALLBACK.model)
+    real_script_env(monkeypatch, judge_from_env=lambda: SingleJudge(FALLBACK, llm))
+    monkeypatch.setenv("PUDDLES_JUDGE", "fallback")
+    monkeypatch.setattr(eval_safety.OpenAIYesNo, "from_env", classmethod(lambda cls: Asker()))
+    config = tmp_path / "run.toml"  # the safety model priced, the fallback judge's model not
+    config.write_text('[prices]\nexa_search_usd = 0\n[prices.models."fake-safety"]\n'
+                      "input_usd_per_million = 1\noutput_usd_per_million = 2\n[output_limits]\ndefault = 100\n")
+    monkeypatch.setenv("PUDDLES_CONFIG", str(config))
+    root = tmp_path / "root"
+    code = script.main(["--root", str(root), "--policy", str(POLICY), "--mlflow", f"sqlite:///{root}/mlflow.db"])
+    captured = capsys.readouterr()
+    assert code == 2 and not captured.out
+    [line] = captured.err.splitlines()
+    assert line.startswith("error: MissingPrice: ") and FALLBACK.model in line and "fake-safety" not in line
+    assert not root.exists() and llm.calls == 0

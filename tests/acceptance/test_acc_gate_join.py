@@ -1,4 +1,4 @@
-"""Acceptance tests from docs/specs/gate-join.md, without sight of the join.
+"""Acceptance tests from gate-join.md; original cases authored before the join existed.
 
 Includes the amended fail-closed rules for empty/contradictory safety evidence
 and unmeasured baselines. Cases, prompts and the yes/no interpretation belong
@@ -30,7 +30,7 @@ from puddles import round as round_api
 from puddles.decision_log import DecisionLog
 from puddles.eval import judge as judge_api
 from puddles.eval import safety as safety_api
-from puddles.eval.judge import JudgePanel, PanelConfig
+from puddles.eval.judge import FallbackConfig, JudgePanel, PanelConfig, SingleJudge
 from puddles.gate_join import real_gate_deps, safety_check, safety_models
 from puddles.judging import MeteredJudge
 from puddles.memory import FakeMemory, now
@@ -199,6 +199,21 @@ class ObservedPanel(JudgePanel):
         super().__init__(PanelConfig(judges=MODELS[:3], astra=MODELS[3]), self.clients, astra)
         self.records = []
         self.reported = []
+
+    def score(self, record):
+        self.records.append(record)
+        result = super().score(record)
+        self.reported.append((record, result.usage))
+        return result
+
+
+class ObservedSingle(SingleJudge):
+    """The real fallback judge, observing its public score boundary and returned usage."""
+
+    def __init__(self, *, fail_validation=False):
+        self.client = PanelLLM(MODELS[0], fail_validation=fail_validation)
+        super().__init__(FallbackConfig(model=self.client.model), self.client)
+        self.records, self.reported = [], []
 
     def score(self, record):
         self.records.append(record)
@@ -457,6 +472,45 @@ def test_missing_safety_configuration_valueerror_propagates_before_work(case):
 # Section 3.1--3.4: real safety cases and real panel, including harmful failures.
 
 
+@pytest.mark.parametrize("mode", ["kept", "noise_unmeasured", "unclear", "judge_failure"])
+def test_single_judge_real_safety_round_keeps_or_reverts_and_meters_once(case, mode):
+    """Catches panel-only wiring, unmetered fallback scoring, and failed fallback/safety keeps."""
+    judge = ObservedSingle(fail_validation=mode == "judge_failure")
+    target = next(c for c in case.cases if any(a.type == "judged" for a in c.must))
+    asker = (CaseAsker(case.cases, unclear=(target.case_id, "must"))
+             if mode == "unclear" else case.asker)
+    result = candidate_result(case)
+    check = gate.make_gate(joined(case, judge=judge, asker=asker,
+                                  noise_measured=mode != "noise_unmeasured"),
+                           validation_scenario_ids=[s.scenario_id for s in case.scenarios], noise=0.1)
+    with metering(Meter(case.root, prices()), "gatekeeper"):
+        outcome = check(result)
+    assert outcome.decision == ("kept" if mode == "kept" else "reverted")
+    if mode != "kept":
+        failed = {"noise_unmeasured": "noise_not_measured", "unclear": "safety_cases",
+                  "judge_failure": "complete_evidence"}[mode]
+        assert failed in check.last_report.failed
+    event = finish(case, result, outcome)
+    assert event.outcome == outcome.decision and event.safety.cases == len(case.cases) > 0
+    assert event.safety.passed is (mode != "unclear")
+    assert Counter(asker.calls) == asker.expected
+    records = scored_records(case.root)
+    assert Counter(r.id for r in judge.records) == Counter(r.id for r in records)
+    assert all(n == 1 for n in Counter(r.id for r in judge.records).values())
+    expected = Counter((entry.model, entry.prompt_tokens, entry.completion_tokens)
+                       for _, entries in judge.reported for entry in entries)
+    done = [row for row in read_usage(case.root / "log/usage.jsonl")
+            if row.get("event") == "done" and row.get("model") == judge.client.model]
+    assert Counter((row["model"], row["tokens_in"], row["tokens_out"]) for row in done) == expected
+    assert all(row["agent"] == "gatekeeper" and row["estimated"] is False for row in done)
+    if mode == "judge_failure":
+        failed_calls = [user for _, user, _, _ in judge.client.calls
+                        if f"helper: {CANDIDATE_REPLY}" in user and SECOND_VALIDATION in user]
+        assert len(failed_calls) == 2
+    else:
+        assert len(judge.client.calls) == len(records)
+
+
 def test_empty_real_loader_reverts_despite_clean_measured_gain_and_records_no_pass(case, monkeypatch):
     """Catches vacuous safety passes leaking through the real join into a keep or event."""
     loads, returned = [], []
@@ -647,11 +701,11 @@ def script_case(case, tmp_path, scenario_factory, monkeypatch):
     validation_file.write_text("".join(s.model_dump_json() + "\n" for s in reversed(case.scenarios)))
     config = tmp_path / "run.toml"
 
-    def configure(*, safety_price=True):
+    def configure(*, safety_price=True, missing=()):
         names = MODELS + ([SAFETY_MODEL] if safety_price else [])
         config.write_text("[output_limits]\ndefault = 80\n\n[prices]\nexa_search_usd = 0\n" + "".join(
             f'\n[prices.models."{name}"]\ninput_usd_per_million = 1\noutput_usd_per_million = 2\n'
-            for name in names
+            for name in names if name not in missing
         ))
 
     configure()
@@ -818,6 +872,42 @@ def test_unpriced_safety_model_stops_before_round_writes_memory_or_model_calls(
     assert not case.root.exists() or not list(case.root.rglob("*"))
     assert not memory.calls and not case.helper.calls and not case.user.calls
     assert not case.panel.records and not case.asker.calls
+
+
+@pytest.mark.parametrize("missing", [MODELS[0], MODELS[3]])
+def test_unpriced_round_judge_cannot_write_mlflow_under_root_before_price_error(
+    script_case, monkeypatch, capsys, missing,
+):
+    """Catches checking a judge price only after tracing has already written under root."""
+    case = script_case.case
+    install_real_factories(monkeypatch, case)
+    script_case.configure(missing=[missing])
+    memory = UntouchedMemory()
+    patch_public(monkeypatch, memory_api, "PastClient", lambda: memory)
+    args = list(script_case.args)
+    args[args.index("--mlflow") + 1] = f"sqlite:///{case.root}/mlflow.db"
+    capsys.readouterr()
+    assert script.main(args) == 2
+    captured = capsys.readouterr()
+    assert not memory.calls and not case.helper.calls and not case.user.calls
+    assert not case.panel.records and not case.asker.calls
+    assert not case.root.exists() or not list(case.root.rglob("*")), "Price preflight followed a root write"
+    assert captured.out == "" and len(captured.err.splitlines()) == 1 and missing in captured.err
+
+
+def test_missing_safety_api_credentials_exit_two_before_work(script_case, monkeypatch, capsys):
+    """Catches a missing OpenAI credential escaping the script's configuration boundary."""
+    case = script_case.case
+    patch_public(monkeypatch, judge_api, "judge_from_env", lambda: case.panel)
+    monkeypatch.setenv("PUDDLES_SAFETY_MODEL", SAFETY_MODEL)
+    memory = UntouchedMemory()
+    patch_public(monkeypatch, memory_api, "PastClient", lambda: memory)
+    capsys.readouterr()
+    assert script.main(script_case.args) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and len(captured.err.splitlines()) == 1 and captured.err.strip()
+    assert not memory.calls and not case.root.exists()
+    assert not case.helper.calls and not case.user.calls and not case.panel.records
 
 
 def test_script_prices_astra_safety_fallback_when_safety_model_is_unset(
