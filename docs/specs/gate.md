@@ -238,3 +238,29 @@ Besides what [graph.md](graph.md) lists, for the work that was done. A candidate
 The implementer writes `tests/test_gate.py` with tests 3 to 8 of the stage file, using a scripted judge and a scripted safety check. Test 3's last line ("a yes-or-no answer that is neither word, twice") belongs to the safety check and is tested when the real one is joined.
 
 The acceptance tests are written from this file alone, by someone who has not seen the code.
+
+## 9. Measurements passed to `finish_round` by its caller (added when main was merged in)
+
+Main changed `finish_round` while this piece was being built (#52): it takes two more keyword arguments, `scores: Optional[LogScores] = None` and `safety: Optional[LogSafety] = None`, and files them in the round event. Their one caller is `scripts/dataset_rounds.py`, which has a gate of its own (`dataset_gate`), does not use `puddles.gate`, and does not set `result.scores`, `result.safety`, `result.base_sha256` or `result.candidate_sha256`.
+
+Both ways of filing a measurement are kept, and they never mix:
+
+```python
+def finish_round(result, gate, log, memory, root, start_policy=None, scores=None, safety=None) -> RoundEvent
+```
+
+- **A round is the real gate's as soon as `make_gate` is called for it, and nothing that fails afterwards changes that.** A missing report proves nothing: the report's own write can fail, and a run can be killed before it. So `finish_round` refuses a `scores` or `safety` argument that is not `None`, with `ValueError` before any write and with a message that says which sign it found, when ANY of these holds for `result.round`:
+  1. one of the four fields below is set on the result;
+  2. `make_gate`'s gate was called for this root and round in this process. The gate records that as its first act, before it reads or writes anything, by calling `puddles.round.mark_gated(root, round)`; `puddles.round.is_gated(root, round)` reads it. The record is in memory, keyed on the root's resolved path and the round, and is never cleared by a failure;
+  3. any file the real gate writes for the round is there: `scores/round-NN-gate.json`, `scores/round-NN-safety.json`, `scores/round-NN-validation.jsonl` or `conversations/round-NN-validation.jsonl` under the root, tested so that a dangling symbolic link counts as there (`os.path.lexists`);
+  4. `<root>/scores` is there and is not a folder, so nothing can be known about what the gate left.
+  **Not being able to look is not the same as not being there.** Caller values are accepted only when the absence of every sign is confirmed. For sign 3, each of the four paths is looked at with `os.lstat`, and only `FileNotFoundError` (the path or one of its folders is not there) counts as absent; any other error (`PermissionError`, an input or output error, a loop of links, a name too long, a folder on the way that is a file) is a refusal whose message names the path and the error. For sign 4, `<root>/scores` and `<root>/conversations` are each either confirmed absent the same way or a folder whose entries can be listed (`os.scandir`); anything else is a refusal. The same goes for `<root>` itself.
+  Clearing the four fields, rebuilding the `RoundResult`, passing `gate=None`, a report that could not be written, and a gate killed after its first file do not make a gated round ungated. What is left outside: another process's gate that was killed before it wrote any file for the round measured nothing that reached a `GateOutcome`, and a caller that deletes the gate's files has left what one process can check; the docstring says both.
+- **A gate outcome belongs to one round and one edit.** Whatever else is passed, `finish_round` raises `ValueError` before any write when `gate` is not `None` and `gate.round` is not `result.round`, or `gate.edit_id` is not `result.edit.id` (or `result.edit` is `None`). So an outcome from round 1 cannot be filed with round 2's result to get past the signs above, which are looked up for `result.round`.
+- **`run_gate` called directly marks the round too.** `mark_gated(deps.root, inp.round)` is the first act of `run_gate` as well as of the gate `make_gate` returns, so a caller that goes round `make_gate` is covered by sign 2.
+- **Left outside, with the two named above:** a real gate's outcome carried to another root in the same process (an outcome does not say which root it was measured on); two spellings of one root on a file system that ignores case, a reloaded `puddles.round`, or a gate run in a forked child, each only when no gate file reached disk. The docstring lists them.
+- **The gate's measurements cannot be replaced.** When any of `result.scores`, `result.safety`, `result.base_sha256` or `result.candidate_sha256` is set (the round went through `make_gate`), a `scores` or `safety` argument that is not `None` raises `ValueError` before any file is read for writing and before any write. What is filed is what the gate measured, under every check of section 3.
+- **Without them, the caller's are filed as on main.** When none of the four is set, `scores` and `safety` go into the event exactly as given, and the round is finished exactly as main's `finish_round` finished it: same event, same files, same memory copies, for the same arguments. `finish_round` does not tie these values to any file's contents; the caller answers for them, and the docstring says so in one sentence.
+- With both arguments `None` nothing changes from sections 3 and 6.
+- `puddles/round.py`'s other change on main (`extras_for` passing `safety_cases`) is kept as main has it.
+- Nothing in `scripts/dataset_rounds.py`, `tests/test_dataset_rounds.py`, `schemas.py` or `puddles/memory.py` is changed by this piece.

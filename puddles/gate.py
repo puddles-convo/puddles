@@ -24,7 +24,7 @@ from puddles.graph import check_policy_file
 from puddles.memory import now
 from puddles.policy import TOKEN_CAP, estimate_tokens, parse_policy, render_policy
 from puddles.records import sha256_bytes, sha256_text
-from puddles.round import RoundResult, read_policy_text
+from puddles.round import RoundResult, mark_gated, read_policy_text
 from schemas import (
     ConversationRecord,
     GateInput,
@@ -603,6 +603,7 @@ def _bare_revert(round_: int, edit_id: str, current_policy: str, failed: list[st
 def run_gate(inp: GateInput, deps: GateDeps) -> GateReport:
     """Apply the checks in order. It never raises: anything that goes wrong reverts the candidate,
     including a file that could not be saved."""
+    mark_gated(deps.root, inp.round)  # first act, as in make_gate's gate: the round is the real gate's
     return _run_gate(inp, deps)[0]
 
 
@@ -647,6 +648,7 @@ class _Gate:
         self.last_report: Optional[GateReport] = None
 
     def __call__(self, result: RoundResult) -> GateOutcome:
+        mark_gated(self.deps.root, result.round)  # first act: the round is the real gate's, whatever fails later
         result.scores, result.safety, result.candidate_sha256, result.base_sha256 = None, None, None, None
         try:
             report = self._gate(result)

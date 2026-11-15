@@ -3,6 +3,7 @@
 Within a round the critic, researcher and proposer hand records straight to each other.
 Only after the round is logged are its records copied into memory, for later rounds to recall.
 """
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Optional
@@ -174,7 +175,8 @@ def extras_for(record: Record, log: DecisionLog, root: Path) -> dict:
         edit = load_record(ref, PolicyEdit, root) if ref else None
         event = next((r for r in log.rounds() if r.round == record.round), None)
         return {"rule_id": edit.rule_id if edit else None, "summary": edit.summary if edit else "",
-                "noise": event.scores.noise if event and event.scores else None}
+                "noise": event.scores.noise if event and event.scores else None,
+                "safety_cases": event.safety.cases if event and event.safety else None}
     return {}
 
 
@@ -260,8 +262,90 @@ def read_policy_text(path: Path, expected_sha256: Optional[str] = None,
     return text
 
 
+def gate_report_path(root: Path, round_: int) -> Path:
+    """The report `puddles.gate.make_gate` writes for every round it is called on."""
+    return Path(root) / "scores" / f"round-{round_:02d}-gate.json"
+
+
+def gate_files(root: Path, round_: int) -> list[Path]:
+    """Every file the real gate writes for a round (gate.md section 6)."""
+    root = Path(root)
+    return [gate_report_path(root, round_), root / "scores" / f"round-{round_:02d}-safety.json",
+            root / "scores" / f"round-{round_:02d}-validation.jsonl",
+            root / "conversations" / f"round-{round_:02d}-validation.jsonl"]
+
+
+# (resolved root, round) for every round make_gate's gate was called on in this process. Only added to.
+_GATED: set[tuple[str, int]] = set()
+
+
+def mark_gated(root: Path, round_: int) -> None:
+    """Called by the real gate as its first act: from here on the round is the gate's, whatever fails later."""
+    _GATED.add((str(Path(root).resolve()), int(round_)))
+
+
+def is_gated(root: Path, round_: int) -> bool:
+    return (str(Path(root).resolve()), int(round_)) in _GATED
+
+
+CANNOT_TELL = "cannot be looked at"
+
+
+def _named(exc: OSError) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _absent(path: Path) -> Optional[str]:
+    """None when `path` is confirmed not there (`os.lstat` raises FileNotFoundError); "" when it is
+    there; otherwise why it cannot be told. Not being able to look is not the same as not being there."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"{path} {CANNOT_TELL} ({_named(exc)}), so it cannot be told that the gate left nothing there"
+    return ""
+
+
+def _folder_sign(path: Path) -> Optional[str]:
+    """None when `path` is confirmed absent, or a folder whose entries can all be listed; else the sign."""
+    why = _absent(path)
+    if not why:
+        if why is None:
+            return None
+        try:
+            with os.scandir(path) as entries:
+                for _ in entries:
+                    pass
+            return None
+        except (NotADirectoryError, FileNotFoundError):  # a file, or a link to nothing
+            return f"{path} is there and is not a folder, so nothing can be known about what the gate left"
+        except OSError as exc:
+            return (f"{path} is there but its entries {CANNOT_TELL} ({_named(exc)}), so nothing can be known "
+                    "about what the gate left")
+    return why
+
+
+def gated_signs(result: RoundResult, root: Path) -> list[str]:
+    """Every sign that the round is the real gate's, or that it cannot be told it is not (gate.md
+    section 9); empty only when the absence of every sign is confirmed."""
+    signs = []
+    if any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256)):
+        signs.append("the result carries the gate's measurements or hashes, so it went through the gate")
+    if is_gated(root, result.round):
+        signs.append("make_gate's gate was called for this root and round in this process")
+    root = Path(root)
+    signs += [s for s in (_folder_sign(p) for p in (root, root / "scores", root / "conversations")) if s]
+    for path in gate_files(root, result.round):
+        why = _absent(path)
+        if why is not None:
+            signs.append(why or f"{path} is there, written by the real gate")
+    return signs
+
+
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
-                 root: Path, start_policy: Optional[Path] = None) -> RoundEvent:
+                 root: Path, start_policy: Optional[Path] = None, scores: Optional[LogScores] = None,
+                 safety: Optional[LogSafety] = None) -> RoundEvent:
     """Log the round, copy its records into memory, then run the replay check.
 
     It works in two halves. First it reads every file it needs once (the base policy, the
@@ -277,7 +361,42 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     crash comes between the two. Without `start_policy` (the stage-0 graph runner) no .meta.json
     is written and no replay check runs. With a gate outcome, the gate's `result.scores` and
     `result.safety` go into the event; without one both stay empty.
+
+    `scores` and `safety` are for a caller with a gate of its own (scripts/dataset_rounds.py). A
+    round is the real gate's as soon as `make_gate`'s gate, or `run_gate`, is called for it, and it
+    refuses them with ValueError, before anything is read or written, on any sign of that
+    (`gated_signs`): one of `result.scores`, `result.safety`, `result.base_sha256`,
+    `result.candidate_sha256` set; the gate called for this root and round in this process
+    (`is_gated`); any file the gate writes for the round there, a dangling link included; or
+    `<root>/scores` there and not a folder. Not being able to look is not the same as not being
+    there: they are taken only when the absence of every sign is confirmed (`os.lstat` raising
+    FileNotFoundError; `<root>`, `scores` and `conversations` each absent or a folder that can be
+    listed; the decision log absent or there), and refused when it cannot be told. A gate outcome
+    belongs to one round and one edit: one whose round or edit ID is not the result's is refused with ValueError, whatever else is passed.
+    Left outside: another process's gate killed before it wrote any file for the round; a caller
+    that deletes the gate's files; a real gate's outcome carried to another root in the same
+    process (an outcome does not say which root it was measured on); and, each only when no gate
+    file reached disk, two spellings of one root on a file system that ignores case, a reloaded
+    `puddles.round`, or a gate run in a forked child. Otherwise they go into the event exactly as
+    given; finish_round does not tie them to any file's contents, and the caller answers for them.
     """
+    if gate is not None and (gate.round != result.round or result.edit is None
+                             or gate.edit_id != result.edit.id):
+        raise ValueError(f"the gate outcome {gate.id} is for round {gate.round} and {gate.edit_id}, not round "
+                         f"{result.round} and {result.edit.id if result.edit else 'no edit'}; nothing was written")
+    gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
+    if scores is not None or safety is not None:
+        signs = gated_signs(result, root)
+        # Whether the round is logged already is told from the log; a log that cannot be looked at tells nothing.
+        why = _absent(log.path)
+        if why:
+            signs.append(f"the decision log {why}")
+        if signs:
+            known = [s for s in signs if CANNOT_TELL not in s]
+            head = (f"round {result.round} is the real gate's" if known else
+                    f"it cannot be told that round {result.round} is not the real gate's")
+            raise ValueError(f"{head} ({'; '.join(signs)}); its measurements cannot be replaced by the "
+                             "caller's scores or safety; nothing was written")
     # ---- read each file once, as its bytes, and check what was measured against those bytes ----
     base_text = read_policy_text(
         result.base_policy_path, result.base_sha256 if gate is not None else None,
@@ -348,7 +467,9 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
                            out_of=p.out_of, status_before=result.status_before) if p else None,
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
                      rule_text=result.edit.rule_text) if result.edit and gate else None,
-        scores=result.scores if gate is not None else None, safety=result.safety if gate is not None else None)
+        # Gated: the gate's measurements, with a gate outcome only. Ungated: the caller's, as given.
+        scores=(result.scores if gate is not None else None) if gated else scores,
+        safety=(result.safety if gate is not None else None) if gated else safety)
     meta = None
     if start_policy is not None and start_text is not None:
         meta = _replay_before_writing(log, root, start_policy, start_text, event, promoted)

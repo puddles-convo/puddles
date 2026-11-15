@@ -1,0 +1,19 @@
+{
+  "id": "pattern-r03",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T06:47:00Z",
+  "parent_ids": [],
+  "round": 3,
+  "name": "no-reassurance",
+  "description": "The helper never affirms the person's strengths or reassures them during the conversation.",
+  "seen_in": 3,
+  "out_of": 10,
+  "example_conversation_ids": [
+    "conv-esconv-train-0036",
+    "conv-esconv-train-0155",
+    "conv-esconv-train-0111"
+  ],
+  "same_as_pattern_id": null,
+  "seen_in_high": null
+}
