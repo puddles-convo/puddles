@@ -306,7 +306,133 @@ def test_a_noise_that_was_not_measured_is_refused_and_make_gate_reverts_untested
     assert deps.safety.calls == [] and result.scores is None  # never tested
 
 
-def test_an_infinite_noise_can_only_fail_quality_gain(tmp_path):
+# ---------- the noise is a finite number that is not negative, or the gate does not run ----------
+
+BAD_NOISES = [float("inf"), float("-inf"), float("nan"), -1.0]
+BAD_IDS = ["inf", "-inf", "nan", "-1"]
+
+
+def model_calls(deps):
+    return (len(deps.judge.calls), len(deps.helper_client.calls), len(deps.user_client.calls), len(deps.safety.calls))
+
+
+@pytest.mark.parametrize("replay_on", [False, True])
+@pytest.mark.parametrize("noise", BAD_NOISES, ids=BAD_IDS)
+def test_a_bad_noise_through_make_gate_reverts_untested_and_leaves_a_readable_log(tmp_path, noise, replay_on):
+    from puddles import replay
+    from puddles.round import finish_round
+
     deps, current, candidate = setup(tmp_path)
-    report = gate.run_gate(gate_input(current, candidate, noise=float("inf")), deps)
-    assert report.outcome.decision == "reverted" and report.failed == ["quality_gain"]
+    result = gated_round(deps, current, candidate)
+    adapter = gate.make_gate(deps, validation_scenario_ids=IDS, noise=noise)
+    out = adapter(result)
+    assert model_calls(deps) == (0, 0, 0, 0)  # refused before any conversation, judge call or safety check
+    assert not (deps.root / "scores" / "current.json").exists()
+    assert out.decision == "reverted" and adapter.last_report.failed == ["complete_evidence"]
+    assert "the noise" in out.reason and "not a finite number that is not negative" in out.reason
+    assert "candidate was not tested" in out.reason.lower()
+    assert adapter.last_report.log_scores is None and result.scores is None and result.safety is None
+    assert out.before == out.after == gate.NOT_MEASURED
+    if replay_on:
+        gate.ensure_starting_meta(deps.root, current)
+    log = DecisionLog(deps.root)
+    event = finish_round(result, out, log, FakeMemory(), deps.root, start_policy=current if replay_on else None)
+    assert DecisionLog(deps.root).rounds() == [event] and event.outcome == "reverted" and event.scores is None
+    assert log.next_round() == 2  # a later round can start
+    if replay_on:
+        assert replay.check(log, deps.root, current) == current
+
+
+@pytest.mark.parametrize("noise", BAD_NOISES, ids=BAD_IDS)
+def test_a_bad_noise_in_run_gate_is_refused_before_anything_runs(tmp_path, noise):
+    deps, current, candidate = setup(tmp_path)
+    inp = gate_input(current, candidate).model_copy(update={"noise": noise})  # past GateInput's own check
+    report = gate.run_gate(inp, deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert all(report.checks[k] == "not_run" for k in gate.CHECKS if k not in ("complete_evidence",
+                                                                               "noise_not_measured"))
+    assert model_calls(deps) == (0, 0, 0, 0) and report.candidate_sha256 is None
+    assert report.log_scores is None and "not a finite number that is not negative" in report.outcome.reason
+    assert json.loads(report.outcome.model_dump_json())["before"]["empathy"] == 3.0  # every number writable
+    assert saved_gate(deps)["failed"] == ["complete_evidence"]
+
+
+def test_a_good_noise_of_zero_still_runs(tmp_path):
+    deps, current, candidate = setup(tmp_path)
+    report = gate.run_gate(gate_input(current, candidate, noise=0.0), deps)
+    assert report.outcome.decision == "kept" and report.log_scores.noise == 0.0
+
+
+# ---------- no number the gate writes or hands on is ever non-finite ----------
+
+@pytest.mark.parametrize("field, value", [("empathy", float("nan")), ("relevance", float("inf")),
+                                          ("emotion_change", float("nan")), ("emotion_change", float("-inf")),
+                                          ("quality", float("nan"))])
+def test_a_baseline_with_a_non_finite_number_was_not_measured_and_is_never_written(tmp_path, field, value):
+    from puddles.round import finish_round
+
+    deps, current, candidate = setup(tmp_path)
+    scores = Scores(empathy=3, relevance=3, emotion_change=0.5).model_copy(update={field: value})
+    report = gate.run_gate(gate_input(current, candidate).model_copy(update={"current_scores": scores}), deps)
+    out = report.outcome
+    assert out.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert gate.NO_BASELINE in out.reason and report.log_scores is None
+    if field == "quality":  # never taken from the caller: worked out, so the record's before is finite
+        assert out.before == Scores(empathy=3, relevance=3, quality=3.0, emotion_change=0.5)
+    else:  # a number JSON cannot hold is shown as not measured, never written
+        assert out.before == gate.NOT_MEASURED
+    assert gate._finite_numbers(out) and gate._finite_numbers(report.log_safety)
+    result = gated_round(deps, current, candidate)
+    result.scores, result.safety, result.candidate_sha256 = report.log_scores, report.log_safety, None
+    finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
+    assert len(DecisionLog(deps.root).rounds()) == 1  # the log reads back
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_a_current_json_holding_a_non_finite_number_counts_as_absent(tmp_path, token):
+    deps, current, _ = setup(tmp_path)
+    first = gate.current_scores(deps, current, IDS)
+    path = deps.root / "scores" / "current.json"
+    text = path.read_text().replace('"emotion_change": 1.0', f'"emotion_change": {token}')
+    assert token in text
+    path.write_text(text)  # json.loads accepts these tokens, so the gate must refuse them itself
+    calls = len(deps.judge.calls)
+    assert gate.current_scores(deps, current, IDS) == first
+    assert len(deps.judge.calls) - calls == len(IDS)  # scored again
+    assert token not in path.read_text()
+
+
+def test_current_json_is_never_written_with_a_non_finite_number(tmp_path):
+    key = {"policy_version": "policy-v1"}
+    with pytest.raises(ValueError):
+        gate._write_current(tmp_path, key, Scores(empathy=3, relevance=3, emotion_change=float("nan")))
+    assert not gate.current_path(tmp_path).exists()
+
+
+def test_an_after_with_a_non_finite_number_is_a_revert_and_nothing_non_finite_is_handed_on(tmp_path, monkeypatch):
+    from puddles.round import finish_round
+
+    real = gate.average
+    monkeypatch.setattr(gate, "average", lambda scores: real(scores).model_copy(
+        update={"emotion_change": float("nan")}))  # as if a judge field slipped through the schema
+    deps, current, candidate = setup(tmp_path)
+    result = gated_round(deps, current, candidate)
+    adapter = gate.make_gate(deps, validation_scenario_ids=IDS, noise=0.15)
+    out = adapter(result)
+    assert out.decision == "reverted" and adapter.last_report.failed[0] in ("complete_evidence",)
+    assert gate._finite_numbers([out, result.scores, result.safety])
+    assert not (deps.root / "scores" / "current.json").exists()  # the baseline's own average was refused
+    event = finish_round(result, out, DecisionLog(deps.root), FakeMemory(), deps.root)
+    assert DecisionLog(deps.root).rounds() == [event]
+
+
+def test_a_validation_average_with_a_non_finite_number_is_reverted_with_the_reason(tmp_path, monkeypatch):
+    real = gate.average
+    monkeypatch.setattr(gate, "average", lambda scores: real(scores).model_copy(
+        update={"emotion_change": float("inf")}))
+    deps, current, candidate = setup(tmp_path)
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.decision == "reverted" and "complete_evidence" in report.failed
+    assert "not finite" in report.outcome.reason and report.log_scores is None
+    assert report.outcome.after == gate.NOT_MEASURED and gate._finite_numbers(report.outcome)
+    assert saved_gate(deps)["decision"] == "reverted"

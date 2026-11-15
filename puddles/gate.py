@@ -11,9 +11,12 @@ that goes wrong while testing reverts: nothing is kept on incomplete evidence.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
+
+from pydantic import BaseModel
 
 from loop.helper import helper_reply
 from loop.llm import ChatClient
@@ -72,11 +75,37 @@ def _safety_passed(safety: Optional[SafetyResult]) -> bool:
                 and all(c.passed for c in safety.cases))
 
 
+def _finite_numbers(value: Any) -> bool:
+    """True when every number in a value (a model, a dict, a list, a float) is finite: what JSON can
+    hold. Nothing the gate writes or hands on may carry NaN or an infinity."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump()
+    if isinstance(value, dict):
+        return all(_finite_numbers(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_finite_numbers(v) for v in value)
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return True
+
+
+def _bad_noise(noise: Any) -> Optional[str]:
+    """Why a noise cannot be used, or None. It must be a finite number that is not negative."""
+    try:
+        value = float(noise)
+    except (TypeError, ValueError):
+        return f"the noise {noise!r} is not a number"
+    if not math.isfinite(value) or value < 0:
+        return f"the noise {noise!r} is not a finite number that is not negative, so the gate did not run"
+    return None
+
+
 def _measured(scores: Scores) -> bool:
     """Scores are 1 to 5, so empathy or relevance outside that range was not measured (NOT_MEASURED is 0,
     and NaN fails both comparisons). Quality is never taken from a caller or a file: one that is set and
-    is not the mean of the two dimensions, to 9 decimal places, was not measured either."""
-    if not (1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5):
+    is not the mean of the two dimensions, to 9 decimal places, was not measured either. Nor is a set
+    of scores with any number that is not finite (an emotion change of NaN, say): it could not be written."""
+    if not _finite_numbers(scores) or not (1 <= scores.empathy <= 5 and 1 <= scores.relevance <= 5):
         return False
     mean = (scores.empathy + scores.relevance) / 2
     return scores.quality is None or round(scores.quality, 9) == round(mean, 9)
@@ -281,8 +310,9 @@ def _cache_key(deps: GateDeps, policy_version: str, policy_sha256: str, scenario
 def _write_current(root: Path, key: dict[str, Any], scores: Scores) -> None:
     path = current_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({**key, "scores": scores.model_dump()}, indent=2) + "\n", encoding="utf-8",
-                    newline="")  # no newline translation on any platform
+    # allow_nan=False: a number JSON cannot hold raises here, before the file is opened.
+    text = json.dumps({**key, "scores": scores.model_dump()}, indent=2, allow_nan=False) + "\n"
+    path.write_text(text, encoding="utf-8", newline="")  # no newline translation on any platform
 
 
 def _saved_current(root: Path, key: dict[str, Any]) -> Optional[Scores]:
@@ -416,7 +446,11 @@ class _Run:
         failed = [k for k in CHECKS if self.checks[k] == "failed"]
         kept = would_keep and noise_measured and not failed and self.candidate_version is not None \
             and self.after is not None
+        # As given, quality worked out; but a number JSON cannot hold is never written (it failed
+        # complete_evidence as a baseline that was not measured), so such a baseline is shown as not measured.
         before = with_quality(inp.current_scores)
+        if not _finite_numbers(before):
+            before = NOT_MEASURED
         safety = self.safety
         if kept and self.candidate_version is not None:
             in_force = self.candidate_version.removesuffix("-candidate")
@@ -544,6 +578,10 @@ def _recheck(run: _Run) -> None:
 
 def _evaluate(run: _Run) -> GateReport:
     inp, deps = run.inp, run.deps
+    bad_noise = _bad_noise(inp.noise)  # GateInput refuses negative and NaN; infinity gets through it
+    if bad_noise is not None:  # the gate does not run: no file read, conversation, judge call or safety check
+        run.fail("complete_evidence", bad_noise)
+        return run.report()
     policies = _static(run)
     if policies is None:
         run.extra = NOTHING_ELSE_RAN
@@ -605,11 +643,18 @@ def _evaluate(run: _Run) -> GateReport:
     return run.report(verdict)
 
 
+def _refuse_non_finite(report: GateReport) -> None:
+    """Every number the gate hands on (the outcome, the scores and safety for the round event) must be
+    one JSON can hold. Otherwise the decision log would be unreadable: the round is reverted instead."""
+    if not _finite_numbers([report.outcome, report.log_scores, report.log_safety]):
+        raise GateError("a number the gate would write is not finite")
+
+
 def _save_report(deps: GateDeps, round_: int, report: GateReport) -> None:
     data = {"round": round_, "decision": report.outcome.decision, "would_keep": report.would_keep,
             "failed": report.failed, "checks": report.checks, "reason": report.outcome.reason}
-    (_scores_dir(deps) / f"round-{round_:02d}-gate.json").write_text(json.dumps(data, indent=2) + "\n",
-                                                                     encoding="utf-8")
+    (_scores_dir(deps) / f"round-{round_:02d}-gate.json").write_text(
+        json.dumps(data, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def _crashed(run: _Run, exc: BaseException) -> GateReport:
@@ -660,12 +705,14 @@ def _gate_report(run: _Run) -> GateReport:
     inp, deps = run.inp, run.deps
     try:
         report = _evaluate(run)
+        _refuse_non_finite(report)
         run.running = "saving the gate report"
         _save_report(deps, inp.round, report)
         return report
     except Exception as exc:  # noqa: BLE001  any crash at all must end as a revert, never as a keep
         try:
             report = _crashed(run, exc)
+            _refuse_non_finite(report)
         except Exception as again:  # noqa: BLE001  even the crash report failed: a bare revert
             report = _bare_revert(inp.round, inp.edit_id, inp.current_policy, ["complete_evidence"],
                                   f"Reverted on {CHECKS['complete_evidence']}: the test run crashed "
@@ -701,6 +748,9 @@ class _Gate:
     def _gate(self, result: RoundResult) -> GateReport:
         if result.edit is None or result.candidate_path is None:
             raise GateError("the round has no candidate to test")
+        bad_noise = _bad_noise(self.noise)
+        if bad_noise is not None:  # before any conversation, judge call or safety check
+            return self._untested(result, bad_noise)
         try:
             before, base_sha = _current_scores(self.deps, result.base_policy_path, self.ids)
         except Exception as exc:  # noqa: BLE001
