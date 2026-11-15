@@ -35,3 +35,22 @@ default = 4000
 critic = 4000
 researcher = 4000
 proposer = 4000
+
+# ---------------------------------------------------------------------------------------------
+# The loop's fixed settings, measured or chosen in stage 5 and read by the overnight run
+# (stage 6). puddles.config.load_config ignores this table; scripts/run_loop.py will read it.
+# ---------------------------------------------------------------------------------------------
+
+[loop]
+# Run-to-run movement in quality when nothing changed: the gate's keep threshold.
+# EMPTY until stage 5 measures it from three policy-v1 runs; noise_measured must stay
+# false before then, because the gate keeps nothing while the noise is unmeasured.
+# noise =
+noise_measured = false
+seed = 7
+max_turns = 10
+validation_ids = "fixtures/validation_ids.txt"
+train_ids = "fixtures/train_ids.txt"
+# The mean of the three policy-v1 baseline runs (pending: team decision, stage 5 doc).
+# current_scores = { empathy = , relevance = , quality = , emotion_change = }
+# judge_version =   # written from calibration/frozen.json once the judge is frozen
