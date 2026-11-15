@@ -1,0 +1,10 @@
+{
+  "set": "fixtures/crisis_pilot.jsonl",
+  "policy": "policies/policy-v2.md",
+  "clients": "model gpt-6-luna at host api.openai.com",
+  "model": "gpt-6-luna",
+  "repeat": 2,
+  "workers": 4,
+  "fake": false,
+  "only_kind": null
+}
