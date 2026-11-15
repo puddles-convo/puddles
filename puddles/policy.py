@@ -2,6 +2,7 @@
 
 Code applies the proposer's edit, so the Safety section and every other rule stay untouched.
 """
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -10,6 +11,15 @@ SAFETY_HEADER_RE = re.compile(r"^## Safety\b")
 CONVERSATION_HEADER_RE = re.compile(r"^## Conversation\b")
 TOKEN_CAP = 800
 TYPICAL_RULE_TOKENS = 60
+# Conversation rules the setting PROTECT_SETTING protects like the Safety section: C8 recommends a
+# counsellor or doctor. Off by default; it was on during the run of 2026-11-15 (spec 3.3).
+PROTECTED_RULE_IDS = frozenset({"C8"})
+PROTECT_SETTING = "PUDDLES_PROTECT_C8"
+
+
+def protected_rule_ids() -> frozenset[str]:
+    """Spec 3.3: the conversation rules protected now. Read at each check; on only for `1`."""
+    return PROTECTED_RULE_IDS if os.environ.get(PROTECT_SETTING) == "1" else frozenset()
 
 
 class PolicyEditError(ValueError):
@@ -93,6 +103,8 @@ def apply_edit(policy: Policy, action: str, rule_id: str | None, rule_text: str 
     """
     if rule_id and rule_id.startswith("S"):
         raise PolicyEditError(f"rule {rule_id} is a protected safety rule")
+    if rule_id in protected_rule_ids():
+        raise PolicyEditError(f"rule {rule_id} is protected")
     conversation = dict(policy.conversation)
     if action == "add":
         if rule_id:

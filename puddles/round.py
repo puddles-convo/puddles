@@ -194,23 +194,42 @@ def copy_to_memory(record: Record, ref: RecordRef, round_: int, memory: Memory, 
 
 MAX_COPY_ATTEMPTS = 3
 
+# The log's size when retry_pending last finished, by log file. A call that finds the log unchanged
+# is the same round start (prepare_round, then run_round), so it sends nothing again.
+_RETRIED_AT: dict[Path, int] = {}
+
+
+def _log_size(log: DecisionLog) -> int:
+    return log.path.stat().st_size if log.path.exists() else 0
+
 
 def _stop_if_stuck(log: DecisionLog) -> None:
-    stuck = [f"{e.record_id} (round {e.round})" for e in log.pending_copies() if e.attempt >= MAX_COPY_ATTEMPTS]
+    """Warn about copies pending after many attempts. It never raises: memory is a copy of the log,
+    so a pending copy stays pending and is retried at the next round start."""
+    import sys
+
+    stuck = [f"{e.record_id} (round {e.round}, attempt {e.attempt})" for e in log.pending_copies()
+             if e.attempt >= MAX_COPY_ATTEMPTS]
     if stuck:
-        raise PastError(f"memory copies still pending after {MAX_COPY_ATTEMPTS} attempts: {', '.join(stuck)}")
+        print(f"warning: memory copies still pending: {', '.join(stuck)}", file=sys.stderr)
 
 
 def retry_pending(log: DecisionLog, memory: Memory, root: Path) -> None:
-    """Run at the start of a round: send copies a crash cut short, resend pending ones, and stop the
-    loop if any copy is still pending after three attempts, before the round goes ahead."""
-    _stop_if_stuck(log)
+    """Run at the start of a round: send copies a crash cut short and resend pending ones, once per
+    round start. A copy that fails stays pending; it never stops the loop or blocks a start."""
+    if _RETRIED_AT.pop(log.path, None) == _log_size(log):
+        return  # already tried at this round start
+    if log.missing_copies() or log.pending_copies():
+        from puddles.memory import prepare_training_audience
+
+        prepare_training_audience(memory, root)  # the one try of this start needs the audience to exist
+    pending = log.pending_copies()  # taken first: a missing copy that fails now waits for the next start
     for round_, missing in log.missing_copies():
         record = load_record(missing, replay_model(missing.id), root)
         if record is None:
             raise PastError(f"record file for {missing.id} (round {round_}) is missing or changed")
         copy_to_memory(record, missing, round_, memory, log, root)
-    for event in log.pending_copies():
+    for event in pending:
         for kind, model in MODELS.items():
             round_event = next((r for r in log.rounds() if r.round == event.round), None)
             ref = round_event.records.get(kind) if round_event else None
@@ -219,6 +238,7 @@ def retry_pending(log: DecisionLog, memory: Memory, root: Path) -> None:
                 if record:
                     copy_to_memory(record, ref, event.round, memory, log, root, attempt=event.attempt + 1)
     _stop_if_stuck(log)
+    _RETRIED_AT[log.path] = _log_size(log)
 
 
 def replay_model(record_id: str) -> type[Record]:

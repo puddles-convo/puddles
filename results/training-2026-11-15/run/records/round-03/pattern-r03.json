@@ -1,0 +1,30 @@
+{
+  "id": "pattern-r03",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T11:53:01Z",
+  "parent_ids": [
+    "conv-r03-esconv-train-0792",
+    "conv-r03-esconv-train-0364",
+    "conv-r03-esconv-train-0139",
+    "conv-r03-esconv-train-0896",
+    "conv-r03-esconv-train-0041",
+    "conv-r03-esconv-train-0688",
+    "conv-r03-esconv-train-0188",
+    "conv-r03-esconv-train-0674"
+  ],
+  "round": 3,
+  "name": "Paraphrases the user's feelings or plan instead of deepening the conversation",
+  "description": "After the user shares a feeling, concern, or tentative plan, the helper often reflects it in similar words and follows with a generic question or repeats a suggestion, rather than exploring what makes it difficult or what it means to the user.",
+  "seen_in": 5,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r03-esconv-train-0364",
+    "conv-r03-esconv-train-0896",
+    "conv-r03-esconv-train-0041",
+    "conv-r03-esconv-train-0188",
+    "conv-r03-esconv-train-0674"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
+from puddles import usage
 from puddles.agents import bullet_lines, system_prompt
 from puddles.decision_log import DecisionLog
 from puddles.llm import LLM, AgentFailed, call_checked
@@ -74,7 +75,9 @@ def run(inp: ResearcherInput, llm: LLM, search: Search,
         try:
             results = search(query)
         except RuntimeError as exc:  # puddles.exa.search, after Exa failed twice
-            raise AgentFailed(f"the search failed: {exc}") from exc
+            reason = f"the search failed: {exc}"
+            usage.note_failed(IDENTITY, reason)
+            raise AgentFailed(reason) from exc
         log.append({"query": query, "results": results})
         returned.update(r["url"] for r in results)
         searched.add(normalise(query))

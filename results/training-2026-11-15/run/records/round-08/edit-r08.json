@@ -1,0 +1,20 @@
+{
+  "id": "edit-r08",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T13:21:02Z",
+  "parent_ids": [
+    "pattern-r08",
+    "research-r08"
+  ],
+  "round": 8,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r08",
+  "base_policy_version": "policy-v3",
+  "new_policy_version": "policy-v4-candidate",
+  "policy_path": "policies/policy-v4-candidate-r08.md",
+  "summary": "Rewords C1 to vary the type of listening response and remove the expectation of a question on every turn. Unlike the reverted edits, it addresses the loop by offering alternatives such as encouragers and summaries, rather than by directing the helper to notice the pattern or explore a particular connection.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Choose the listening response that fits what needs exploring: briefly reflect a feeling or possible meaning, use a concise summary to draw together themes, or offer a simple encourager; do not paraphrase details or add a question by default, because varying your response helps deepen the conversation without creating a repetitive reflection-and-question loop. If you do ask a question, make it advance the conversation and avoid asking about what the person has already explained."
+}

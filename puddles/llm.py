@@ -124,7 +124,12 @@ class OpenAILLM:
         while searches < max_searches:
             resp = self._request(self.client.chat.completions.create, messages, tools=[SEARCH_TOOL],
                                  **self.tool_extra)
-            msg = resp.choices[0].message
+            choice = resp.choices[0]
+            msg = choice.message
+            if getattr(choice, "finish_reason", None) == "length":
+                reason = "a search turn was cut off at the output limit"
+                usage.note_failed(usage.current()[1] or "agent", reason)
+                raise AgentFailed(reason)
             if not msg.tool_calls:
                 break
             messages.append(msg.model_dump(exclude_none=True))
@@ -132,11 +137,25 @@ class OpenAILLM:
                 if searches >= max_searches:
                     result: object = {"error": "search limit reached"}
                 else:
-                    query = json.loads(call.function.arguments)["query"]
-                    result = {"query": query, "results": search(query)}
                     searches += 1
+                    query = _search_query(call)
+                    result = ({"query": query, "results": search(query)} if query is not None else
+                              {"error": 'the call must be search with arguments {"query": "<non-blank text>"}'})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
         return self._parse(messages, schema)
+
+
+def _search_query(call: Any) -> Optional[str]:
+    """The query of a well-formed call to the search tool, or None."""
+    function = getattr(call, "function", None)
+    if getattr(function, "name", None) != SEARCH_TOOL["function"]["name"]:
+        return None
+    try:
+        args = json.loads(getattr(function, "arguments", None) or "")
+    except (TypeError, ValueError):
+        return None
+    query = args.get("query") if isinstance(args, dict) else None
+    return query if isinstance(query, str) and query.strip() else None
 
 
 def _usage(resp: Any, messages: list[dict]) -> CallUsage:

@@ -1,0 +1,31 @@
+{
+  "id": "research-r09",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T13:48:51Z",
+  "parent_ids": [
+    "pattern-r09"
+  ],
+  "round": 9,
+  "pattern_id": "pattern-r04",
+  "queries": [
+    "counselling skills explore client's concern open questions clarification before problem solving training",
+    "helping skills identifying client needs collaborative goal setting before intervention counsellor training",
+    "counselling ask what would be most helpful explore client's preferred support skills guide"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://learn.scu.edu.au/bbcswebdav/courses/WELF1003-2021-3/welf1003_sg_06.html",
+      "title": "welf1003: Topic 6 Microskills 2 – questioning",
+      "quote": "What would need to occur today for you to feel that our session had been helpful?",
+      "technique": "Use purposeful, open questions to explore the client’s concerns and expectations, including what would make the conversation helpful, rather than following a pre-set agenda."
+    },
+    {
+      "url": "https://rhntc.org/sites/default/files/resources/rhntc_oars_model_job_aid_12-20-2021.pdf",
+      "title": "OARS Model: Essential Communication Skills",
+      "quote": "Explore, clarify and gain an understanding of your client’s world.",
+      "technique": "First explore the client’s experiences, thoughts, feelings, beliefs, and hopes with open questions, then reflect what you heard and check your understanding of their goals and preferences."
+    }
+  ]
+}

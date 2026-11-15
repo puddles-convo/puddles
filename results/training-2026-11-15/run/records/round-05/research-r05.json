@@ -1,0 +1,37 @@
+{
+  "id": "research-r05",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T12:28:53Z",
+  "parent_ids": [
+    "pattern-r05"
+  ],
+  "round": 5,
+  "pattern_id": "pattern-r04",
+  "queries": [
+    "counsellor therapeutic use of silence staying with emotion before problem solving training guide",
+    "counselling skills emotional exploration here and now empathic response before advice training manual",
+    "counselling training pacing advice client emotional readiness explore concern before action planning"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://sk.sagepub.com/book/mono/the-counseling-skills-practice-manual/chpt/using-little-tools-with-big-effect-silence-simple",
+      "title": "Sage Academic Books - The Counseling Skills Practice Manual - Using Little Tools with Big Effect: Silence and Simple Prompts",
+      "quote": "Most of the work during counseling sessions should be done by your client as she explores aspects of herself and her world. You are there more as a catalyst ... and less as an expert problem solver.",
+      "technique": "Give the client space to explore their experience, using silence and simple prompts rather than taking over with problem-solving."
+    },
+    {
+      "url": "https://www.ncbi.nlm.nih.gov/books/NBK571068/",
+      "title": "Chapter 3—Motivational Interviewing as a Counseling Style",
+      "quote": "Reflective listening is fundamental to the four MI process (i.e., engaging, focusing, evoking, and planning) and core counseling strategies.",
+      "technique": "Use reflective listening to engage the client and explore their concerns before moving into planning."
+    },
+    {
+      "url": "https://www.apa.org/pubs/books/deliberate-practice-emotion-focused-therapy-sample-chapter.pdf",
+      "title": "Deliberate Practice in Emotion-Focused Therapy",
+      "quote": "Exercises for Intermediate Emotion-Focused Therapy Skills: Empathic Explorations; Exercises for Advanced Emotion-Focused Therapy Skills: Staying in Contact in the Face of Intense Affect.",
+      "technique": "When strong emotion is present, stay in contact and use empathic exploration rather than shifting immediately to action steps."
+    }
+  ]
+}

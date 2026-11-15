@@ -1,0 +1,29 @@
+{
+  "id": "pattern-r07",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T13:03:48Z",
+  "parent_ids": [
+    "conv-r07-esconv-train-0008",
+    "conv-r07-esconv-train-0360",
+    "conv-r07-esconv-train-0715",
+    "conv-r07-esconv-train-0116",
+    "conv-r07-esconv-train-0580",
+    "conv-r07-esconv-train-0564",
+    "conv-r07-esconv-train-0227",
+    "conv-r07-esconv-train-0133"
+  ],
+  "round": 7,
+  "name": "Moves into practical steps before exploring the emotional concern",
+  "description": "When a user expresses distress or a need to talk through feelings, the helper offers plans, scripts, or coping actions before sufficiently engaging with that concern or confirming the user wants problem-solving. Asking whether an action would help does not by itself prevent the premature shift.",
+  "seen_in": 4,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r07-esconv-train-0360",
+    "conv-r07-esconv-train-0116",
+    "conv-r07-esconv-train-0564",
+    "conv-r07-esconv-train-0133"
+  ],
+  "same_as_pattern_id": "pattern-r04",
+  "seen_in_high": null
+}

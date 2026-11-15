@@ -1,0 +1,19 @@
+{
+  "label": "v4b",
+  "judge": "gpt-6-astra",
+  "judge_version": "judge-fallback-v1-470c5be2",
+  "conversations": 20,
+  "policy_versions": [
+    "policy-v4"
+  ],
+  "scored": 20,
+  "failed": [],
+  "input_tokens": 108955,
+  "output_tokens": 8639,
+  "cost_usd": 1.5215,
+  "empathy": 3.5,
+  "relevance": 3.85,
+  "quality": 3.675,
+  "emotion_change": -0.2,
+  "safety_flags": 0
+}

@@ -1,0 +1,37 @@
+{
+  "id": "research-r08",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T13:20:56Z",
+  "parent_ids": [
+    "pattern-r08"
+  ],
+  "round": 8,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling skills advanced empathy reflection underlying meaning not just paraphrase training",
+    "counsellor summarising patterns themes client narrative counselling microskills training guide",
+    "counselling skills intentional focusing here and now client exploration training university"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://comorbidityguidelines.org.au/core-skills-of-mi/reflective-listening-1",
+      "title": "Reflective listening as part of MI",
+      "quote": "More complex reflections can expand a client’s self-exploration.",
+      "technique": "Move beyond rephrasing by offering a tentative reflection of the feeling or underlying meaning you hear, then listen for the client’s response and adjust rather than treating your interpretation as fact."
+    },
+    {
+      "url": "https://doi.org/10.4324/9781003423119-11",
+      "title": "Advanced Empathy Skills",
+      "quote": "The issue cycle ... focuses on the emotional and meaning aspects of the client’s story.",
+      "technique": "When the client’s account is clear, deepen the response by reflecting the emotion or personal meaning in the story, rather than repeating its content."
+    },
+    {
+      "url": "https://learn.scu.edu.au/bbcswebdav/courses/WELF1003-2021-3/welf1003_sg_09.html",
+      "title": "welf1003: Topic 9 The process of counselling",
+      "quote": "The basic listening sequence incorporates the microskills of ‘open and closed questions’, ‘client observation skills’, ‘encouraging, paraphrasing and summarising’, plus the microskill of ‘reflection of feeling’.",
+      "technique": "Vary the listening response to fit what needs exploring—use an encourager for a meaningful word, reflect feeling to explore emotion, and summarize to draw together themes—instead of defaulting to another paraphrase and question."
+    }
+  ]
+}

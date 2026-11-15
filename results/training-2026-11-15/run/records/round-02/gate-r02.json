@@ -1,0 +1,28 @@
+{
+  "id": "gate-r02",
+  "schema_version": 4,
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-15T11:45:41Z",
+  "parent_ids": [
+    "edit-r02"
+  ],
+  "round": 2,
+  "edit_id": "edit-r02",
+  "decision": "reverted",
+  "before": {
+    "empathy": 3.2,
+    "relevance": 4.1,
+    "quality": 3.65,
+    "emotion_change": 0.55
+  },
+  "after": {
+    "empathy": 3.75,
+    "relevance": 4.05,
+    "quality": 3.9,
+    "emotion_change": 0.2
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v2",
+  "reason": "Reverted on no quality gain above the noise (check 5): quality rose by 0.25, which is not more than the noise of 0.275.",
+  "prediction_met": null
+}

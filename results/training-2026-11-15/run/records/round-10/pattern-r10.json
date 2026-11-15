@@ -1,0 +1,29 @@
+{
+  "id": "pattern-r10",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T14:13:06Z",
+  "parent_ids": [
+    "conv-r10-esconv-train-0485",
+    "conv-r10-esconv-train-0062",
+    "conv-r10-esconv-train-0209",
+    "conv-r10-esconv-train-0742",
+    "conv-r10-esconv-train-0241",
+    "conv-r10-esconv-train-0473",
+    "conv-r10-esconv-train-0613",
+    "conv-r10-esconv-train-0784"
+  ],
+  "round": 10,
+  "name": "Repeats the user's account instead of deepening the conversation",
+  "description": "After the user shares a feeling or detail, the helper often reflects it back in similar words without adding a new understanding or meaningfully advancing the discussion. This can create a formulaic reflection-and-question loop, including questions about things the user has already explained.",
+  "seen_in": 4,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r10-esconv-train-0485",
+    "conv-r10-esconv-train-0209",
+    "conv-r10-esconv-train-0241",
+    "conv-r10-esconv-train-0613"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

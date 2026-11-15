@@ -12,49 +12,49 @@ The loop runs round after round with nobody watching, stops itself at its caps, 
 
 **The loop**
 
-- [ ] `scripts/run_loop.py`: reads a config file, then runs the stage 0 graph once per round until a cap is reached.
-- [ ] Config: `max_rounds`, `conversations_per_round`, `conversations_for_critic`, `max_turns`, `spend_limit_usd`, the prices table, the training scenario ID file, the validation ID file, the seed, the judge version, the noise. Values come from stages 3 and 5.
+- [x] `scripts/run_loop.py`: reads a config file, then runs the stage 0 graph once per round until a cap is reached.
+- [x] Config: `max_rounds`, `conversations_per_round`, `conversations_for_critic`, `max_turns`, `spend_limit_usd`, the prices table, the training scenario ID file, the validation ID file, the seed, the judge version, the noise. Values come from stages 3 and 5.
 - [ ] A fresh root folder and the real past.dev project. Not `runs/small`.
-- [ ] One line printed per round: number, outcome, quality before and after, cost so far.
+- [x] One line printed per round: number, outcome, quality before and after, cost so far.
 
 **Which scenarios a round uses**
 
-- [ ] Training scenarios come from the ESConv training split. Each round draws `conversations_per_round` of them with a sampler seeded by the seed and the round number, so a re-run of a round draws the same ones.
-- [ ] The validation IDs and the training IDs share nothing. The loop checks this at start and refuses to run otherwise.
-- [ ] The critic gets the `conversations_for_critic` lowest-scoring conversations (`select_for_critic`, stage 2).
+- [x] Training scenarios come from the ESConv training split. Each round draws `conversations_per_round` of them with a sampler seeded by the seed and the round number, so a re-run of a round draws the same ones.
+- [x] The validation IDs and the training IDs share nothing. The loop checks this at start and refuses to run otherwise.
+- [x] The critic gets the `conversations_for_critic` lowest-scoring conversations (`select_for_critic`, stage 2).
 
 **Starting again after a stop**
 
 The code as it stands does not restart safely. Three things need building.
 
-- [ ] **The policy in force comes from the log.** `puddles.round.policy_in_force` picks the newest policy file by its modified time. Replace that: take `policy.in_force` from the last round event, and check the file's hash against the event. When the log has no round event yet, as in a fresh root, the policy in force is the starting policy named in the config, the same one stage 5 scored.
-- [ ] **An interrupted promotion is undone.** `finish_round` writes the promoted policy file before it appends the round event. A crash between the two leaves a policy file the log knows nothing about. At start, a promoted policy file with no round event is removed, and the round is run again.
-- [ ] **A round is written once.** `DecisionLog.append` does not refuse a second `RoundEvent` for the same round number. Add the guard for round events only. Memory-copy events carry the round number too, and there are several per round; they must still append.
-- [ ] `DecisionLog.next_round()` gives the next number; that part works today.
+- [x] **The policy in force comes from the log.** `puddles.round.policy_in_force` picks the newest policy file by its modified time. Replace that: take `policy.in_force` from the last round event, and check the file's hash against the event. When the log has no round event yet, as in a fresh root, the policy in force is the starting policy named in the config, the same one stage 5 scored.
+- [x] **An interrupted promotion is undone.** `finish_round` writes the promoted policy file before it appends the round event. A crash between the two leaves a policy file the log knows nothing about. At start, a promoted policy file with no round event is removed, and the round is run again.
+- [x] **A round is written once.** `DecisionLog.append` does not refuse a second `RoundEvent` for the same round number. Add the guard for round events only. Memory-copy events carry the round number too, and there are several per round; they must still append.
+- [x] `DecisionLog.next_round()` gives the next number; that part works today.
 
 **Copies into memory**
 
-- [ ] `puddles.round.retry_pending` checks the three-attempt limit before it retries. A copy that fails its third attempt lets the round go ahead, and the loop stops one round later. Check the limit again after the retries.
-- [ ] A crash after the round event but before a copy leaves no `pending` entry, so nothing resends it. At start, compare the records each round event points to with the copy events, and send any that are missing.
+- [x] `puddles.round.retry_pending` checks the three-attempt limit before it retries. A copy that fails its third attempt lets the round go ahead, and the loop stops one round later. Check the limit again after the retries.
+- [x] A crash after the round event but before a copy leaves no `pending` entry, so nothing resends it. At start, compare the records each round event points to with the copy events, and send any that are missing.
 
 **Spend**
 
-- [ ] Spend so far is the sum of `<root>/log/usage.jsonl` (stage 1), so it survives a restart. It includes failed attempts, the gate's conversations, Exa searches, and the calls of a round that was interrupted: finished calls at their real cost, and calls that were sent but never answered at their estimate.
-- [ ] Before each round: stop if spend so far plus the most a round has cost so far, times 1.5, is over the limit. Before round 1, use the cost per round measured in stage 3, scaled to the overnight settings.
+- [x] Spend so far is the sum of `<root>/log/usage.jsonl` (stage 1), so it survives a restart. It includes failed attempts, the gate's conversations, Exa searches, and the calls of a round that was interrupted: finished calls at their real cost, and calls that were sent but never answered at their estimate.
+- [x] Before each round: stop if spend so far plus the most a round has cost so far, times 1.5, is over the limit. Before round 1, use the cost per round measured in stage 3, scaled to the overnight settings.
 - [ ] **This is a stop rule, not a guarantee.** It is based on what rounds have cost so far, and some token counts are estimates, so one round can overshoot. Put a hard spending limit on each provider account as well, where the provider offers one.
 - [ ] past.dev credits are not counted. Check the dashboard before leaving.
 
 **Stopping on repeated failure**
 
-- [ ] Three rounds in a row that fail on the same agent stop the loop with that agent's name. A round has failed on an agent if `usage.jsonl` has a `failed` line for that round and agent. Group the lines by round first, then count rounds in a row; a round has many lines.
+- [x] Three rounds in a row that fail on the same agent stop the loop with that agent's name. A round has failed on an agent if `usage.jsonl` has a `failed` line for that round and agent. Group the lines by round first, then count rounds in a row; a round has many lines.
 
 **The end-of-round check**
 
 Run after every round. Any failure stops the loop.
 
-- [ ] Replay the kept edits from the log and compare with the policy in force: same rule IDs, same text, nothing extra.
-- [ ] The Safety section's hash equals the starting policy's.
-- [ ] The `.meta.json` of the policy in force (written in stage 2, for the starting policy and for each promoted one) agrees: every rule is a base rule or links to a kept edit in the log.
+- [x] Replay the kept edits from the log and compare with the policy in force: same rule IDs, same text, nothing extra.
+- [x] The Safety section's hash equals the starting policy's.
+- [x] The `.meta.json` of the policy in force (written in stage 2, for the starting policy and for each promoted one) agrees: every rule is a base rule or links to a kept edit in the log.
 
 **If a round is too slow**
 
@@ -64,12 +64,12 @@ Run after every round. Any failure stops the loop.
 
 A different judge gives different numbers, so its scores cannot be compared with the first judge's.
 
-- [ ] Default: the loop stops, and the policy in force is the result.
+- [x] Default: the loop stops, and the policy in force is the result.
 - [ ] To carry on with the fallback judge (#23), start a new stretch of rounds: calibrate the fallback, measure the baselines and the noise again with it (stage 5), score the policy in force with it, and record the switch in the log. Plots mark the two stretches separately and never join their lines.
 
 **The plots**
 
-- [ ] `scripts/plots.py`, into `docs/results/`:
+- [x] `scripts/plots.py`, into `docs/results/`:
 
   | Plot | Drawn from |
   |---|---|
@@ -78,8 +78,8 @@ A different judge gives different numbers, so its scores cannot be compared with
   | Judge score against user score | `runs/calibration/pairs.jsonl` (stage 2, lane A) |
   | Final policy against both baselines, three bars with the spread | The final evaluation results (issue #7). The format is agreed with the evaluation lead before Sunday. |
 
-- [ ] Small made-up input files for all four plots under `tests/`, so the script can be tested before the real data exists.
-- [ ] Every number in a plot comes from a file in the repo or in `runs/`.
+- [x] Small made-up input files for all four plots under `tests/`, so the script can be tested before the real data exists.
+- [x] Every number in a plot comes from a file in the repo or in `runs/`.
 
 ## Tests that must pass
 
@@ -111,6 +111,35 @@ A different judge gives different numbers, so its scores cannot be compared with
 - [ ] 09:00: hand the policy in force to the robot pair, and to the evaluation lead for the held-out test and the outside sets (#6, #7).
 - [ ] Run the plots. Pick one kept round and one reverted round to show.
 - [ ] Freeze at 12:30. Submissions close at 14:00.
+
+## Status (built, offline-verified)
+
+- `puddles/loop.py`: `draw_scenarios` (seed + round), `check_id_files`, `spend_by_round`,
+  `worst_round_cost`, `agent_failure_streaks`, `run_loop` (caps: max rounds, spend with the
+  1.5× worst-round margin and the stage-3 cost estimate before round 1, repeated same-agent
+  failure), `scoring_judge` (JudgeResult → ScoredConversation, writes `scores/round-NN-train.jsonl`,
+  meters judge usage via `Meter.note_done`).
+- `puddles/config.py`: `LoopConfig` + `load_loop_config` for the `[loop]` table; refuses to run
+  without `max_rounds` or `spend_limit_usd` (config or `--max-rounds`).
+- `scripts/run_loop.py`: `--fake` end-to-end, `--check` pre-flight, `--gate real` (the gatekeeper,
+  built as `scripts/run_graph_round.py` builds it; without `--fake` it needs `loop.noise_measured`
+  and a `loop.noise` above 0), `--gate kept|reverted` stand-ins (without `--fake`, `kept` is refused
+  and `reverted` is a pilot). Real mode gives the judge to the round as `judge_panel`, requires a
+  frozen panel judge (`check_frozen`; the fallback judge needs none), refuses a judge other than
+  `loop.judge_version`, and checks prices before any call. A round's exception costs that round
+  (`round_error` in `log/loop.jsonl`); three in a row, or three rounds with nothing scored, stop the
+  loop; every stop writes a `stopped` line there (exit 0 for a cap, 3 for failures).
+  Rules: `docs/specs/unattended-run.md` section 1.
+- Plumbing: judge signature is `judge(records, round)`; `select_for_critic` feeds the critic the
+  lowest-scoring conversations; `RoundDeps.start_policy` turns on `.meta.json` + the end-of-round
+  replay check; `DecisionLog` reports a truncated last line as `DecisionLogError`.
+- `scripts/plots.py` + `tests/fixtures/plot-*`: quality-by-round with noise band and kept/reverted
+  marks, rounds table, judge-vs-user scatter, final-vs-baselines bars. Missing inputs skip.
+- Tests: `tests/test_loop.py` (26), `tests/test_plots.py` (4); suite 730 passed, 1 skipped.
+
+Still needed before the overnight run: stage-3 round-cost measurement to set
+`max_rounds`/`spend_limit_usd`/`round_cost_estimate_usd`, the stage-5 noise numbers, API keys,
+`calibration/frozen.json`, and one watched real round.
 
 ## Not in this stage
 

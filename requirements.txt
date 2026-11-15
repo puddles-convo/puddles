@@ -6,3 +6,4 @@ mlflow>=3.18
 fastapi>=0.110
 uvicorn>=0.30
 pytest>=8
+matplotlib>=3.9

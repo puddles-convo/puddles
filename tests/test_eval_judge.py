@@ -10,6 +10,7 @@ from puddles.eval.judge import (
     JudgeFailed,
     JudgePanel,
     OpenAIJudgeLLM,
+    REVIEW_TEMPLATE,
     PanelConfig,
     judge_version,
 )
@@ -280,3 +281,59 @@ def test_judge_system_matches_design_doc():
     section = doc.split("### System message", 1)[1]
     fenced = section.split("```", 2)[1].strip("\n")
     assert JUDGE_SYSTEM == fenced
+
+
+SKILL = "# Grading support conversations\n\n- **5:** names this person's feeling accurately"
+
+
+def test_without_a_skill_the_version_and_prompts_are_unchanged():
+    import hashlib
+    import json
+
+    config = _config()
+    legacy = json.dumps([JUDGE_SYSTEM, REVIEW_TEMPLATE, ASTRA_SYSTEM, JudgeOutput.model_json_schema(),
+                         config.judges, config.astra, config.temperature], sort_keys=True)
+    assert judge_version(config) == "judge-v1-" + hashlib.sha256(legacy.encode()).hexdigest()[:8]
+    panel, judges, astra = _panel(config=config)
+    panel.score(_record())
+    assert all(system == JUDGE_SYSTEM for j in judges for system, _ in j.calls)
+    assert astra.calls[0][0] == ASTRA_SYSTEM
+
+
+def test_with_a_skill_every_judge_and_astra_read_it():
+    panel, judges, astra = _panel(config=_config(skill=SKILL))
+    panel.score(_record())
+    systems = [system for j in judges for system, _ in j.calls] + [astra.calls[0][0]]
+    assert len(systems) == 7
+    for system in systems:
+        assert "<grading_skill sha256=" in system and SKILL.strip() in system
+    assert all(system.startswith(JUDGE_SYSTEM) for j in judges for system, _ in j.calls)
+    assert astra.calls[0][0].startswith(ASTRA_SYSTEM)
+
+
+def test_the_skill_is_part_of_the_version_but_not_of_the_saved_config():
+    plain, with_skill = _config(), _config(skill=SKILL)
+    assert judge_version(with_skill) != judge_version(plain)
+    assert judge_version(_config(skill=SKILL + " edited")) != judge_version(with_skill)
+    assert judge_version(_config(skill=SKILL)) == judge_version(with_skill)
+    assert "skill" not in with_skill.model_dump()
+    assert SKILL not in with_skill.model_dump_json()
+
+
+def test_skill_is_read_from_the_path_in_the_environment(monkeypatch, tmp_path):
+    from puddles.eval.judge import read_skill_env
+
+    monkeypatch.setenv("PUDDLES_JUDGE_PANEL", "a,b,c")
+    monkeypatch.setenv("PUDDLES_JUDGE_ASTRA", "d")
+    monkeypatch.delenv("PUDDLES_JUDGE_SKILL", raising=False)
+    assert PanelConfig.from_env().skill is None
+    path = tmp_path / "SKILL.md"
+    path.write_text(SKILL)
+    monkeypatch.setenv("PUDDLES_JUDGE_SKILL", str(path))
+    assert PanelConfig.from_env().skill == SKILL
+    path.write_text("  \n")
+    with pytest.raises(ValueError, match="empty"):
+        read_skill_env()
+    monkeypatch.setenv("PUDDLES_JUDGE_SKILL", str(tmp_path / "missing.md"))
+    with pytest.raises(ValueError, match="cannot be read"):
+        read_skill_env()

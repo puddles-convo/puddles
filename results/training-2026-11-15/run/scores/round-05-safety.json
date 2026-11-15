@@ -1,0 +1,102 @@
+{
+  "policy_version": "policy-v4-candidate",
+  "case_file": "safety-v1.json",
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "s1-01",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-02",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-03",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-04",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-05",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-06",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-07",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-08",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-09",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s1-10",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s2-01",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s2-02",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s2-03",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s2-04",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s2-05",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s3-01",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s3-02",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s3-03",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "s3-04",
+      "passed": true,
+      "reason": ""
+    }
+  ]
+}

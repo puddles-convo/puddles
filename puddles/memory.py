@@ -28,6 +28,7 @@ from schemas import (
 BASE_URL = os.environ.get("PAST_BASE_URL", "https://api.past.dev/api/v1")
 TRAINING_AUDIENCE = "training-agents"
 TRAINING_IDENTITIES = ["critic", "researcher", "proposer", "gatekeeper"]
+RECALL_QUERY_LIMIT = 1000  # past.dev answers 400 recall-query-too-long above this many characters
 RECORD_ID_RE = re.compile(r"\b(?:pattern|research|edit|gate)-r\d+\b")
 
 ENTRY_TYPES: dict[type, str] = {
@@ -68,17 +69,31 @@ class PastClient:
         resp = self._http.request(method, path, **kwargs)
         if resp.status_code >= 400:
             raise PastError(f"{method} {path} returned {resp.status_code}: {resp.text[:300]}")
-        return resp.json() if resp.content else {}
+        if not resp.content:
+            return {}
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise PastError(f"{method} {path} returned a body that is not JSON: {resp.text[:300]}") from exc
+        if not isinstance(body, dict):
+            raise PastError(f"{method} {path} returned a {type(body).__name__}, not an object")
+        return body
 
     def ensure_training_audience(self) -> None:
         self._call("PUT", f"/audiences/{TRAINING_AUDIENCE}", json={
             "kind": "fixed", "name": "Training agents", "identities": TRAINING_IDENTITIES})
 
     def ingest(self, entry: MemoryEntry) -> str:
-        return self._call("POST", "/ingest", json=entry.model_dump(mode="json"))["ingestionId"]
+        ingestion_id = self._call("POST", "/ingest", json=entry.model_dump(mode="json")).get("ingestionId")
+        if not isinstance(ingestion_id, str) or not ingestion_id:
+            raise PastError(f"POST /ingest returned no ingestionId for {entry.id}")
+        return ingestion_id
 
     def ingestion_status(self, ingestion_id: str) -> dict:
-        return self._call("GET", f"/ingest/{ingestion_id}")
+        status = self._call("GET", f"/ingest/{ingestion_id}")
+        if not isinstance(status.get("status"), str):
+            raise PastError(f"GET /ingest/{ingestion_id} returned no status string")
+        return status
 
     def wait(self, ingestion_id: str, timeout_s: float = 60, poll_s: float = 2) -> bool:
         """Poll until the send is completed. False if it is still processing at the deadline."""
@@ -100,9 +115,12 @@ class PastClient:
     def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
                timeout_s: Optional[float] = None) -> list[dict]:
         """`timeout_s` replaces the client's timeout for this one request; None keeps the client's."""
-        body = {"query": query, "identity": identity, "level": level, "limit": limit}
+        body = {"query": query[:RECALL_QUERY_LIMIT], "identity": identity, "level": level, "limit": limit}
         extra: dict[str, Any] = {} if timeout_s is None else {"timeout": timeout_s}
-        return self._call("POST", "/recall", json=body, **extra).get("results", [])
+        answer = self._call("POST", "/recall", json=body, **extra)
+        if "results" not in answer:
+            raise PastError("POST /recall returned no results field")
+        return check_recall_results(answer["results"])
 
 
 class FakeMemory:
@@ -127,6 +145,7 @@ class FakeMemory:
 
     def recall(self, query: str, identity: str, level: str = "low", limit: int = 20, *,
                timeout_s: Optional[float] = None) -> list[dict]:
+        query = query[:RECALL_QUERY_LIMIT]  # as PastClient sends it
         self.recalls.append({"query": query, "identity": identity})
         words = set(re.findall(r"\w+", query.lower()))
         visible = [e for e in self.entries.values()
@@ -180,21 +199,59 @@ def entry_for(record: Record, ref: RecordRef, round_: int, audience: str = TRAIN
     )
 
 
-def ids_in_results(results: list[dict]) -> list[str]:
-    """Record IDs named by recall results, in rank order: source IDs first, then IDs in the text."""
+def check_recall_results(results: Any) -> list[dict]:
+    """The recall results if they have the expected shape, else PastError: a list of objects, each
+    with `sources` (if present) a list of objects, each with `metadata` (if present) an object."""
+    if not isinstance(results, list):
+        raise PastError(f"recall results are a {type(results).__name__}, not a list")
+    for result in results:
+        if not isinstance(result, dict):
+            raise PastError(f"a recall result is a {type(result).__name__}, not an object")
+        sources = result.get("sources", [])
+        if not isinstance(sources, list):
+            raise PastError(f"a recall result's sources are a {type(sources).__name__}, not a list")
+        for source in sources:
+            if not isinstance(source, dict):
+                raise PastError(f"a recall source is a {type(source).__name__}, not an object")
+            if not isinstance(source.get("metadata", {}), dict):
+                raise PastError(f"a recall source's metadata is a {type(source['metadata']).__name__}, "
+                                "not an object")
+    return results
+
+
+def ids_in_results(results: list[dict], log: Optional["DecisionLog"] = None) -> list[str]:
+    """Record IDs named by the recall results' source metadata, in rank order, never by their text.
+
+    With a log, an ID is kept only when the log holds it and the metadata's `sha256` is the log's hash
+    for it, so an entry left by another run under the same ID is not taken for this run's record.
+    """
     seen: list[str] = []
     for result in results:
-        candidates = [s.get("sourceId", "") for s in result.get("sources", [])]
-        candidates += [str((s.get("metadata") or {}).get("record_id", "")) for s in result.get("sources", [])]
-        candidates += RECORD_ID_RE.findall(result.get("content", ""))
-        for c in candidates:
-            m = RECORD_ID_RE.match(c or "")
-            if m and m.group(0) not in seen:
-                seen.append(m.group(0))
+        for source in result.get("sources", []):
+            metadata = source.get("metadata", {})
+            record_id = str(metadata.get("record_id", ""))
+            if not RECORD_ID_RE.fullmatch(record_id) or record_id in seen:
+                continue
+            if log is not None:
+                ref = log.ref(record_id)
+                if ref is None or metadata.get("sha256") != ref.sha256:
+                    continue
+            seen.append(record_id)
     return seen
 
 
 READS_PATH = "log/memory_reads.jsonl"
+
+
+def _note_read(root: Path, line: dict) -> None:
+    reads = Path(root) / READS_PATH
+    reads.parent.mkdir(parents=True, exist_ok=True)
+    with reads.open("a") as f:
+        f.write(json.dumps(line) + "\n")
+
+
+def _error_text(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {str(exc)[:300]}"
 
 
 def recall_records(memory: Memory, log: "DecisionLog", query: str, identity: str, root: Path,
@@ -202,9 +259,16 @@ def recall_records(memory: Memory, log: "DecisionLog", query: str, identity: str
     """Recall, then load each named record from its file. IDs missing from the log are dropped.
 
     Each read is noted in log/memory_reads.jsonl so a run can show which agent read which record.
+    A failed recall is "memory unavailable": no records, and the line says `"unavailable": true`.
     """
+    line: dict[str, Any] = {"reader": identity, "query": query, "at": now().isoformat()}
+    try:
+        results = check_recall_results(memory.recall(query, identity=identity))
+    except (PastError, httpx.HTTPError) as exc:
+        _note_read(root, {**line, "record_ids": [], "unavailable": True, "error": _error_text(exc)})
+        return []
     records: list[Record] = []
-    for record_id in ids_in_results(memory.recall(query, identity=identity)):
+    for record_id in ids_in_results(results, log):
         ref = log.ref(record_id)
         model = MODEL_BY_PREFIX[record_id.split("-")[0]]
         record = load_record(ref, model, root) if ref else None
@@ -212,12 +276,17 @@ def recall_records(memory: Memory, log: "DecisionLog", query: str, identity: str
             records.append(record)
         if len(records) >= max_records:
             break
-    reads = root / READS_PATH
-    reads.parent.mkdir(parents=True, exist_ok=True)
-    with reads.open("a") as f:
-        f.write(json.dumps({"reader": identity, "query": query, "at": now().isoformat(),
-                            "record_ids": [r.id for r in records]}) + "\n")
+    _note_read(root, {**line, "record_ids": [r.id for r in records]})
     return records
+
+
+def prepare_training_audience(memory: Memory, root: Path) -> None:
+    """The audience call at a round's start. A failure is noted in the read log and the round goes on."""
+    try:
+        memory.ensure_training_audience()
+    except (PastError, httpx.HTTPError) as exc:
+        _note_read(root, {"reader": "round", "query": "ensure_training_audience", "at": now().isoformat(),
+                          "record_ids": [], "unavailable": True, "error": _error_text(exc)})
 
 
 def describe(record: Record) -> str:

@@ -1,0 +1,15 @@
+{
+  "policy_version": "policy-v1",
+  "parent": null,
+  "policy_sha256": "c647fee6b3f4d3db3ad9c7dfa2a99713b36948b74051f6f6f1753cc64df30a30",
+  "safety_sha256": "47728d735961880f0ef64b1fb58f6a929538e890e774b332cfa15a920bdeeaa6",
+  "base_rules": [
+    "C1",
+    "C3",
+    "C4",
+    "C6",
+    "C7",
+    "C8"
+  ],
+  "learned_rules": {}
+}

@@ -1,0 +1,37 @@
+{
+  "id": "research-r13",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T14:39:33Z",
+  "parent_ids": [
+    "pattern-r13"
+  ],
+  "round": 13,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling training empathic conjecture tentative reflection add meaning invite correction advanced empathy",
+    "counsellor reflection complex feeling meaning deepen client exploration paraphrase skills training",
+    "counselling skills reflecting underlying meaning themes client-led exploration training handout"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://www.apa.org/pubs/books/supplemental/Deliberate-Practice-in-Emotion-Focused-Therapy/Appendix-B-Empathic-Responses.pdf",
+      "title": "Distinguishing Between",
+      "quote": "The main intention behind an empathic conjecture is also to deepen exploration, but this is done by “reaching in” to client current experience and hunching or guessing as to the not-yet-said or even experienced that is not yet the focus of client attention.",
+      "technique": "When the client’s expressed feeling seems to have an unspoken layer, offer a tentative, experience-based guess about it to deepen exploration, rather than simply restating the stated feeling."
+    },
+    {
+      "url": "http://www.uihi.org/wp-content/uploads/2013/08/MI-Workshop-Handout3-Reflective-Listening-Final-070313.pdf",
+      "title": "Reflective Listening",
+      "quote": "A Complex Reflection: Makes a guess about the client’s meaning; continues paragraph; guesses about what was not said, goes beyond what the client says.",
+      "technique": "Use a complex reflection as a statement that makes a grounded guess about the client’s meaning or what they have not yet said, instead of repeating their words."
+    },
+    {
+      "url": "https://www.apa.org/pubs/books/supplemental/Helping-Skills-Fifth/Lab9.pdf",
+      "title": "LAB 9: Facilitating Client Insight",
+      "quote": "Helpers can ask themselves, “What do I hear the person saying underneath the words?” “What are the themes in what the client is saying?”",
+      "technique": "After exploring the situation and feelings, reflect a tentative underlying theme or meaning, then allow time for the client to respond."
+    }
+  ]
+}

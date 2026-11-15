@@ -4,11 +4,13 @@ import hashlib
 import json
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal, Optional, Protocol
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from puddles.llm import AgentFailed, call_checked
 from schemas import ConversationRecord, JudgeOutput, ScoreRecord, Strict, Turn
@@ -65,6 +67,31 @@ Return JSON with exactly these fields: empathy, relevance, emotion_before, emoti
 def render_conversation(turns: list[Turn]) -> str:
     lines = [f"{i}. {turn.speaker}: {turn.text}" for i, turn in enumerate(turns, start=1)]
     return "<conversation>\n" + "\n".join(lines) + "\n</conversation>"
+
+
+def skill_sha(skill: str) -> str:
+    return hashlib.sha256(skill.encode("utf-8")).hexdigest()
+
+
+def read_skill_env() -> Optional[str]:
+    """The grading skill named by PUDDLES_JUDGE_SKILL, or None when it is unset (no skill)."""
+    path = os.environ.get("PUDDLES_JUDGE_SKILL", "").strip()
+    if not path:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"PUDDLES_JUDGE_SKILL={path!r} cannot be read: {e}") from e
+    if not text.strip():
+        raise ValueError(f"PUDDLES_JUDGE_SKILL={path!r} is empty")
+    return text
+
+
+def with_skill(system: str, skill: Optional[str]) -> str:
+    """The fixed system prompt, followed by the grading skill when there is one."""
+    if not skill:
+        return system
+    return f'{system}\n\n<grading_skill sha256="{skill_sha(skill)[:12]}">\n{skill.strip()}\n</grading_skill>'
 
 
 TINKER_BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
@@ -158,6 +185,9 @@ class PanelConfig(Strict):
     judges: list[str]
     astra: str
     temperature: Optional[float] = 0.0
+    # The grading skill's text; None means no skill. Not saved with the config (reports, frozen.json):
+    # its hash is in the judge version instead.
+    skill: Optional[str] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _check(self) -> "PanelConfig":
@@ -184,15 +214,16 @@ class PanelConfig(Strict):
             judges=[name.strip() for name in panel.split(",")],
             astra=astra.strip(),
             temperature=None if temperature.lower() == "none" else float(temperature),
+            skill=read_skill_env(),
         )
 
 
 def judge_version(config: PanelConfig) -> str:
-    payload = json.dumps(
-        [JUDGE_SYSTEM, REVIEW_TEMPLATE, ASTRA_SYSTEM, JudgeOutput.model_json_schema(),
-         config.judges, config.astra, config.temperature],
-        sort_keys=True,
-    )
+    parts = [JUDGE_SYSTEM, REVIEW_TEMPLATE, ASTRA_SYSTEM, JudgeOutput.model_json_schema(),
+             config.judges, config.astra, config.temperature]
+    if config.skill:  # without a skill the version is what it was before skills existed
+        parts.append({"grading_skill": skill_sha(config.skill)})
+    payload = json.dumps(parts, sort_keys=True)
     return "judge-v1-" + hashlib.sha256(payload.encode()).hexdigest()[:8]
 
 
@@ -200,6 +231,9 @@ class FallbackConfig(Strict):
     model: str
     temperature: Optional[float] = 0.0
     base_url: str = TINKER_BASE_URL
+    # The grading skill's text; None means no skill. Not saved with the config (reports, frozen.json):
+    # its hash is in the judge version instead.
+    skill: Optional[str] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _check(self) -> "FallbackConfig":
@@ -214,14 +248,14 @@ class FallbackConfig(Strict):
             raise ValueError("PUDDLES_FALLBACK_JUDGE_MODEL is not set")
         temperature = os.environ.get("PUDDLES_JUDGE_TEMPERATURE", "0").strip()
         return cls(model=model.strip(), temperature=None if temperature.lower() == "none" else float(temperature),
-                   base_url=os.environ.get("PUDDLES_TINKER_BASE_URL") or TINKER_BASE_URL)
+                   base_url=os.environ.get("PUDDLES_TINKER_BASE_URL") or TINKER_BASE_URL, skill=read_skill_env())
 
 
 def fallback_judge_version(config: FallbackConfig) -> str:
-    payload = json.dumps(
-        [JUDGE_SYSTEM, JudgeOutput.model_json_schema(), "tinker", config.model, config.temperature],
-        sort_keys=True,
-    )
+    parts = [JUDGE_SYSTEM, JudgeOutput.model_json_schema(), "tinker", config.model, config.temperature]
+    if config.skill:
+        parts.append({"grading_skill": skill_sha(config.skill)})
+    payload = json.dumps(parts, sort_keys=True)
     return "judge-fallback-v1-" + hashlib.sha256(payload.encode()).hexdigest()[:8]
 
 
@@ -320,9 +354,10 @@ class JudgePanel:
                    record_id: str) -> tuple[PanelVerdict, list[Usage]]:
         label = "ABC"[index]
         usage: list[Usage] = []
-        initial = checked_judgement(llm, "initial", label, JUDGE_SYSTEM, conversation, helper_count, record_id, usage)
+        system = with_skill(JUDGE_SYSTEM, self.config.skill)
+        initial = checked_judgement(llm, "initial", label, system, conversation, helper_count, record_id, usage)
         review = REVIEW_TEMPLATE.format(conversation=conversation, initial=initial.model_dump_json(indent=2))
-        final = checked_judgement(llm, "final", label, JUDGE_SYSTEM, review, helper_count, record_id, usage)
+        final = checked_judgement(llm, "final", label, system, review, helper_count, record_id, usage)
         return PanelVerdict(judge=label, model=llm.model, initial=initial, final=final), usage
 
     def score(self, record: ConversationRecord) -> JudgeResult:
@@ -341,11 +376,34 @@ class JudgePanel:
             for verdict in verdicts
         )
         astra_usage: list[Usage] = []
-        out = checked_judgement(self.astra, "astra", "astra", ASTRA_SYSTEM, conversation + "\n\n" + judgements,
-                           helper_count, record.id, astra_usage)
+        out = checked_judgement(self.astra, "astra", "astra", with_skill(ASTRA_SYSTEM, self.config.skill),
+                                conversation + "\n\n" + judgements, helper_count, record.id, astra_usage)
         usage += astra_usage
         score = _score_record(record, self.version, out)
         return JudgeResult(score=score, verdicts=verdicts, usage=usage)
+
+
+_TURN_MARKER = re.compile(r"^(?:(?:helper\s+)?turn\s*)?\d+\s*[.:\-–—)]\s*", re.IGNORECASE)
+_QUOTES = " \t\r\n\"'`“”‘’"
+
+
+def normalise_strategy(label: str) -> str:
+    """The canonical strategy name for a label like `Turn 2: Reflection of feelings`, else the label."""
+    text = _TURN_MARKER.sub("", label.strip(_QUOTES)).strip(_QUOTES)
+    return next((s for s in STRATEGIES if s.lower() == text.lower()), label)
+
+
+class _NormalisedLabels:
+    """The single-model judge's LLM, with its strategy labels normalised before they are checked."""
+
+    def __init__(self, llm: JudgeLLM):
+        self.llm = llm
+        self.model = llm.model
+
+    def judge(self, system: str, user: str) -> tuple[JudgeOutput, int, int]:
+        out, prompt_tokens, completion_tokens = self.llm.judge(system, user)
+        out = out.model_copy(update={"strategies": [normalise_strategy(s) for s in out.strategies]})
+        return out, prompt_tokens, completion_tokens
 
 
 class SingleJudge:
@@ -370,9 +428,12 @@ class SingleJudge:
         if helper_count == 0:
             raise ValueError(f"{record.id}: conversation has no helper turns")
         usage: list[Usage] = []
-        out = checked_judgement(self.llm, "single", "fallback", JUDGE_SYSTEM,
+        out = checked_judgement(_NormalisedLabels(self.llm), "single", "fallback",
+                                with_skill(JUDGE_SYSTEM, self.config.skill),
                                 render_conversation(record.turns), helper_count, record.id, usage)
-        return JudgeResult(score=_score_record(record, self.version, out), verdicts=[], usage=usage)
+        score = _score_record(record, self.version, out).model_copy(
+            update={"evidence": out.evidence, "safety_flags": list(out.safety_flags)})
+        return JudgeResult(score=score, verdicts=[], usage=usage)
 
 
 def judge_from_env():

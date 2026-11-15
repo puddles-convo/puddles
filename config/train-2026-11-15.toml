@@ -1,0 +1,70 @@
+# The run's config file. Read by puddles/config.py.
+# Another file can be used by setting the environment variable PUDDLES_CONFIG to its path.
+
+# ---------------------------------------------------------------------------------------------
+# Prices. EMPTY ON PURPOSE.
+#
+# Whoever holds each account fills these in from the provider's own price page. Do not guess,
+# and do not copy a figure from memory. A run stops before its first call if a model it uses
+# has no row here, or if it searches Exa and exa_search_usd is not set.
+#
+# The model name must be exactly the one in HELPER_MODEL, SIMUSER_MODEL or PUDDLES_AGENT_MODEL.
+# A model that is free to call still needs a row, with both prices written as 0.
+# ---------------------------------------------------------------------------------------------
+
+[prices]
+# Dollars for one Exa search request.
+# exa_search_usd =
+# https://exa.ai/pricing, read 2026-11-15; the higher reading of an unclear page.
+exa_search_usd = 0.012
+
+[prices.models]
+# Dollars per million tokens.
+# "the-model-name" = { input_usd_per_million = , output_usd_per_million = }
+# OpenAI standard tier, https://developers.openai.com/api/docs/pricing, read 2026-11-15.
+"gpt-6-luna" = { input_usd_per_million = 0.10, output_usd_per_million = 0.50 }
+"gpt-6.1-sol" = { input_usd_per_million = 2.00, output_usd_per_million = 10.00 }
+"gpt-6-astra" = { input_usd_per_million = 10.00, output_usd_per_million = 50.00 }
+
+# ---------------------------------------------------------------------------------------------
+# Output limits: the most tokens one answer may have, for the agents that call the OpenAI API
+# (puddles.llm.OpenAILLM). The limit is sent as max_completion_tokens, so on a reasoning model
+# it covers the reasoning as well as the answer. An answer cut off at the limit fails the agent.
+# `default` is required and is used by any agent with no line of its own.
+#
+# These are starting values that nobody has measured. Set them in stage 3 from real calls.
+# The helper and the simulated user have their limits in loop/helper.py and loop/simulated_user.py.
+# ---------------------------------------------------------------------------------------------
+
+[output_limits]
+default = 4000
+critic = 4000
+researcher = 4000
+proposer = 4000
+
+# ---------------------------------------------------------------------------------------------
+# The loop's fixed settings, measured or chosen in stage 5 and read by the overnight run
+# (stage 6). puddles.config.load_config ignores this table; scripts/run_loop.py will read it.
+# ---------------------------------------------------------------------------------------------
+
+[loop]
+# Run-to-run movement in quality when nothing changed: the gate's keep threshold.
+# EMPTY until stage 5 measures it from three policy-v1 runs; noise_measured must stay
+# false before then, because the gate keeps nothing while the noise is unmeasured.
+noise = 0.275
+noise_measured = true
+seed = 7
+max_turns = 6
+validation_ids = "fixtures/validation_ids.txt"
+train_ids = "fixtures/train_ids.txt"
+# The mean of the three policy-v1 baseline runs (pending: team decision, stage 5 doc).
+# current_scores = { empathy = , relevance = , quality = , emotion_change = }
+# judge_version =   # written from calibration/frozen.json once the judge is frozen
+
+# The overnight run's caps and sizes. Values marked "stage 3" come from the small real
+# run's measurements; leave them commented until then.
+# max_rounds =          # total round events allowed; unset means no round cap
+conversations_per_round = 8
+# conversations_for_critic =   # the n lowest-scoring conversations the critic reads; unset = all
+spend_limit_usd = 11.00
+round_cost_estimate_usd = 0.70

@@ -52,8 +52,8 @@ Six levels. The first four belong to training, the last two to a person.
 ## 3. One training round, end to end
 
 ```
-start of round    resend any memory copies still pending from earlier rounds
-                  (three failed attempts on one copy stop the loop)
+start of round    resend any memory copies still pending from earlier rounds, once per start
+                  (a copy that fails stays pending; it never stops the loop)
 
 1 simulated user  no memory
 2 helper          no memory; reads the policy file in force
@@ -145,7 +145,7 @@ What is kept depends on the two answers:
 | Gatekeeper | Critic, Proposer |
 | Note-taker | Helper, Note-taker |
 
-Every recall is noted in `log/memory_reads.jsonl` with the reader, the query and the record IDs returned, so a run can show which agent read which record.
+Every recall is noted in `log/memory_reads.jsonl` with the reader, the query and the record IDs returned, so a run can show which agent read which record. A recall that fails (an error from past.dev, or an answer of the wrong shape) is "memory unavailable": the agent runs without memory and the line says `"unavailable": true` with the error.
 
 ## 6. How memory gets into a prompt
 
@@ -164,7 +164,7 @@ The budget is `HISTORY_RECENT = 10`. It limits what a model reads, not what code
 **Route 2: recall, then load.**
 
 1. Code sends a query to past.dev under the agent's identity. For the critic the query is built from the judge's notes on this round's worst conversations.
-2. The results are used only to find record IDs.
+2. The results are used only to find record IDs, taken from each source's metadata, never from the text. An ID is kept only when this root's log holds it and the metadata's `sha256` is the log's hash for it, so an entry left by an earlier run under the same ID is not used.
 3. Code loads those records from their files and checks each against the hash in the log. An ID with no matching file is dropped.
 4. At most `FROM_MEMORY_LIMIT = 5` go into the prompt, one line each, in a `<from_memory>` block.
 
@@ -181,7 +181,7 @@ So a stale or altered memory entry cannot put wrong content in front of an agent
 | Policy in force | End of round, only when the gate says `kept` | The candidate is written as the next version | Token cap. At the cap the edit must be a removal or a shortening. |
 | Decision log | End of round: one `round` event. Then one `memory_copy` event per copy. | Appended. Never edited. | Nothing |
 | Training memory | After the `round` event, one record at a time | Code builds the sentence from a template, sends it, and polls up to 60 seconds for `completed` | Add-only. About 200 entries after 50 rounds. |
-| Pending copies | Start of the next round | Resent, with the attempt number raised. Three attempts stop the loop. | Three attempts |
+| Pending copies | Start of the next round | Resent once per round start, with the attempt number raised. A copy that fails stays pending and never stops the loop. | Nothing; one try per start |
 | Pattern status | Whenever a list is built | Replay of the kept edits in the log | Derived, not stored |
 | Prompt history lists | Every agent call | Rebuilt from the log within the budget | 10 recent items plus the relevant ones |
 | Live-note index | Session start (expiry) and session end (note-taker) | See below | 23 notes: `NOTE_CAPS` |
@@ -345,6 +345,12 @@ Every active rule is in `base_rules` (from the starting policy) or `learned_rule
 {"reader": "proposer", "query": "(the question asked)", "at": "2026-11-14T22:30:02Z", "record_ids": ["gate-r03", "edit-r03"]}
 ```
 
+A failed recall, and a failed audience call at a round's start (reader `round`), add two fields:
+
+```json
+{"reader": "critic", "query": "(the question asked)", "at": "2026-11-14T22:30:02Z", "record_ids": [], "unavailable": true, "error": "PastError: POST /recall returned 503: ..."}
+```
+
 ### A person's notes
 
 ```python
@@ -411,7 +417,7 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 
 - A promoted policy file that no `round` event names is removed, with its `.meta.json`, and the round runs again.
 - A record a `round` event points to with no `memory_copy` event is copied then.
-- Pending copies are resent, and the three-attempt limit is checked again after the resend, so the loop stops before the next round.
+- Pending copies are resent once per round start (`run_round` calling `retry_pending` after `prepare_round` sends nothing again). A copy that fails stays pending; it never raises or blocks a start.
 
 **Known gaps in what is built**
 
@@ -443,7 +449,7 @@ Version 3 is in `schemas.py`, the agent files, the README, the examples and the 
 
 14. **Real sessions feeding training.** Consented sessions use the same record format, so the judge and critic can read them. Nothing collects them, and they would need identifying details removed before the critic reads them in full. Real sessions can show what to fix; only simulated users can test a fix.
 15. **Whether the log and records are committed.** The design calls the log "a file in the repo". Runs are written under `runs/`, which git ignores.
-16. **How past.dev behaves in practice:** how long a write takes to be searchable, and whether metadata comes back on recall. The design does not depend on the second.
+16. **How past.dev behaves in practice:** how long a write takes to be searchable, and whether metadata comes back on recall. Recall depends on the second: a result is used only through its source metadata (record ID and hash).
 
 ## 11. Where the detail lives
 

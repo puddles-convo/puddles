@@ -102,6 +102,16 @@ Tinker's OpenAI-compatible endpoint does not document structured output, so the 
 
 Scores from the two judges are not interchangeable. If the loop switches judges, re-score the current policy with the new judge before comparing anything, and record the switch in the decision log.
 
+### Grading skill
+
+**Status: the skill is built (`calibration/judge-skill/SKILL.md`), and the panel and the fallback judge read it when `PUDDLES_JUDGE_SKILL` is set. Not yet checked on real conversations.** See the README section [How the judges grade](../../README.md#how-the-judges-grade-the-grading-skill).
+
+- **What it is.** A short grading guide, `calibration/judge-skill/SKILL.md`: anchors for 1, 3 and 5 on each dimension, what raises or lowers a score, known traps, and 4 to 6 rated examples.
+- **How it is built.** `python -m puddles.eval.judge_skill` reads the ESConv **training split only**, samples evenly across rating levels, asks a builder model (`PUDDLES_SKILL_BUILDER_MODEL`) to write the guidelines, and picks the examples in code. The ESConv IDs behind every guideline and example are in `skill.meta.json`.
+- **How it enters the prompt.** When `PUDDLES_JUDGE_SKILL` points to it, each judge's and Astra's system message is the fixed prompt above followed by a `<grading_skill>` block. The fixed prompt itself does not change.
+- **Part of the version.** The skill's hash goes into `judge_version` (and `fallback_judge_version`), so the frozen judge refuses to run if the skill changes.
+- **Checked once** on about 50 validation conversations, with and without the skill. It is used only if agreement does not fall. Never tuned on validation.
+
 ## 2. Where the input goes in the prompt
 
 | Place in the prompt | Filled with | Comes from |

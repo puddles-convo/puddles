@@ -1,0 +1,20 @@
+{
+  "id": "edit-r01",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T11:07:34Z",
+  "parent_ids": [
+    "pattern-r01",
+    "research-r01"
+  ],
+  "round": 1,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r01",
+  "base_policy_version": "policy-v1",
+  "new_policy_version": "policy-v2-candidate",
+  "policy_path": "policies/policy-v2-candidate-r01.md",
+  "summary": "Reworded C1 to encourage tentative meaning-focused reflections and useful summaries instead of repetitive paraphrasing and questions.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Begin with a brief reflection that tentatively connects what the person said to its feeling or meaning, rather than merely restating it; use a concise summary when helpful and ask only a question that advances the conversation, because repeating details or asking about what they already explained can feel formulaic."
+}

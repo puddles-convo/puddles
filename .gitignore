@@ -8,3 +8,5 @@ mlruns/
 /mlflow.db
 .venv/
 cache/
+uv.lock
+mlflow.db

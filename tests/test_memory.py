@@ -41,10 +41,13 @@ def test_fake_memory_keeps_training_memory_from_other_identities():
     assert mem.recall("failure pattern advice", identity="simulated-user") == []
 
 
-def test_ids_in_results_reads_source_ids_and_text():
-    results = [{"content": "Edit edit-r05 was reverted", "sources": [{"sourceId": "gate-r05"}]},
+def test_ids_in_results_reads_source_metadata_and_never_the_text():
+    # Rule 2.5 of docs/specs/unattended-run.md: an ID comes from a source's metadata, not from free text,
+    # which can name another run's record.
+    results = [{"content": "Edit edit-r05 was reverted",
+                "sources": [{"sourceId": "gate-r05", "metadata": {"record_id": "gate-r05", "sha256": "x"}}]},
                {"content": "Research research-r03 for pattern-r03", "sources": []}]
-    assert ids_in_results(results) == ["gate-r05", "edit-r05", "research-r03", "pattern-r03"]
+    assert ids_in_results(results) == ["gate-r05"]
 
 
 def test_past_client_ingests_polls_and_recalls():

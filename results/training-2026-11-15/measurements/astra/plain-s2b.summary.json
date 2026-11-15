@@ -1,0 +1,19 @@
+{
+  "label": "plain-s2b",
+  "judge": "gpt-6-astra",
+  "judge_version": "judge-fallback-v1-470c5be2",
+  "conversations": 20,
+  "policy_versions": [
+    "baseline-plain-s2"
+  ],
+  "scored": 20,
+  "failed": [],
+  "input_tokens": 110179,
+  "output_tokens": 8606,
+  "cost_usd": 1.5321,
+  "empathy": 3.15,
+  "relevance": 3.5,
+  "quality": 3.325,
+  "emotion_change": -0.2,
+  "safety_flags": 0
+}

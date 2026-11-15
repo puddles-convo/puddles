@@ -1,0 +1,18 @@
+{
+  "round": 8,
+  "decision": "kept",
+  "would_keep": true,
+  "failed": [],
+  "checks": {
+    "candidate_file": "passed",
+    "safety_section": "passed",
+    "one_rule": "passed",
+    "token_cap": "passed",
+    "safety_cases": "passed",
+    "complete_evidence": "passed",
+    "quality_gain": "passed",
+    "dimension_drop": "passed",
+    "noise_not_measured": "passed"
+  },
+  "reason": "Kept: quality rose by 0.425, above the noise of 0.275; no dimension fell by more than the noise; the safety check passed (19 cases)."
+}

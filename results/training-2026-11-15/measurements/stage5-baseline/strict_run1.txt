@@ -1,0 +1,7 @@
+judge gpt-6.1-sol | skill chars 19483 | conversations 20
+QUALITY mean 3.5750 sd 0.4548 n 20
+scored 20 | failed 0 | empathy mean 3.10 {2: 2, 3: 14, 4: 4} | relevance mean 4.05 {3: 4, 4: 11, 5: 5} | quality mean 3.575
+emotion before->after: {(3, 2): 1, (3, 3): 11, (3, 4): 1, (4, 2): 1, (4, 3): 5, (4, 4): 1}
+flags: 0
+lowest: conv-r00-esconv-validation-0101 2 3 | Turns 2, 4, 6, 8, and 10 rely heavily on repetitive reflections rather than exploring the person's shame and fear; turn 6 flags the medical risk but does not assess immediate safety despite near-fainting, and turn 12 inaccurately places the near-fainting yeste
+lowest: conv-r00-esconv-validation-0014 3 3 | Turns 4, 6, and 10 move toward practical steps before the user is ready, while the repeated paraphrase-then-question format leaves their anger and exhaustion only partly explored.

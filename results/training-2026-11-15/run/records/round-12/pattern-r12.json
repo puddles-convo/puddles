@@ -1,0 +1,30 @@
+{
+  "id": "pattern-r12",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T14:33:58Z",
+  "parent_ids": [
+    "conv-r12-esconv-train-0438",
+    "conv-r12-esconv-train-0907",
+    "conv-r12-esconv-train-0744",
+    "conv-r12-esconv-train-0841",
+    "conv-r12-esconv-train-0906",
+    "conv-r12-esconv-train-0355",
+    "conv-r12-esconv-train-0844",
+    "conv-r12-esconv-train-0636"
+  ],
+  "round": 12,
+  "name": "Repeats reflections or reassurance instead of deepening the conversation",
+  "description": "After the person has explained a concern, the helper sometimes restates their uncertainty or offers familiar reassurance without adding a new understanding or exploring what the concern means to them. This leaves the conversation feeling repetitive rather than moving emotional exploration forward.",
+  "seen_in": 5,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r12-esconv-train-0438",
+    "conv-r12-esconv-train-0907",
+    "conv-r12-esconv-train-0841",
+    "conv-r12-esconv-train-0906",
+    "conv-r12-esconv-train-0636"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

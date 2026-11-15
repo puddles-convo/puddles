@@ -1,0 +1,27 @@
+{
+  "id": "pattern-r06",
+  "schema_version": 4,
+  "written_by": "critic",
+  "created_at": "2026-11-15T12:47:46Z",
+  "parent_ids": [
+    "conv-r06-esconv-train-0625",
+    "conv-r06-esconv-train-0325",
+    "conv-r06-esconv-train-0774",
+    "conv-r06-esconv-train-0285",
+    "conv-r06-esconv-train-0835",
+    "conv-r06-esconv-train-0493",
+    "conv-r06-esconv-train-0391",
+    "conv-r06-esconv-train-0901"
+  ],
+  "round": 6,
+  "name": "Formulaic reflection-then-question loop",
+  "description": "After reflecting the user's feelings or situation, the helper repeatedly ends with another question in the same cadence. Vary the response: sometimes let validation stand, offer space, or make a concise observation instead of prompting again, while keeping questions purposeful.",
+  "seen_in": 2,
+  "out_of": 8,
+  "example_conversation_ids": [
+    "conv-r06-esconv-train-0625",
+    "conv-r06-esconv-train-0285"
+  ],
+  "same_as_pattern_id": "pattern-r01",
+  "seen_in_high": null
+}

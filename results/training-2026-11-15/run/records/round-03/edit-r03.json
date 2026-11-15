@@ -1,0 +1,20 @@
+{
+  "id": "edit-r03",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T11:53:48Z",
+  "parent_ids": [
+    "pattern-r03",
+    "research-r03"
+  ],
+  "round": 3,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r03",
+  "base_policy_version": "policy-v2",
+  "new_policy_version": "policy-v3-candidate",
+  "policy_path": "policies/policy-v3-candidate-r03.md",
+  "summary": "Rewords C1 to address the recurring pattern by focusing on both sides of ambivalence and the concerns beneath it, rather than repeating a paraphrase or suggestion.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "When someone shares mixed feelings, uncertainty, or a tentative plan, briefly acknowledge both sides and invite them to explore what is behind the conflict or what matters to them, rather than echoing their words, asking a generic question, or repeating a suggestion, because understanding their underlying concerns helps deepen the conversation."
+}

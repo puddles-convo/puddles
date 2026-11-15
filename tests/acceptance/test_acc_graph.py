@@ -371,7 +371,7 @@ def test_graph_finishes_when_nothing_is_scored(tmp_path, inputs, kind):
     policy, scenarios, _ = inputs
     judge_calls, gate_calls = [], []
 
-    def judge(records):
+    def judge(records, round_):
         judge_calls.append(records)
         return []
 

@@ -1,0 +1,20 @@
+{
+  "id": "edit-r07",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T13:04:15Z",
+  "parent_ids": [
+    "pattern-r07",
+    "research-r07"
+  ],
+  "round": 7,
+  "pattern_id": "pattern-r04",
+  "research_id": "research-r07",
+  "base_policy_version": "policy-v3",
+  "new_policy_version": "policy-v4-candidate",
+  "policy_path": "policies/policy-v4-candidate-r07.md",
+  "summary": "Tightens C9 with a clear sequence and opt-in threshold: the person must first answer an exploratory question and then explicitly agree to problem-solving. This differs from the reverted edit by making those two steps prerequisites before offering practical actions.",
+  "action": "reword",
+  "rule_id": "C9",
+  "rule_text": "When someone expresses distress or asks for emotional presence, respond directly to the feeling or need they named, then ask one curious question to help them put the feeling or its meaning into words; do not offer plans, scripts or coping actions, or ask about problem-solving, until they have answered that question and explicitly opted in, because they need to feel heard before advice is useful."
+}

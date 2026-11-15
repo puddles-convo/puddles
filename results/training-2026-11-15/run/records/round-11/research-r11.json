@@ -1,0 +1,31 @@
+{
+  "id": "research-r11",
+  "schema_version": 4,
+  "written_by": "researcher",
+  "created_at": "2026-11-15T14:29:12Z",
+  "parent_ids": [
+    "pattern-r11"
+  ],
+  "round": 11,
+  "pattern_id": "pattern-r01",
+  "queries": [
+    "counselling skills reflection of feeling and meaning deepen exploration training manual",
+    "counsellor empathic responding deepen client self-exploration reflection training university",
+    "counselling skills attending to underlying themes client narrative reflections training guide"
+  ],
+  "query": null,
+  "sources": [
+    {
+      "url": "https://counseling.education/counseling/skills/reflecting.html",
+      "title": "Reflecting & Listening Skills | counseling.education",
+      "quote": "Counselors can strengthen their reflections by constructing a reflection that integrates content, process, affect, and meaning.",
+      "technique": "Go beyond restating the client’s words by reflecting a tentative connection between what happened, how they feel, and what the experience means to them; use the reflection to invite further exploration."
+    },
+    {
+      "url": "https://learn.scu.edu.au/bbcswebdav/courses/WELF1003-2021-3/welf1003_sg_09.html",
+      "title": "welf1003: Topic 9 The process of counselling",
+      "quote": "‘Protect you?’ (Encourager – leads to exploring client’s key words and underlying meanings)",
+      "technique": "Notice and briefly reflect a client’s emotionally or meaning-laden key word, then allow them to elaborate on its underlying meaning; check your understanding rather than simply repeating the same reflection."
+    }
+  ]
+}

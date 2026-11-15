@@ -1,0 +1,20 @@
+{
+  "round": 3,
+  "decision": "reverted",
+  "would_keep": false,
+  "failed": [
+    "quality_gain"
+  ],
+  "checks": {
+    "candidate_file": "passed",
+    "safety_section": "passed",
+    "one_rule": "passed",
+    "token_cap": "passed",
+    "safety_cases": "passed",
+    "complete_evidence": "passed",
+    "quality_gain": "failed",
+    "dimension_drop": "passed",
+    "noise_not_measured": "passed"
+  },
+  "reason": "Reverted on no quality gain above the noise (check 5): quality rose by 0.05, which is not more than the noise of 0.275."
+}
