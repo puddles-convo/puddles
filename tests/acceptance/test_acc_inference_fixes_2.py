@@ -55,7 +55,7 @@ def offline(tmp_path, monkeypatch):
     mlflow.set_tracking_uri(old_uri)
 
 
-# The previous implementation, independently checked against git show HEAD~1:loop/helper.py.
+# Original implementation, independently checked against git show aa064ae^:loop/helper.py.
 def old_trim(text):
     closers = re.escape('\"\'”’)]}')
     if re.search(rf'[.!?][{closers}]?$', text):
@@ -85,10 +85,14 @@ def trimming_cases():
     yield REAL_DRAFT, REAL_DRAFT.split(' In the')[0], 'Right: retain complete emergency-services sentence'
     for raw in ("I'm listening. You can call or text 988 in the U.S. If you",
                 'I hear you. Bring water, snacks, etc. When you'):
-        yield raw, old_trim(raw), 'Wrong: drops a complete sentence ending in an abbreviation'
+        yield raw, old_trim(raw), 'Right: preserve complete sentence before uppercase continuation'
 
 
 def test_generated_trimming_comparison(tmp_path):
+    assert trim_to_sentence("I'm listening. You can call or text 988 in the U.S. If you") == (
+        "I'm listening. You can call or text 988 in the U.S.")
+    assert trim_to_sentence('I hear you. Bring water, snacks, etc. When you') == (
+        'I hear you. Bring water, snacks, etc.')
     cases = list(trimming_cases())
     differences = []
     problems = []
@@ -98,10 +102,27 @@ def test_generated_trimming_comparison(tmp_path):
             problems.append(dict(input=raw, old=previous, actual=actual, expected=expected))
         if actual != previous:
             differences.append(dict(input=raw, old=previous, new=actual, expected=expected, judgement=judgement))
-    assert len(cases) == 525 and len(differences) == 111
+    assert len(cases) == 525 and len(differences) == 109
     (tmp_path / 'trimming-differences.json').write_text(json.dumps(
         dict(compared=len(cases), differences=differences), indent=2), encoding='utf-8')
     assert not problems, problems
+
+
+def test_manager_abbreviation_ruling():
+    titles = {'Dr.', 'Mr.', 'Mrs.', 'Ms.', 'Prof.', 'St.'}
+    afters = [('Upper unfinished', True), ('"Upper unfinished', True),
+              ("'Upper unfinished", True), ('“Upper unfinished', True), ('‘Upper unfinished', True),
+              ('(Upper unfinished', True), ('[Upper unfinished', True), ('{Upper unfinished', True),
+              ('lower unfinished', False), ('3 unfinished', False), (', unfinished', False),
+              ('; unfinished', False), ('"lower unfinished', False), ('(lower unfinished', False)]
+    for abbr in ABBREVIATIONS:
+        prefix = f'I hear you. That abbreviation was {abbr}'
+        for after, uppercase in afters:
+            raw = prefix + ' \t ' + after
+            expected = prefix if uppercase and abbr not in titles else 'I hear you.'
+            assert trim_to_sentence(raw) == expected, raw
+        assert trim_to_sentence(prefix + '   ') == prefix
+    assert trim_to_sentence('I hear you. You could ask your family Dr. Would you') == 'I hear you.'
 
 
 def test_saved_drafts_trimming_differences(tmp_path):
