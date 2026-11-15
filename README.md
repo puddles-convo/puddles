@@ -29,57 +29,17 @@ The helper listens, reflects, asks questions, suggests coping techniques and poi
 
 ## 1. Training steps
 
-Training is the offline loop that improves the policy. It runs in the cloud in rounds, with no human in it.
+The agreed design is an offline policy-improvement loop. The figure below distinguishes implemented handoffs from planned integration; the current development gate is selected manually.
 
-```
-TRAINING  (one round; down the left is what each agent hands the next)
-+------------------------------+                                        +----------------------+
-| 1. SIMULATED USER            |     (no access)                        |                      |
-| plays a person in distress   |                                        |                      |
-+------------------------------+                                        |                      |
-              |  user message                                           |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 2. HELPER                    |     (no access during training)        |                      |
-| replies, following policy    |                                        |                      |
-+------------------------------+                                        |                      |
-              |  conversation, turns only                               |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 3. JUDGE                     |     (no access)                        |                      |
-| rates the conversation       |                                        |                      |
-+------------------------------+                                        |                      |
-              |  scores and notes                                       |                      |
-              v                                                         |                      |
-+------------------------------+                                        |   TRAINING MEMORY    |
-| 4. CRITIC                    | <- reads: past patterns, outcomes ---- |      (past.dev)      |
-| names the main failure       | -- writes: failure pattern ----------> |                      |
-+------------------------------+                                        |    shared by the     |
-              |  failure pattern, or none found                         |   training agents    |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 5. RESEARCHER                | <- reads: past searches -------------- |                      |
-| finds how counsellors fix it | -- writes: sources and technique ----> |                      |
-+------------------------------+                                        |                      |
-              |  sources, or none found                                 |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 6. PROPOSER                  | <- reads: past edits and outcomes ---- |                      |
-| writes one policy edit       | -- writes: the proposed edit --------> |                      |
-+------------------------------+                                        |                      |
-              |  candidate policy                                       |                      |
-              v                                                         |                      |
-+------------------------------+                                        |                      |
-| 7. GATEKEEPER (code)         | -- writes: outcome, from the log ----> |                      |
-| tests it; keeps or reverts   |                                        |                      |
-+------------------------------+                                        |                      |
-              :  policy in force; the next round starts again at 1      |                      |
-              :                                                         +----------------------+
-```
+![Puddles training implementation snapshot](figures/fig1-training.svg)
 
-- **Down the left** is the order of the steps and what each agent hands straight to the next.
-- **Across** is what each agent reads from and writes to the shared memory.
-- **A round can also end early:** with no pattern found, or no usable source found. Then no edit is made.
+**Implementation snapshot:** solid paths show implemented handoffs; dashed paths show planned Judge integration. The round script consumes pre-scored JSON, and the gate is a developer-selected keep/revert stand-in, not measured evaluation. There is **no automatic next-batch loop**.
+
+- **State inputs** name policy, decision-log and memory dependencies; the log and hash-checked local records are authoritative.
+- **Finish round** logs the outcome, copies available records to shared memory and promotes the policy only when kept. No-pattern/no-evidence exits finish without an edit.
+- **Motion is illustrative**, not execution timing or measured embeddings. The broader tables below remain the agreed design, not a claim that all planned components are built.
+
+[Replayable player](figures/fig1-player.html) (download and open locally) · [Architecture and reproduction notes](figures/fig1-architecture.md)
 
 ## 2. Training agents
 
