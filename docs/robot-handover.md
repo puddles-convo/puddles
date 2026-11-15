@@ -4,6 +4,14 @@ For the `puddles-stack` team. This page is everything needed to move the robot's
 
 Every response shown in sections 4 and 9 was produced by the service in fake mode on 15 November 2026, unless it is marked as the contract's example.
 
+> **Real mode needs pull request #74 merged first.** This checkout starts in real mode, but three things in it are not ready for real people:
+>
+> - **The note-taker without training consent cannot run.** It ignores `HELPER_MAX_TOKENS_PARAM` and `HELPER_EXTRA_BODY` and sends `max_tokens` and `temperature: 0.0`, which `gpt-6-luna` refuses (HTTP 400 in the smoke test). Notes and forget requests of sessions without training consent then fail.
+> - **The wait for past.dev is 60 s**, while past.dev took 54 s and 81 s to confirm a note, so a note can be lost. Pull request #74 makes it 300 s.
+> - **The crisis checker's deadline is 3 s**, close to its real latency; one ordinary turn in eleven lost its reply to the holding line. Pull request #74 makes it 5 s.
+>
+> The integration branch will have pull request #74 before 09:00. **Fake mode works now**, on this checkout, for everything on this page.
+
 ## 1. The swap in five lines
 
 1. Speech-to-text turns what the person said into text.
@@ -32,28 +40,46 @@ PUDDLES_SERVICE_TOKEN=dev-token python -m scripts.serve --policy policies/policy
 
 **Real mode:**
 
+Set the token first, without it landing in your shell history (paste it at the silent prompt), then start:
+
 ```
-PUDDLES_SERVICE_TOKEN=<a long random string> python -m scripts.serve --policy policies/policy-v2.md --root runs/serve
+read -rs PUDDLES_SERVICE_TOKEN && export PUDDLES_SERVICE_TOKEN
+python -m scripts.serve --policy policies/policy-v2.md --root runs/serve
 ```
+
+The brain needs the same token, from its own secret store.
 
 Options: `--notes-root DIR` (default: the `--root` value), `--host` (default `127.0.0.1`), `--port` (default `8765`), `--mlflow URI` (used only for sessions with training consent), `--sweep-every SECONDS` (default 30). It binds to `127.0.0.1` unless you pass `--host`; opening it beyond the machine is your decision.
 
-Real mode needs these environment variables. Names and non-secret values are the ones the team runs with; the keys are yours to fill in.
+Real mode reads these environment variables. Names and non-secret values are the ones the team runs with; the keys are yours to fill in.
+
+**Required** (the service will not start without them):
 
 | Variable | Value | For |
 |---|---|---|
 | `PUDDLES_SERVICE_TOKEN` | a long random string | the bearer token every request must carry; never an argument, never printed |
 | `HELPER_URL` | `https://api.openai.com/v1` | the helper and the crisis checker |
 | `HELPER_MODEL` | `gpt-6-luna` | the helper and the crisis checker |
+| `OPENAI_API_KEY` | your key | the note-taker |
+| `PUDDLES_AGENT_MODEL` | `gpt-6-luna` | the note-taker |
+| `PAST_API_KEY` | your key | past.dev, where "remember me" notes live |
+
+**Provider settings** (optional to the code, but needed for OpenAI and `gpt-6-luna`):
+
+| Variable | Value | For |
+|---|---|---|
 | `HELPER_API_KEY` | your key | the helper and the crisis checker |
 | `HELPER_MAX_TOKENS_PARAM` | `max_completion_tokens` | the helper and the crisis checker |
 | `HELPER_EXTRA_BODY` | `'{"temperature": 1, "reasoning_effort": "none"}'` | the helper and the crisis checker |
-| `OPENAI_API_KEY` | your key | the note-taker |
-| `PUDDLES_AGENT_MODEL` | `gpt-6-luna` | the note-taker |
-| `PUDDLES_AGENT_TOOL_REASONING_EFFORT` | `none` | the note-taker (optional) |
-| `OPENAI_BASE_URL` | optional | the note-taker without training consent; default OpenAI |
-| `PAST_API_KEY` | your key | past.dev, where "remember me" notes live |
-| `PAST_BASE_URL` | optional, default `https://api.past.dev/api/v1` | past.dev |
+
+**Optional:**
+
+| Variable | Default | For |
+|---|---|---|
+| `OPENAI_BASE_URL` | OpenAI | the note-taker, with and without training consent |
+| `PAST_BASE_URL` | `https://api.past.dev/api/v1` | past.dev |
+
+`PUDDLES_AGENT_TOOL_REASONING_EFFORT`, which the training scripts set, applies only to requests with tools and does not affect the note-taker.
 
 At startup one of each client is built, so a missing variable stops it before anything listens: one line on standard error starting `error: ` and exit code 2. Without the token, for example:
 
@@ -65,7 +91,7 @@ error: PUDDLES_SERVICE_TOKEN is not set
 
 **As its own process:** run the command above and call `http://127.0.0.1:8765`.
 
-**Mounted inside your FastAPI app:** with this repo installed or on the path, `PUDDLES_SERVICE_TOKEN` and the variables above in the environment (drop `fake=True` for real mode):
+**Mounted inside your FastAPI app:** with this repo installed or on the path, `PUDDLES_SERVICE_TOKEN` and the variables above in the environment. The snippet is real mode; change `fake=False` to `fake=True` for fake mode:
 
 ```python
 import argparse, os
@@ -90,7 +116,7 @@ B=http://127.0.0.1:8765
 
 ### Start a session
 
-`user_id`, `remember_me` and `consent_for_training` are required, and both consent answers must be JSON booleans (`true` or `false`). Ask the person both questions at the start of every session and send what they said. Never assume an answer, and never fill in a default. `session_id` is optional; leave it out and the service makes one.
+`user_id`, `remember_me` and `consent_for_training` are required, and both consent answers must be JSON booleans (`true` or `false`). Ask the person both questions at the start of every session and send what they said. Never assume an answer, and never fill in a default. `session_id` is optional; leave it out or send `null` and the service makes one. If you send it, it must be a string of letters, digits, `_` and `-`, starting with a letter or digit, at most 64 characters. Send only these four fields; any other field is refused with `422`.
 
 ```
 curl -s -X POST $B/sessions -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
@@ -105,7 +131,7 @@ curl -s -X POST $B/sessions -H "Authorization: Bearer $T" -H "Content-Type: appl
 
 ### One turn
 
-`text` is required: 1 to 2000 characters once leading and trailing whitespace is removed.
+`text` is required and must be a JSON string: 1 to 2000 characters once leading and trailing whitespace is removed. Send no other field; any other field is refused with `422`.
 
 ```
 curl -s -X POST $B/sessions/sess-0007/turns -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
@@ -141,38 +167,126 @@ curl -s -X POST $B/sessions/sess-0007/end -H "Authorization: Bearer $T"
 
 ### The same in Python
 
+Every call handles a lost connection, a timeout, an unexpected status and an answer that is not JSON; a turn with no usable answer speaks the stored offline line. The end call runs on its own thread, and the next session for that person waits for it. `speak` is yours: it sends the text to text-to-speech and must not print, log or trace it.
+
 ```python
+import logging
+import threading
+
 import httpx
 
+log = logging.getLogger("brain.puddles")  # IDs, statuses and flags only; never the person's text or the reply
 OFFLINE = ("I can't connect right now, so I can't listen properly. If you are in danger, please call 911. "
-           "If you are thinking about hurting yourself, call or text 988.")
+           "If you are thinking about hurting yourself, call or text 988.")  # stored on the robot
+brain = httpx.Client(base_url="http://127.0.0.1:8765", headers={"Authorization": "Bearer dev-token"})
+ending: dict[str, threading.Thread] = {}  # user_id -> its end call, still running
 
-brain = httpx.Client(base_url="http://127.0.0.1:8765", headers={"Authorization": "Bearer dev-token"},
-                     timeout=httpx.Timeout(35.0))
 
-def say(text: str) -> None:
-    print("robot:", text)  # your text-to-speech goes here
+def speak(text: str) -> None:
+    """Yours: send text to text-to-speech. Do not print, log or trace it."""
+    raise NotImplementedError
 
-r = brain.post("/sessions", json={"user_id": "user-01", "remember_me": False, "consent_for_training": False})
-sid = r.json()["session_id"]
-for heard in ["Work has been really stressful lately.", "Some days I just want to die."]:
+
+def call(path: str, body: dict | None = None, timeout: float | None = 35.0) -> tuple[int | None, dict]:
+    """(status, JSON object), or (None, {}) when there is no usable answer: no connection, timeout, not JSON."""
     try:
-        r = brain.post(f"/sessions/{sid}/turns", json={"text": heard})
-    except httpx.TransportError:
-        say(OFFLINE); continue
-    body = r.json()
-    say(body["text"] if r.status_code == 200 else body.get("say", OFFLINE))
-print(brain.post(f"/sessions/{sid}/end", timeout=None).json())  # in your brain: in the background
+        r = brain.post(path, json=body, timeout=timeout)
+        data = r.json()
+    except (httpx.HTTPError, ValueError):
+        return None, {}
+    return (r.status_code, data) if isinstance(data, dict) else (None, {})
+
+
+def start(user_id: str, remember_me: bool, consent_for_training: bool) -> str | None:
+    previous = ending.get(user_id)
+    if previous is not None:
+        previous.join()  # this person's last session is still ending: wait for it (409 user_busy otherwise)
+    status, data = call("/sessions", {"user_id": user_id, "remember_me": remember_me,
+                                      "consent_for_training": consent_for_training})
+    log.info("start: %s %s", status, data.get("error"))
+    if status == 201 and isinstance(data.get("session_id"), str):
+        return data["session_id"]
+    speak(OFFLINE)
+    return None
+
+
+def turn(session_id: str, heard: str) -> dict:
+    status, data = call(f"/sessions/{session_id}/turns", {"text": heard})
+    log.info("turn %s: %s %s fixed=%s", session_id, status, data.get("error"), data.get("fixed_handoff_response"))
+    if status == 200 and isinstance(data.get("text"), str):
+        speak(data["text"])  # always, exactly as returned
+    elif status == 500 and isinstance(data.get("say"), str):
+        speak(data["say"])  # turn_failed: the offline line; the session is still live
+    else:
+        speak(OFFLINE)  # see the error table for what to do next
+    return data
+
+
+def end_in_background(user_id: str, session_id: str) -> None:
+    def run() -> None:
+        status, data = call(f"/sessions/{session_id}/end", timeout=None)  # can take minutes
+        notes = data.get("notes") or {}
+        log.info("end %s: %s kept=%s notes_failed=%s undeleted=%d", session_id, status, data.get("kept"),
+                 notes.get("failed"), len(notes.get("undeleted") or []))
+        ending.pop(user_id, None)
+
+    ending[user_id] = thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+
+sid = start("user-01", remember_me=False, consent_for_training=False)  # the person's two answers, asked
+if sid:
+    for heard in ["Work has been really stressful lately.", "Some days I just want to die."]:
+        turn(sid, heard)
+    end_in_background("user-01", sid)
 ```
+
+What it did against the fake-mode app, with `speak` recording which line it was given, and more calls added after the page's own lines to try each failure. The log lines are the client's own and hold no text; session IDs differ from run to run:
+
+```
+== the page's own lines: start, two turns, end in the background
+log: start: 201 None
+log: turn sess-20261115141348-9ab7cd28: 200 None fixed=False
+speak: the helper's reply
+log: turn sess-20261115141348-9ab7cd28: 200 None fixed=True
+speak: the unsure crisis response
+end running in background: True
+== same person again at once: start waits for the end, then gets a session
+log: end sess-20261115141348-9ab7cd28: 200 kept=False notes_failed=False undeleted=0
+log: start: 201 None
+second session: True | end finished first: True
+== a turn after the end of the first session (404)
+log: turn sess-20261115141348-9ab7cd28: 404 session_not_found fixed=None
+speak: the offline line
+== turn_failed (run_turn made to raise)
+log: turn sess-20261115141348-b0f04945: 500 turn_failed fixed=None
+speak: the offline line
+log: end sess-20261115141348-b0f04945: 200 kept=False notes_failed=False undeleted=0
+== no connection (nothing listening)
+log: start: None None
+speak: the offline line
+start returned: None
+== an answer that is not JSON (a proxy's error page, status 502)
+log: turn sess-0007: None None fixed=None
+speak: the offline line
+== wrong token (401)
+log: start: 401 unauthorized
+speak: the offline line
+start returned: None
+```
+
+The client speaks the offline line for every turn it cannot use; what to do next (start a new session, alert, retry) is in the error table in section 6.
 
 ## 5. What to do with each turn's response
 
-- **Speak `text`, exactly as given.** Do not shorten, rephrase, translate or add to it.
-- **`fixed_handoff_response` true:** `text` is a fixed line from the crisis path, not the helper's words: one of the three crisis responses, the holding line or the offline line. Speak all of it, do not let the person's next words cut it off, and append nothing (no filler, no follow-up from another model).
-- **A crisis response** is `fixed_handoff_response` true with `keyword_matched` true, or with `risk` `"crisis"`. Do not rely on `risk` alone: a keyword match forces the crisis response even when the checker said `none`, and the response then still says `"risk": "none"` (see section 9).
+- **Always speak the returned `text`, exactly as given.** Do not shorten, rephrase, translate or add to it. The service has already chosen the safe line; the brain never chooses between lines itself.
+- **A keyword match forces the crisis response even when the check failed.** The keyword check runs first and wins over everything the checker did or did not say.
+- **`risk` and `category` are `null` when the check did not answer** (`check_status` is `late`, `failed` or anything but `"answered"`). Treat that as unknown, never as calm. They can also read `"none"` on a crisis response forced by a keyword (section 9 shows one).
+- **So the only reliable sign of a fixed line is `fixed_handoff_response` true.** A fixed line is one of the three crisis responses, the holding line or the offline line, never the helper's words. Speak all of it, do not let the person's next words cut it off, and append nothing (no filler, no follow-up from another model).
+- **The only reliable sign of a crisis response is `fixed_handoff_response` true together with `keyword_matched` true or `risk` equal to `"crisis"`.** Use that, not `risk` alone, for anything that must react to a crisis.
+- **When the check did not answer and no keyword matched**, the text is the holding line ("Sorry, I lost my thread for a moment. Could you say that again?") on the first failed check in a row, and the offline line on the second and later ones.
 - **`risk` and `category`** may drive the face or the lights. They never change the words.
-- **`check_status` not `"answered"`** (`late`, `failed` and so on): the checker gave no usable answer, so the service gave the holding line ("Sorry, I lost my thread for a moment. Could you say that again?"), or the offline line on a second failed check in a row. `risk` and `category` are then `null`; treat that as unknown, never as calm.
-- **`helper_failed` true:** the helper did not produce a draft; the text is still safe to speak.
+- **`helper_failed` true** means the helper failed or had no usable draft in time; the text is still safe to speak. In `timings_ms`, a `helper` of `-1` means no timely helper result was recorded when the turn closed; it does not say whether the turn waited.
 
 ## 6. Every error and what the robot should do
 
@@ -182,9 +296,10 @@ Errors are JSON with an `error` code; none repeats what was sent.
 |---|---|---|---|
 | 401 | `unauthorized` | token missing, wrong or malformed | Do not retry. Speak the offline line, and alert: the brain's configuration is wrong. |
 | 404 | `not_found` | not one of the routes | A bug in the brain's URL. Speak the offline line, log it. |
-| 404 | `session_not_found` | the session never existed, was ended, or was swept after 15 idle minutes | Start a new session (ask the two consent questions again), then send the text again. |
+| 404 | `session_not_found` | the session never existed, was ended, or was ended by the idle sweep | Start a new session (ask the two consent questions again), then send the text again. |
+| 405 | `method_not_allowed` | the HTTP method is wrong for that route | A bug in the brain's request; fix it. Speak the offline line if something must be said. |
 | 409 | `session_exists` | that `session_id` is live, or (with training consent) already on disk | Start again without `session_id`, so the service makes one. |
-| 409 | `user_busy` | this person already has a live session, or the last one is still ending | Wait for that session's end call to return, then start. If you lost track of it, wait and retry; the sweeper ends it after 15 idle minutes. |
+| 409 | `user_busy` | this person already has a live session, or the last one is still ending | Wait for that session's end call to return, then start. If you lost track of it, wait and retry; an idle session is ended by a later sweep, and one that is already ending holds the person until its end finishes, which has no fixed limit. |
 | 422 | `invalid_request` | the body is wrong; `fields` names the fields at fault | A brain bug, except for empty text (for example speech-to-text heard nothing): say nothing and keep listening. Never fix a consent field by guessing. |
 | 429 | `too_many_sessions` | 64 sessions are live | Speak the offline line; retry the start shortly. |
 | 503 | `policy_unavailable` | the policy file cannot be read | Speak the offline line; alert. No session was made. |
@@ -200,21 +315,21 @@ Store it on the device, because with no connection nothing can be fetched.
 
 ## 7. Timing
 
-- **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn, and the crisis checker has 5 s. Normal turns take 1 to 2 s: the median measured on `gpt-6-luna` is about 1.4 s per turn. (This checkout's `safety/crisis-path-v1.json` still says `"timeout_seconds": 3`; the change to 5 s is in pull request #74. At 3 s one ordinary turn in eleven lost its reply to the holding line.)
-- **Do not block on the end call.** Ending runs the note-taker, and past.dev took about a minute (54 s and 81 s measured) to confirm each note, so an end can take minutes. Call it in the background with no short timeout, and let the robot carry on.
+- **Turn timeout: at least 35 s.** The service waits up to 30 s for the helper, counted from the start of the turn. The crisis checker's deadline is 3 s on this checkout and 5 s with pull request #74. Normal turns take 1 to 2 s: the median measured on `gpt-6-luna` is about 1.4 s per turn.
+- **Do not block on the end call.** Ending runs the note-taker, and past.dev took 54 s and 81 s to confirm a note. With pull request #74 the service waits up to 300 s per note, so an end can take several minutes; on this checkout it waits only 60 s, so a note can be lost instead. Run the end call in the background with no short timeout, as the client in section 4 does.
 - **Next session for the same person only after the end returns.** Until then a new start for that `user_id` gets `409 user_busy`. A different person can start at once.
-- **Idle sessions are ended after 15 minutes** without activity, notes and all. A turn after that gets `404 session_not_found`.
+- **Idle sessions** become eligible to be ended after 900 s (15 minutes) without activity, and are ended, notes and all, when the next sweep reaches them (`scripts.serve` sweeps every 30 s; endings are run one after another, so a sweep can take a while). A session with a turn running is not idle. A turn after the end gets `404 session_not_found`. A session that is already ending holds its person until the end finishes; there is no guaranteed release at 15 minutes.
 
 ## 8. Consent and logs
 
 | Remember me | Use for training | What is kept after the session |
 |---|---|---|
-| No | No | Nothing new. Notes the person asked to forget are gone. |
+| No | No | Nothing new. Notes the person asked to forget are deleted, when the notes step succeeds (below). |
 | Yes | No | Notes only: `notes/<user_id>/`. No session file, no record, no trace. |
 | No | Yes | The session file, the record and the traces. No new notes. |
 | Yes | Yes | Both |
 
-Forgetting always works: if the person asks the robot to forget something, it is deleted whatever they answered.
+**Forgetting is attempted whatever the person answered, but it can fail.** The note-taker runs at the end of every session with at least one turn, so a request to forget is acted on even with "remember me" off. But the notes step can fail before it changes anything (`notes.failed` true in the end response), and past.dev can be slow to confirm a deletion (the note ID is then in `notes.undeleted`; the service keeps retrying it). So read `notes.failed` and `notes.undeleted`, and never tell the person something was deleted unless the end response shows it: `failed` false and the note not in `undeleted`. Forgetting notes does not remove a session file, record or trace kept with training consent.
 
 **Your brain keeps logs too.** With training consent off, nothing the person said may be kept anywhere, so the brain must not log the person's text, the transcript, the reply text or the audio either: not in Modal logs, not in error reports, not in traces. Log session IDs, statuses, counts and timings only. The service itself never logs text, so the gap would only be on your side.
 
@@ -256,9 +371,9 @@ What you should see, one line per call (the timings can differ by a few millisec
 {"error":"session_not_found"}
 ```
 
-The second turn holds `want to die`, a phrase from `safety/keywords-v1.txt`: it gets a fixed response with 988, `fixed_handoff_response` true and `keyword_matched` true. The fake checker always answers `none`, which is why `risk` says `none` there; the keyword alone forced the crisis response. `helper` `-1` means the helper's draft was not waited for. Timings are near zero because fake mode calls no model.
+The second turn holds `want to die`, a phrase from `safety/keywords-v1.txt`: it gets a fixed response with 988, `fixed_handoff_response` true and `keyword_matched` true. For these two messages, which carry no checker marker, the fake checker answers `none`, which is why `risk` says `none` there; the keyword alone forced the crisis response. (The fake checker gives other outcomes when a message holds a marker such as `[checker:concern]`, `[checker:crisis-self]` or `[checker:fail]`.) `helper` `-1` means no timely helper result was recorded; a crisis response does not wait for the helper. Timings are near zero because fake mode calls no model.
 
-Then point your brain at it and run the Python client from section 4: it should print the same two replies and the end result. Stop the service with Ctrl-C.
+Then run the Python client from section 4 against it with your `speak`: it should speak the helper's reply, then the crisis response, and log `end ...: 200`. Stop the service with Ctrl-C.
 
 ## 10. Known limits today
 
