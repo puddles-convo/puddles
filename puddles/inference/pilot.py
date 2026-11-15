@@ -401,11 +401,28 @@ def _fmt_mean(v: float | str) -> str:
     return v if isinstance(v, str) else f"{round(v, 2):.2f}"
 
 
-def _mean_diff(a: float | str, b: float | str) -> str:
-    if isinstance(a, str) or isinstance(b, str):
+def _is_scored(s: dict) -> bool:
+    return s["score"]["status"] == "scored"
+
+
+def _pairs(pilot: dict, only3: bool) -> list[tuple[dict, dict]]:
+    """(notes_on, notes_off) for every (persona, session) that ran in both arms, in persona and session order."""
+    out = []
+    for p in pilot["personas"]:
+        off_by_n = {s["session"]: s for s in p["sessions"]["notes_off"]}
+        for on in p["sessions"]["notes_on"]:
+            off = off_by_n.get(on["session"])
+            if off is not None and (not only3 or on["session"] == 3):
+                out.append((on, off))
+    return out
+
+
+def _signed(d: float | str) -> str:
+    """A difference of means: sign and 2 decimals from the unrounded value; zero is `0.00`."""
+    if isinstance(d, str):
         return NOT_MEASURED
-    d = round(a - b, 2)
-    return f"+{d:.2f}" if d > 0 else f"{d:.2f}" if d < 0 else "0.00"
+    r = round(d, 2)
+    return f"+{r:.2f}" if r > 0 else f"{r:.2f}" if r < 0 else "0.00"
 
 
 def _scored(sessions: list[dict], key: str) -> list[float]:
@@ -471,9 +488,15 @@ def render_report(pilot: dict) -> str:
                               ("Mean relevance, session 3", True, "relevance"),
                               ("Mean empathy, all sessions", False, "empathy"),
                               ("Mean relevance, all sessions", False, "relevance")):
-        a = _mean(_scored(arm_sessions("notes_on", only3), key))  # unrounded: rounded for display only
+        a = _mean(_scored(arm_sessions("notes_on", only3), key))  # each arm's own mean, unrounded
         b = _mean(_scored(arm_sessions("notes_off", only3), key))
-        lines.append(f"| {label} | {_fmt_mean(a)} | {_fmt_mean(b)} | {_mean_diff(a, b)} |")
+        both = [(on, off) for on, off in _pairs(pilot, only3) if _is_scored(on) and _is_scored(off)]
+        diff = _mean([on["score"][key] - off["score"][key] for on, off in both])  # paired, amendment 10
+        lines.append(f"| {label} | {_fmt_mean(a)} | {_fmt_mean(b)} | {_signed(diff)} |")
+    for label, only3 in (("Pairs compared, session 3", True), ("Pairs compared, all sessions", False)):
+        pairs = _pairs(pilot, only3)
+        k = sum(1 for on, off in pairs if _is_scored(on) and _is_scored(off))
+        lines.append(f"| {label} | {k} of {len(pairs)} | | |")
     counts = {}
     for arm in ARMS:
         ss = arm_sessions(arm)

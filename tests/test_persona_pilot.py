@@ -319,7 +319,8 @@ def test_report_numbers_from_dict_only(tmp_path, monkeypatch):
     assert "| 2 | 5 | unscored | not measured | 5 | unscored | not measured |" in report
     assert "| 3 | 4 | 2 | +2 |" in report
     assert "| Mean empathy, session 3 | 4.00 | 2.00 | +2.00 |" in report
-    assert "| Mean empathy, all sessions | 4.33 | 2.50 | +1.83 |" in report
+    # paired (amendment 10): session 2 is unscored in notes_off, so the pairs are 1 (+1) and 3 (+2)
+    assert "| Mean empathy, all sessions | 4.33 | 2.50 | +1.50 |" in report
     assert "| Sessions scored | 3 of 3 | 2 of 3 | |" in report
     assert "| Notes kept after session 3 | 1 | 0 | |" in report
     assert "| 3 | goals | a \\| b |  |" in report
@@ -393,3 +394,63 @@ def test_difference_of_means_uses_unrounded_means():
     assert P.mean_or_not_measured([1, 1, 2]) == 1.33
     same = P.render_report(_pilot([_session("notes_on", 1, value=3)], [_session("notes_off", 1, value=3)]))
     assert "| 1 | 3 | 3 | 0 |" in same and "| Mean empathy, all sessions | 3.00 | 3.00 | 0.00 |" in same
+
+
+# ---------- repair round 2: paired differences (amendment 10) ----------
+
+def _multi_pilot(personas):
+    """personas: {pid: (on_sessions, off_sessions)}"""
+    base = _pilot([], [])
+    base["personas"] = [{"persona_id": pid, "description": "d", "sessions": {"notes_on": on, "notes_off": off}}
+                        for pid, (on, off) in personas.items()]
+    return base
+
+
+def _row(report, name):
+    rows = [line for line in report.splitlines() if line.startswith(f"| {name} |")]
+    assert len(rows) == 1, (name, rows)
+    return [c.strip() for c in rows[0].strip("|").split("|")][1:]
+
+
+def test_paired_difference_leaves_out_a_one_sided_failure():
+    # a: on 5, off 3 (+2); b: on 4, off 3 (+1); c: on 2, off failed. Paired session 3: mean of +2, +1 = +1.50.
+    # Unpaired would be mean(5, 4, 2) - mean(3, 3) = 3.67 - 3.00 = +0.67, comparing different people.
+    def arm(arm_name, s3):
+        return [_session(arm_name, 1, value=3), _session(arm_name, 2, value=3), s3]
+    pilot = _multi_pilot({
+        "a": (arm("notes_on", _session("notes_on", 3, value=5)), arm("notes_off", _session("notes_off", 3, value=3))),
+        "b": (arm("notes_on", _session("notes_on", 3, value=4)), arm("notes_off", _session("notes_off", 3, value=3))),
+        "c": (arm("notes_on", _session("notes_on", 3, value=2)),
+              arm("notes_off", _session("notes_off", 3, status="failed", failed=True))),
+    })
+    report = P.render_report(pilot)
+    assert _row(report, "Mean empathy, session 3") == ["3.67", "3.00", "+1.50"]
+    assert _row(report, "Pairs compared, session 3") == ["2 of 3", "", ""]
+    assert _row(report, "Pairs compared, all sessions") == ["8 of 9", "", ""]
+    # all sessions: on mean (3*6 + 5 + 4 + 2) / 9 = 3.22; off mean (3*6 + 3 + 3) / 8 = 3.00;
+    # paired: six zeros, +2, +1 over 8 pairs = +0.375, shown +0.38
+    assert _row(report, "Mean relevance, all sessions") == ["3.22", "3.00", "+0.38"]
+    lines = report.splitlines()
+    i = lines.index(next(l for l in lines if l.startswith("| Mean relevance, all sessions |")))
+    assert lines[i + 1].startswith("| Pairs compared, session 3 |")
+    assert lines[i + 2].startswith("| Pairs compared, all sessions |")
+
+
+def test_no_pair_scored_in_both_arms_is_not_measured():
+    on = [_session("notes_on", 1, value=4), _session("notes_on", 2, status="failed", failed=True),
+          _session("notes_on", 3, status="unscored")]
+    off = [_session("notes_off", 1, status="failed", failed=True), _session("notes_off", 2, value=3),
+           _session("notes_off", 3, value=3)]
+    report = P.render_report(_pilot(on, off))
+    assert _row(report, "Mean empathy, all sessions") == ["4.00", "3.00", "not measured"]
+    assert _row(report, "Mean empathy, session 3") == ["not measured", "3.00", "not measured"]
+    assert _row(report, "Pairs compared, session 3") == ["0 of 1", "", ""]
+    assert _row(report, "Pairs compared, all sessions") == ["0 of 3", "", ""]
+
+
+def test_all_pairs_scored_gives_the_unpaired_difference():
+    on = [_session("notes_on", n, value=v) for n, v in zip((1, 2, 3), (1, 1, 2))]
+    off = [_session("notes_off", n, value=v) for n, v in zip((1, 2, 3), (1, 2, 2))]
+    report = P.render_report(_pilot(on, off))
+    assert _row(report, "Mean empathy, all sessions") == ["1.33", "1.67", "-0.33"]
+    assert _row(report, "Pairs compared, all sessions") == ["3 of 3", "", ""]

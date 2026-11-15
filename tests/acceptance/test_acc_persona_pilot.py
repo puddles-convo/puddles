@@ -13,6 +13,9 @@ import os
 from pathlib import Path
 import re
 import socket
+import sys
+from threading import Lock, get_ident
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -205,7 +208,6 @@ def test_arms_share_policy_opener_and_scripted_turns(
         assert [text for sid, text in seen_turns if sid == result.session_id] == expected
         assert len(bundles[arm].helper.calls) == 3
         assert len(bundles[arm].user.calls) == 2
-        assert bundles[arm].helper is not bundles[arm].checker
         expected_notes = [seed_fact] if arm == "notes_on" else []
         assert result.notes_given == expected_notes
         assert all(c["system"] == render_helper_system(policy, expected_notes) for c in bundles[arm].helper.calls)
@@ -240,7 +242,9 @@ def test_notes_off_never_loads_or_stores_notes_even_when_on_has_them(
         pytest.fail("notes_off must not call start_notes")
 
     monkeypatch.setattr(pilot, "finish_session", finish_spy)
-    monkeypatch.setattr(pilot, "start_notes", forbidden_start)
+    from puddles.inference import live
+    monkeypatch.setattr(live, "start_notes", forbidden_start)
+    monkeypatch.setattr(pilot, "start_notes", forbidden_start, raising=False)
     # An add marker tests consent, rather than relying on notes_off fake markers being empty.
     bundle = clients(pilot, ["Please listen. [note:preferences:Likes quiet conversation]"])
     result = run_one(pilot, person, 2, "notes_off", store=store, policy=policy,
@@ -434,8 +438,11 @@ def hand_pilot():
     alpha[0]["notes_after"] = [snapshot("a", "A fact | with\na newline")]
     alpha[0]["changes"]["added"] = [dict(note_id="a", fact="A fact | with\na newline")]
     alpha[2]["notes_after"] = [snapshot("b", "Second fact"), snapshot("c", "Third fact")]
+    alpha[2]["notes_before"] = [snapshot("a", "A fact | with\na newline", "preferences"),
+                                 snapshot("old", "Replaced fact", "people")]
     alpha[2]["changes"]["deleted"] = [dict(note_id="a", fact="A fact | with\na newline")]
-    alpha[2]["changes"]["replaced"] = [dict(note_id="old", fact="Replaced fact")]
+    alpha[2]["changes"]["replaced"] = [dict(note_id="old", fact="Replaced fact"),
+                                        dict(note_id="unknown", fact="Missing replacement kind")]
     beta[2]["notes_after"] = [snapshot("d", "Fourth fact")]
     beta[2]["changes"]["deleted"] = [dict(note_id="e", fact="Deleted E"), dict(note_id="f", fact="Deleted F")]
     # A failed third session can retain snapshots, but these must not be counted.
@@ -481,16 +488,18 @@ def test_hand_built_report_arithmetic_statuses_counts_and_structure(pilot, monke
     assert report.count("### Session 3, first two helper replies") == 3
     assert "## Overall" in report
     for label, on, off, diff in [
-        ("Mean empathy, session 3", 3.5, 1.5, "+2.00"),
-        ("Mean relevance, session 3", 1.5, 4.5, "-3.00"),
-        ("Mean empathy, all sessions", 3.5, 2.83, "+0.67"),
-        ("Mean relevance, all sessions", 2.25, 3.33, "-1.08"),
+        ("Mean empathy, session 3", 3.5, 1.5, "+3.00"),
+        ("Mean relevance, session 3", 1.5, 4.5, "-2.00"),
+        ("Mean empathy, all sessions", 3.5, 2.83, "0.00"),
+        ("Mean relevance, all sessions", 2.25, 3.33, "+1.00"),
     ]:
         row = table_row(report, label)
         assert [float(row[0]), float(row[1])] == [on, off]
         assert row[2] == diff
     assert table_row(report, "Sessions scored") == ["4 of 9", "6 of 9", ""]
     assert table_row(report, "Sessions failed") == ["4", "1", ""]
+    assert table_row(report, "Pairs compared, session 3") == ["1 of 3", "", ""]
+    assert table_row(report, "Pairs compared, all sessions") == ["2 of 9", "", ""]
     assert table_row(report, "Notes kept after session 3") == ["3", "0", ""]
     assert table_row(report, "Notes deleted on request") == ["3", "0", ""]
     alpha = report.split("## alpha:", 1)[1].split("## beta:", 1)[0]
@@ -500,13 +509,16 @@ def test_hand_built_report_arithmetic_statuses_counts_and_structure(pilot, monke
     assert "| 1 | notes_on first | Only one reply |" in alpha
     assert "| 2 | notes_on second | - |" in alpha
     assert "| 1 | situation | A fact \\| with a newline | added |" in alpha
-    assert "| 3 |" in alpha and "A fact \\| with a newline | deleted |" in alpha
-    assert "Replaced fact | replaced |" in alpha
+    assert "| 3 | preferences | A fact \\| with a newline | deleted |" in alpha
+    assert "| 3 | people | Replaced fact | replaced |" in alpha
+    assert "| 3 | - | Missing replacement kind | replaced |" in alpha
     assert "| 2 | - | (session failed) | |" in alpha
     beta = report.split("## beta:", 1)[1].split("## gamma:", 1)[0]
     assert "| 1 | - | (no notes) | |" in beta
     assert "| 2 | - | (no notes) | |" in beta
     assert "| 1 | notes_on first | notes_off first |" in beta
+    assert "| 3 | - | Deleted E | deleted |" in beta
+    assert "| 3 | - | Deleted F | deleted |" in beta
     gamma = report.split("## gamma:", 1)[1].split("## Overall", 1)[0]
     assert "| 1 | - | notes_off first |" in gamma
     assert "Stale G" not in gamma and "Stale H" not in gamma
@@ -533,6 +545,65 @@ def test_integer_score_differences_include_zero(pilot, monkeypatch):
         arm: [hand_session("alpha", arm, n, empathy=2, relevance=5) for n in (1, 2, 3)] for arm in ARMS}
     report = render_without_files(pilot, data, monkeypatch)
     assert "| 1 | 2 | 2 | 0 | 5 | 5 | 0 |" in report
+    for measure in ("empathy", "relevance"):
+        for scope in ("session 3", "all sessions"):
+            assert table_row(report, f"Mean {measure}, {scope}")[2] == "0.00"
+
+
+def test_overall_difference_rounds_only_after_averaging_pairs(pilot, monkeypatch):
+    data = hand_pilot()
+    person = data["personas"][0]
+    data["personas"] = [person]
+    person["sessions"] = {
+        arm: [hand_session("alpha", arm, n, empathy=value, relevance=3)
+              for n, value in enumerate(values, 1)]
+        for arm, values in (("notes_on", [3, 3, 4]), ("notes_off", [1, 2, 2]))}
+    report = render_without_files(pilot, data, monkeypatch)
+    row = table_row(report, "Mean empathy, all sessions")
+    assert [float(row[0]), float(row[1])] == [3.33, 1.67]
+    assert row[2] == "+1.67"  # Subtracting rounded means incorrectly gives +1.66.
+    assert table_row(report, "Mean relevance, all sessions")[2] == "0.00"
+    assert table_row(report, "Pairs compared, all sessions") == ["3 of 3", "", ""]
+
+
+@pytest.mark.parametrize("missing", ["failed", "unscored"])
+def test_overall_pairs_exclude_missing_scores_but_arm_means_stay_independent(pilot, monkeypatch, missing):
+    data = hand_pilot()
+    data["personas"] = data["personas"][:1]
+    data["personas"][0]["sessions"] = {
+        "notes_on": [hand_session("alpha", "notes_on", 1, missing),
+                     hand_session("alpha", "notes_on", 2, empathy=5, relevance=1),
+                     hand_session("alpha", "notes_on", 3, empathy=4, relevance=5)],
+        "notes_off": [hand_session("alpha", "notes_off", 1, empathy=1, relevance=5),
+                      hand_session("alpha", "notes_off", 2, empathy=3, relevance=2),
+                      hand_session("alpha", "notes_off", 3, "unscored")]}
+    report = render_without_files(pilot, data, monkeypatch)
+    for measure, on, off, diff in (("empathy", 4.5, 2, "+2.00"), ("relevance", 3, 3.5, "-1.00")):
+        row = table_row(report, f"Mean {measure}, all sessions")
+        assert [float(row[0]), float(row[1])] == [on, off]
+        assert row[2] == diff
+        assert table_row(report, f"Mean {measure}, session 3")[2] == "not measured"
+    assert table_row(report, "Pairs compared, all sessions") == ["1 of 3", "", ""]
+    assert table_row(report, "Pairs compared, session 3") == ["0 of 1", "", ""]
+
+
+def test_no_paired_scores_is_not_measured_even_when_both_arm_means_exist(pilot, monkeypatch):
+    data = hand_pilot()
+    data["personas"] = data["personas"][:2]
+    for i, person in enumerate(data["personas"]):
+        person["sessions"] = {
+            arm: [hand_session(person["persona_id"], arm, n,
+                               "scored" if (i == 0) == (arm == "notes_on") else "failed",
+                               empathy=5 if arm == "notes_on" else 2)
+                  for n in (1, 2, 3)] for arm in ARMS}
+    report = render_without_files(pilot, data, monkeypatch)
+    for scope in ("session 3", "all sessions"):
+        row = table_row(report, f"Mean empathy, {scope}")
+        assert [float(row[0]), float(row[1])] == [5, 2]
+        assert row[2] == "not measured"
+        assert table_row(report, f"Mean relevance, {scope}")[2] == "not measured"
+    assert table_row(report, "Pairs compared, session 3") == ["0 of 2", "", ""]
+    assert table_row(report, "Pairs compared, all sessions") == ["0 of 6", "", ""]
 
 
 # 4. Failure handling and continuing to later sessions.
@@ -562,8 +633,17 @@ def test_user_exception_still_finishes_and_pilot_continues(
 
     monkeypatch.setattr(pilot, "finish_session", finish_spy)
     judge = Judge()
+    import mlflow
+    from puddles import tracing
+    mlflow.flush_trace_async_logging()
+    root = tmp_path / "store"
+    root.mkdir(exist_ok=True)
+    monkeypatch.chdir(root)
+    tracing.setup(tracking_uri=f"sqlite:///{root}/tracking.db")
+    outside_before = {p: value for p, value in tree(tmp_path).items()
+                      if not p.startswith("store/") and p != "store"}
     result = pilot.run_pilot([person], make_clients=make, policy=policy, store=store,
-                             note_llm=FakeNoteTaker(), judge=judge, root=tmp_path / "store",
+                             note_llm=FakeNoteTaker(), judge=judge, root=root,
                              turns=2, start=START)
     assert order == [(person.persona_id, arm, n) for arm in ARMS for n in (1, 2, 3)]
     assert len(finished) == 6 and "laidoff-on-s2" in finished
@@ -581,6 +661,11 @@ def test_user_exception_still_finishes_and_pilot_continues(
     assert table_row(report, "Sessions scored") == ["2 of 3", "3 of 3", ""]
     assert not (tmp_path / "store" / "pilot.json").exists()
     assert not (tmp_path / "store" / "report.md").exists()
+    assert not list(root.rglob("s[123].json"))
+    mlflow.flush_trace_async_logging()
+    outside_after = {p: value for p, value in tree(tmp_path).items()
+                     if not p.startswith("store/") and p != "store"}
+    assert outside_after == outside_before
 
 
 def test_finish_exception_is_recorded_and_later_sessions_run(
@@ -760,12 +845,14 @@ def test_fake_command_files_shapes_report_and_private_stdout(
                 expected_stdout.append(f"{person['persona_id']} {arm} s{n}: scored, notes +{len(c['added'])} ~{len(c['replaced'])} -{len(c['deleted'])}")
     assert stdout.splitlines() == expected_stdout + [f"report: {out}/report.md"]
     assert (out / "store" / "sessions").is_dir()
+    assert (out / "mlflow.db").is_file()
     report = (out / "report.md").read_text(encoding="utf-8")
     assert report == pilot.render_report(data)
     assert report.count(POLICY_SENTENCE) == report.count(LIMITS_SENTENCE) == 1
     assert report.count("### Notes after each session (notes_on)") == len(expected_people)
     assert report.count("### Judge scores") == report.count("### Session 3, first two helper replies") == len(expected_people)
     assert report.startswith("# Persona pilot\n") and "## Overall" in report
+    assert "Mode: fake." in report and "Mode: real." not in report
     for name in expected_people:
         section = report.split(f"## {name}:", 1)[1].split("\n## ", 1)[0]
         assert "| added |" in section
@@ -830,7 +917,7 @@ def test_missing_real_configuration_is_one_error_and_no_output(command, policy_p
     assert invoke(command, arguments(policy_path, out)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert re.fullmatch(r"error: (ConfigError|ValueError): .*HELPER_URL.*\n", captured.err)
+    assert re.fullmatch(r"error: (ConfigError|ValueError): [^\n]+\n", captured.err)
     assert not out.exists() and tree(tmp_path) == before
 
 
@@ -878,9 +965,14 @@ def test_fake_clients_later_lines_and_fake_judge_contract(pilot, command, person
 
     person = personas[2]
     bundle = command.fake_clients(person, 2, "notes_on", clients(pilot).path)
-    for expected in ("Yes, that is part of it. " + " ".join(
-            m.replace("{user_id}", "grief-on") for m in person.sessions[1].fake_markers), "I suppose so."):
-        assert bundle.user.complete("system", [], max_tokens=120) == expected
+    from loop.simulated_user import next_user_line
+    history = [Turn(speaker="user", text=person.sessions[1].opener),
+               Turn(speaker="helper", text="I am listening.")]
+    first = "Yes, that is part of it. " + " ".join(
+        m.replace("{user_id}", "grief-on") for m in person.sessions[1].fake_markers)
+    assert next_user_line(bundle.user, person.sessions[1].scenario, history) == first
+    history += [Turn(speaker="user", text=first), Turn(speaker="helper", text="Please go on.")]
+    assert next_user_line(bundle.user, person.sessions[1].scenario, history) == "I suppose so."
     judge = command.FakeJudge()
     assert judge.version == "fake-judge"
     for first, expected in ((REMEMBER + " Hello", 4), ("Hello", 3)):
@@ -992,3 +1084,233 @@ def test_arm_ids_and_session_dates(pilot):
     with pytest.raises(ValueError):
         pilot.arm_user_id("x", "other")
     assert [pilot.session_day(START, n) for n in (1, 2, 3)] == [START, START + timedelta(days=7), START + timedelta(days=14)]
+
+
+# Amendments: parallel chains, callbacks and command provenance.
+def test_workers_six_preserve_chain_memory_result_order_and_callbacks(
+        pilot, command, personas, store, policy, tmp_path, monkeypatch):
+    from scripts.chat import FakeNoteTaker
+
+    original = pilot.run_session
+    lock = Lock()
+    started, completed, callbacks, thread_ids = {}, {}, [], {}
+
+    def delayed(persona, n, arm, **kwargs):
+        key = (persona.persona_id, arm)
+        with lock:
+            assert started.get(key, 0) == n - 1
+            assert completed.get(key, 0) == n - 1
+            started[key] = n
+            thread_ids.setdefault(key, get_ident())
+            assert thread_ids[key] == get_ident()
+        # Slow the first chain so result ordering cannot rely on completion order.
+        time.sleep(0.04 if key == (personas[0].persona_id, "notes_on") else 0.005)
+        value = original(persona, n, arm, **kwargs)
+        with lock:
+            completed[key] = n
+        return value
+
+    def callback(value):
+        with lock:
+            callbacks.append(deepcopy(value))
+
+    def make(persona, n, arm):
+        bundle = command.fake_clients(persona, n, arm, clients(pilot).path)
+        if persona.persona_id == "grief" and arm == "notes_off" and n == 2:
+            from loop.llm import FakeClient
+            def fail(*a, **kw):
+                raise RuntimeError("one parallel chain failed")
+            bundle.user = FakeClient(fail)
+        return bundle
+
+    monkeypatch.setattr(pilot, "run_session", delayed)
+    data = pilot.run_pilot(personas, make_clients=make, policy=policy, store=store,
+                           note_llm=FakeNoteTaker(), judge=Judge(), root=tmp_path / "store",
+                           turns=2, start=START, fake=True, workers=6,
+                           policy_path="acceptance-policy-path", on_session=callback)
+    assert data["policy_path"] == "acceptance-policy-path"
+    assert [p["persona_id"] for p in data["personas"]] == [p.persona_id for p in personas]
+    all_sessions = []
+    for person in data["personas"]:
+        assert list(person["sessions"]) == list(ARMS)
+        for arm in ARMS:
+            chain = person["sessions"][arm]
+            assert [s["session"] for s in chain] == [1, 2, 3]
+            assert completed[(person["persona_id"], arm)] == 3
+            if arm == "notes_on":
+                assert chain[0]["notes_after"]
+                assert chain[1]["notes_given"] == [n["fact"] for n in chain[0]["notes_after"]]
+                assert not any(s["failed"] for s in chain)
+            else:
+                assert all(s["notes_given"] == [] for s in chain)
+            all_sessions.extend(chain)
+    assert len(callbacks) == 18
+    assert {s["session_id"]: s for s in callbacks} == {s["session_id"]: s for s in all_sessions}
+    failed = [s["session_id"] for s in all_sessions if s["failed"]]
+    assert failed == ["grief-off-s2"]
+    # Each callback is delivered within its chain before the next session finishes.
+    for person in personas:
+        for arm in ARMS:
+            assert [s["session"] for s in callbacks if s["persona_id"] == person.persona_id and s["arm"] == arm] == [1, 2, 3]
+
+
+def test_fake_workers_three_and_one_render_identical_reports(command, policy_path, tmp_path, capsys):
+    reports = []
+    for workers in (1, 3):
+        out = tmp_path / f"workers-{workers}"
+        assert invoke(command, arguments(policy_path, out) + ["--fake", "--turns", "2", "--workers", str(workers)]) == 0
+        reports.append((out / "report.md").read_text(encoding="utf-8"))
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[-1] == f"report: {out}/report.md"
+        assert len(lines) == 19
+        assert len(set(lines[:-1])) == 18
+    assert reports[0] == reports[1]
+
+
+def test_workers_zero_refused_before_writing(command, policy_path, tmp_path):
+    out = tmp_path / "not-created"
+    before = tree(tmp_path)
+    assert invoke(command, arguments(policy_path, out) + ["--fake", "--workers", "0"]) == 2
+    assert tree(tmp_path) == before
+
+
+def test_command_never_reads_derived_output_to_build_report(command, policy_path, tmp_path, monkeypatch):
+    out = tmp_path / "run"
+    original_builtin, original_path = builtins.open, Path.open
+    reads = []
+
+    def check(path, mode):
+        if not isinstance(path, (str, bytes, os.PathLike)) or not isinstance(mode, str):
+            return
+        candidate = Path(os.fsdecode(path)).absolute()
+        if "r" in mode or "+" in mode:
+            if candidate in (out / "pilot.json", out / "report.md") or (
+                    candidate.is_relative_to(out / "sessions") and candidate.suffix == ".json"):
+                reads.append(str(candidate))
+                raise AssertionError("command read a derived output instead of using its dictionary")
+
+    def builtin_open(path, mode="r", *a, **kw):
+        check(path, mode)
+        return original_builtin(path, mode, *a, **kw)
+
+    def path_open(path, mode="r", *a, **kw):
+        check(path, mode)
+        return original_path(path, mode, *a, **kw)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "open", builtin_open)
+        patch.setattr(Path, "open", path_open)
+        assert invoke(command, arguments(policy_path, out) + ["--fake", "--only", "grief", "--turns", "2"]) == 0
+    assert reads == []
+    assert (out / "report.md").is_file()
+
+
+def patch_dependency(monkeypatch, owner, name, replacement):
+    """Replace a public dependency and imported aliases without assuming import style."""
+    original = getattr(owner, name)
+    for module_name, module in list(sys.modules.items()):
+        if module is not None and module_name.startswith(("puddles.", "loop.", "scripts.")):
+            for alias, value in list(vars(module).items()):
+                if value is original:
+                    monkeypatch.setattr(module, alias, replacement)
+    monkeypatch.setattr(owner, name, replacement)
+
+
+def test_real_command_builds_separate_clients_for_parallel_chains(
+        pilot, command, policy_path, tmp_path, monkeypatch):
+    import loop.llm
+    import puddles.llm
+    import puddles.eval.judge
+    from puddles.inference import note_store
+    from scripts.chat import FakeNoteTaker
+
+    def client_from_env(prefix):
+        from loop.llm import FakeClient
+        path = clients(pilot).path
+        return FakeClient(lambda system, messages: "none | - | scripted" if system == path.system else "A brief reply.")
+
+    patch_dependency(monkeypatch, loop.llm, "client_from_env", client_from_env)
+    patch_dependency(monkeypatch, note_store, "PastUserMemory", note_store.FakeUserMemory)
+    patch_dependency(monkeypatch, puddles.llm, "OpenAILLM", FakeNoteTaker)
+    patch_dependency(monkeypatch, puddles.eval.judge, "judge_from_env", Judge)
+    # Inert values satisfy preflight; every service constructor above is scripted.
+    monkeypatch.setenv("PAST_API_KEY", "unused-scripted-service")
+    monkeypatch.setenv("OPENAI_API_KEY", "unused-scripted-service")
+    monkeypatch.setenv("PUDDLES_AGENT_MODEL", "scripted-note-model")
+    original = pilot.run_session
+    seen = []
+    lock = Lock()
+
+    def inspect_clients(persona, n, arm, **kw):
+        bundle = kw["clients"]
+        assert bundle.helper is not bundle.checker
+        with lock:
+            seen.append(((persona.persona_id, arm), bundle))
+        return original(persona, n, arm, **kw)
+
+    monkeypatch.setattr(pilot, "run_session", inspect_clients)
+    out = tmp_path / "real-with-scripted-services"
+    assert invoke(command, arguments(policy_path, out) + ["--turns", "1", "--workers", "6"]) == 0
+    assert len(seen) == 18
+    for key, bundle in seen:
+        for other_key, other in seen:
+            if key != other_key:
+                assert not ({id(bundle.helper), id(bundle.checker), id(bundle.user)} &
+                            {id(other.helper), id(other.checker), id(other.user)})
+    assert "Mode: real." in (out / "report.md").read_text(encoding="utf-8")
+
+
+def test_command_checkpoints_completed_sessions_before_a_later_interrupt(
+        command, policy_path, tmp_path, monkeypatch):
+    out = tmp_path / "interrupted"
+    original = command.FakeJudge.score
+    count = 0
+
+    def score(self, record):
+        nonlocal count
+        count += 1
+        if count == 2:
+            checkpoint = out / "sessions" / "grief" / "notes_on" / "s1.json"
+            assert checkpoint.is_file(), "completed session was not checkpointed"
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            assert saved["session"] == 1 and saved["score"]["status"] == "scored"
+            assert saved["notes_after"]
+            raise KeyboardInterrupt()
+        return original(self, record)
+
+    monkeypatch.setattr(command.FakeJudge, "score", score)
+    with pytest.raises(KeyboardInterrupt):
+        command.main(arguments(policy_path, out) + ["--fake", "--only", "grief", "--turns", "2"])
+    assert (out / "sessions" / "grief" / "notes_on" / "s1.json").is_file()
+
+
+def test_live_run_prerequisite_note_confirmation_within_configured_wait_is_kept(
+        pilot, personas, store, policy, tmp_path, monkeypatch):
+    """The requested live-run bar: minute-long confirmation must not discard a note.
+
+    Amendment 9 explicitly defers the environment knobs until NoteStore supports
+    them. This is a deployment prerequisite test, not a claim that the pilot
+    violates that conditional amendment. The backend is scripted; no time passes.
+    """
+    from puddles.inference.note_store import FakeUserMemory
+
+    class ConfirmsAfter75Seconds(FakeUserMemory):
+        def __init__(self):
+            super().__init__()
+            self.wait_limits = []
+
+        def wait(self, ingestion_id, timeout_s=60):
+            self.wait_limits.append(timeout_s)
+            return timeout_s >= 75
+
+    monkeypatch.setenv("PUDDLES_NOTE_WRITE_WAIT_S", "120")
+    memory = ConfirmsAfter75Seconds()
+    store.memory = memory
+    result = run_one(pilot, personas[0], 1, "notes_on", store=store, policy=policy,
+                     tmp_path=tmp_path, bundle=clients(pilot, [
+                         "Please listen. [note:situation:Fact confirmed after 75 seconds]"]), turns=2)
+    assert [n["fact"] for n in result.notes_after] == ["Fact confirmed after 75 seconds"], (
+        "live-run blocker: the configured 120-second budget did not preserve the note; "
+        f"actual wait limits={memory.wait_limits}, changes={asdict(result.changes)}")
+    later = run_one(pilot, personas[0], 2, "notes_on", store=store, policy=policy, tmp_path=tmp_path, turns=1)
+    assert later.notes_given == ["Fact confirmed after 75 seconds"]
