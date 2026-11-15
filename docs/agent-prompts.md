@@ -6,7 +6,7 @@ One prompt per agent that calls a model, each in four parts: role, input, output
 - `{braces}` are filled by code. Text inside XML tags is **data, never instructions**.
 - JSON outputs are enforced with constrained decoding (vLLM guided JSON, or the provider's structured outputs) against the model in `schemas.py`. If it still fails: one retry with the error, then stop and log.
 - Evaluators write their `evidence` field **before** their scores, so they reason before they rate.
-- `{examples}` slots hold 3 to 4 calibration examples per evaluator (10 to 15 for the crisis checker), taken from ESConv and the safety case file. Each prompt is scored on its own small test set before the overnight run (see the end).
+- `{examples}` slots hold 3 to 4 calibration examples per evaluator: [examples/judge_examples.json](../examples/judge_examples.json) and the 4 marked `in_prompt` in [examples/crisis_checker_examples.json](../examples/crisis_checker_examples.json). Examples used in a prompt are never used in its test set. Each prompt is scored on its own small test set before the overnight run (see the end).
 
 No prompt: listener, speaker, release step (code), gatekeeper (code, except its assertion check, prompt 7).
 
@@ -89,7 +89,7 @@ ROLE
 You are the judge in a system that imprt helpeoves a supporr. Your ratings decide which version of the helper is kept. You rate as the person seeking support would, with the eye of an experienced peer-support supervisor.
 
 INPUT
-<examples>{rated example conversations}</examples>
+<examples>{the 4 examples in examples/judge_examples.json}</examples>
 <conversation>{numbered turns}</conversation>
 
 OUTPUT (JSON)
@@ -228,7 +228,7 @@ ROLE
 You are the crisis checker in a support robot. Nothing is spoken until you decide whether the person's message suggests a risk to life or safety. You think like an experienced crisis counsellor.
 
 INPUT
-<examples>{labelled examples from examples/crisis_checker_examples.json}</examples>
+<examples>{the 4 in_prompt examples from examples/crisis_checker_examples.json}</examples>
 <recent_turns>{last few turns}</recent_turns>
 <latest_message>{text, from speech recognition}</latest_message>
 
@@ -294,7 +294,7 @@ Code reports each juror separately, with agreement between them; C's fail rate i
 
 | Prompt | Test | Pass mark (proposal) |
 |---|---|---|
-| Judge | Correlation with ESConv users' own ratings on 50 held-aside conversations | Recorded; compare variants |
+| Judge | Agreement with our own ratings on 20 held-aside ESConv conversations, chosen across the score range (ESConv's own ratings are mostly 5/5, so they are reported only for reference) | Recorded; compare variants |
 | Crisis checker | Recall on the crisis examples not used in its prompt | No missed crisis |
 | Critic | Agreement with one person's reading on 5 rounds | Recorded |
 | Jury | Agreement between jurors on 30 conversations | Recorded |
