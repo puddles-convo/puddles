@@ -758,6 +758,56 @@ def test_fake_real_gate_saves_training_scores_without_inventing_judge_tokens(
             assert row.get("tokens_in", 0) == row.get("tokens_out", 0) == 0
 
 
+def test_fake_real_gate_wraps_the_rounds_same_judge_and_records_reported_tokens(
+    tmp_path, monkeypatch, local_mlflow, script_args,
+):
+    """Reason: usage-free fake results cannot detect a separate or unmetered gate judge."""
+    from puddles import gate as gate_api
+
+    item = record("gate-wiring")
+    result = answer(item.id, entries=[usage()])
+    panel = ScriptedJudge({item.id: result})
+    gates = []
+
+    def make_gate(deps, **kwargs):
+        gates.append(deps)
+        return lambda result: pytest.fail("the mocked round must not run a gate")
+
+    def run(deps, **kwargs):
+        assert deps.judge_panel is panel
+        assert len(gates) == 1 and isinstance(gates[0].judge, MeteredJudge)
+        assert gates[0].judge.version == panel.version
+        with metering(Meter(tmp_path / "gate-usage", prices()), "gatekeeper"):
+            assert gates[0].judge.score(item) is result
+        return {"event": SimpleNamespace(round=1, outcome="no_pattern", reason="Finished.")}
+
+    monkeypatch.setattr(script, "FakeJudge", lambda: panel)
+    with patch_public(monkeypatch, gate_api, "make_gate", make_gate, script), \
+         patch_public(monkeypatch, graph, "run_round", run, script):
+        assert script.main(["--fake", "--gate", "real", *script_args]) == 0
+    assert panel.calls == [item]
+    assert reported_rows(usage_rows(tmp_path / "gate-usage")) == Counter([
+        ("gatekeeper", MODEL_NAMES[0], 101, 7, False),
+    ])
+
+
+def test_fake_judge_reads_only_the_conversation_id(monkeypatch, local_mlflow, script_args):
+    """Reason: equal scores on two records do not prove the fake avoids reading their content."""
+    class IdOnly:
+        id = "content-must-not-be-read"
+
+        def __getattr__(self, name):
+            pytest.fail(f"fake judge read conversation field {name}")
+
+    def run(deps, **kwargs):
+        result = deps.judge_panel.score(IdOnly())
+        assert result.score.conversation_id == IdOnly.id and result.usage == []
+        return {"event": SimpleNamespace(round=1, outcome="no_pattern", reason="Finished.")}
+
+    with patch_public(monkeypatch, graph, "run_round", run, script):
+        assert script.main(["--fake", *script_args]) == 0
+
+
 @pytest.mark.parametrize("missing_config", [False, True])
 def test_real_script_constructs_judge_from_env_and_handles_its_valueerror_as_configuration(
     tmp_path, monkeypatch, local_mlflow, script_args, capsys, missing_config,
@@ -793,6 +843,8 @@ def test_real_script_constructs_judge_from_env_and_handles_its_valueerror_as_con
     if missing_config:
         assert code == 2 and round_calls == []
         assert len(captured.err.splitlines()) == 1 and captured.err.strip()
+        # Reason: an empty decision log alone misses usage/tracing writes on configuration failure.
+        assert captured.out == "" and not (tmp_path / "script-root").exists()
         assert DecisionLog(tmp_path / "script-root").events() == []
     else:
         assert code == 0 and len(round_calls) == 1

@@ -65,11 +65,11 @@ class FakeJudge:
     version = "judge-fake"
 
     def score(self, record: ConversationRecord) -> _Judged:
-        helper_turns = sum(t.speaker == "helper" for t in record.turns)
+        # Only the ID is read. No strategy labels: no turn was read, so none can be claimed.
         return _Judged(ScoreRecord(
             id=f"score-{record.id}", written_by="judge", created_at=now(), parent_ids=[record.id],
             conversation_id=record.id, judge_version=self.version, empathy=3, relevance=3, emotion_before=3,
-            emotion_after=3, strategies=["Question"] * helper_turns,
+            emotion_after=3, strategies=[],
             note="Scripted judge: fixed scores, the conversation was not read."))
 
 
