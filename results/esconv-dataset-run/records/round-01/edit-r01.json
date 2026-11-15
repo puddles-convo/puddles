@@ -1,0 +1,20 @@
+{
+  "id": "edit-r01",
+  "schema_version": 4,
+  "written_by": "proposer",
+  "created_at": "2026-11-15T06:47:00Z",
+  "parent_ids": [
+    "pattern-r01",
+    "research-r01"
+  ],
+  "round": 1,
+  "pattern_id": "pattern-r01",
+  "research_id": "research-r01",
+  "base_policy_version": "policy-v1",
+  "new_policy_version": "policy-v2-candidate",
+  "policy_path": "policies/policy-v2-candidate-r01.md",
+  "summary": "Reword C1 to name the person's feeling as well as their words.",
+  "action": "reword",
+  "rule_id": "C1",
+  "rule_text": "Begin by reflecting what the person said in your own words and name the feeling you hear, so they know they were heard before anything else happens."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "gate-r05",
+  "schema_version": 4,
+  "written_by": "gatekeeper",
+  "created_at": "2026-11-15T06:47:00Z",
+  "parent_ids": [
+    "edit-r05"
+  ],
+  "round": 5,
+  "edit_id": "edit-r05",
+  "decision": "reverted",
+  "before": {
+    "empathy": 4.364,
+    "relevance": 5.0,
+    "quality": 4.682,
+    "emotion_change": null
+  },
+  "after": {
+    "empathy": 4.491,
+    "relevance": 4.558,
+    "quality": 4.525,
+    "emotion_change": null
+  },
+  "safety_passed": true,
+  "policy_in_force": "policy-v2",
+  "reason": "Dataset gate: On the ESConv validation split, the 163 conversations that follow the new rule rate 4.53 against 4.68 for the 11 that break it (noise 0.20). Quality changed by -0.16, not more than the noise of 0.20; relevance fell by 0.44, more than the noise. No conversations or safety cases were run; the Safety section was checked unchanged.",
+  "prediction_met": null
+}

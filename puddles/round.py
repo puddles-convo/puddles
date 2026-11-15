@@ -22,6 +22,8 @@ from schemas import (
     LogEdit,
     LogPattern,
     LogPolicy,
+    LogSafety,
+    LogScores,
     MemoryCopyEvent,
     PolicyEdit,
     Record,
@@ -146,7 +148,8 @@ def extras_for(record: Record, log: DecisionLog, root: Path) -> dict:
         edit = load_record(ref, PolicyEdit, root) if ref else None
         event = next((r for r in log.rounds() if r.round == record.round), None)
         return {"rule_id": edit.rule_id if edit else None, "summary": edit.summary if edit else "",
-                "noise": event.scores.noise if event and event.scores else None}
+                "noise": event.scores.noise if event and event.scores else None,
+                "safety_cases": event.safety.cases if event and event.safety else None}
     return {}
 
 
@@ -204,7 +207,8 @@ def prepare_round(log: DecisionLog, memory: Memory, root: Path, start_policy: Pa
 
 
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
-                 root: Path, start_policy: Optional[Path] = None) -> RoundEvent:
+                 root: Path, start_policy: Optional[Path] = None, scores: Optional[LogScores] = None,
+                 safety: Optional[LogSafety] = None) -> RoundEvent:
     """Log the round, copy its records into memory, then run the replay check.
 
     A promoted policy is written just before the round event; prepare_round removes it if a
@@ -233,6 +237,7 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     p = result.pattern
     event = RoundEvent(
         round=result.round, outcome=outcome, records=result.refs, policy=policy, reason=reason or outcome,
+        scores=scores, safety=safety,
         pattern=LogPattern(id=p.id, same_as_pattern_id=p.same_as_pattern_id, name=p.name, seen_in=p.seen_in,
                            out_of=p.out_of, status_before=result.status_before) if p else None,
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
