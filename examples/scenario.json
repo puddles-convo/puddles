@@ -5,5 +5,12 @@
   "problem_type": "job crisis",
   "situation": "I am on short term disability and I am afraid I will lose my job if I don't go back soon.",
   "initial_intensity": 4,
-  "openness": "guarded"
+  "openness": "guarded",
+  "opener": "I'm feeling anxious that I'm going to lose my job.",
+  "reveal_facts": [
+    "I'm on short term disability.",
+    "My manager keeps asking when I'll be back.",
+    "I'm not ready to go back yet."
+  ],
+  "min_turns": 6
 }

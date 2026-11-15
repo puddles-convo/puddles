@@ -436,3 +436,146 @@ def test_a_validation_average_with_a_non_finite_number_is_reverted_with_the_reas
     assert "not finite" in report.outcome.reason and report.log_scores is None
     assert report.outcome.after == gate.NOT_MEASURED and gate._finite_numbers(report.outcome)
     assert saved_gate(deps)["decision"] == "reverted"
+
+
+# ---------- what the gate takes from outside is copied and validated on arrival ----------
+
+def _judge_that(after_score):
+    """The scripted judge, then `after_score(record, answer, calls)` on what it returns."""
+    from tests.test_gate import Judge
+
+    class Mutating(Judge):
+        def score(self, record):
+            answer = super().score(record)
+            after_score(record, answer, self.calls)
+            return answer
+
+    return Mutating()
+
+
+@pytest.mark.parametrize("field", ["empathy", "relevance", "emotion_before", "emotion_after"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 9, "4"], ids=["nan", "inf", "out-of-range", "str"])
+def test_a_judge_record_changed_after_construction_is_validated_before_it_is_saved(tmp_path, field, value):
+    from schemas import ScoreRecord
+
+    def spoil(record, answer, calls):
+        if record.scenario_id == IDS[1]:
+            setattr(answer.score, field, value)
+
+    deps, current, _ = setup(tmp_path, judge=_judge_that(spoil))
+    evidence = gate.score_policy(deps, current, IDS, 0, gate.CURRENT_TAG)
+    lines = (deps.root / "scores" / "round-00-current.jsonl").read_text().splitlines()
+    for line in lines:
+        ScoreRecord.model_validate_json(line)
+        json.loads(line, parse_constant=lambda c: pytest.fail(f"non-finite {c} written"))
+    spoiled = f"conv-r00-current-{IDS[1]}"
+    if value == "4":  # a string that validates as the score 4 is that score
+        assert evidence.complete and len(lines) == len(IDS)
+        return
+    assert not evidence.complete and evidence.scores is None and len(lines) == len(IDS) - 1
+    assert evidence.unscored == [spoiled] == evidence.invalid_record
+    assert evidence.describe() == f"1 of {len(IDS)} had a judge's record that was not valid ({spoiled})"
+
+
+def test_run_gate_names_the_invalid_judge_record_and_nothing_is_kept(tmp_path):
+    def spoil(record, answer, calls):
+        if record.scenario_id == IDS[0]:
+            answer.score.emotion_before = float("nan")
+
+    deps, current, candidate = setup(tmp_path, judge=_judge_that(spoil))
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["complete_evidence"]
+    assert f"had a judge's record that was not valid (conv-r01-val-{IDS[0]})" in report.outcome.reason
+    assert report.log_scores is None and gate._finite_numbers(report.outcome)
+
+
+def test_a_judge_changing_its_earlier_records_later_cannot_reach_the_gate(tmp_path):
+    given = []
+
+    def keep_and_spoil_the_last(record, answer, calls):
+        if given:
+            given[-1].score.emotion_before = float("nan")
+            given[-1].score.empathy = 1
+        given.append(answer)
+
+    deps, current, _ = setup(tmp_path, judge=_judge_that(keep_and_spoil_the_last))
+    evidence = gate.score_policy(deps, current, IDS, 0, gate.CURRENT_TAG)
+    assert evidence.complete and evidence.scores.empathy == 3 and evidence.scores.emotion_change == 1
+    rows = [json.loads(line) for line in (deps.root / "scores" / "round-00-current.jsonl").read_text().splitlines()]
+    assert [r["emotion_before"] for r in rows] == [4] * len(IDS) and [r["empathy"] for r in rows] == [3] * len(IDS)
+
+
+def test_a_judge_that_renames_the_conversation_it_was_given_cannot_make_its_score_match(tmp_path):
+    def rename(record, answer, calls):
+        if record.scenario_id == IDS[0]:
+            record.id = "conv-elsewhere"
+            answer.score.conversation_id = "conv-elsewhere"
+
+    deps, current, _ = setup(tmp_path, judge=_judge_that(rename))
+    evidence = gate.score_policy(deps, current, IDS, 0, gate.CURRENT_TAG)
+    assert not evidence.complete and evidence.unscored == [f"conv-r00-current-{IDS[0]}"]
+    assert evidence.invalid_record == []  # a valid record, but for another conversation: not scored by the judge
+
+
+@pytest.mark.parametrize("where", ["result", "case"])
+def test_a_safety_result_whose_passed_is_not_a_bool_is_not_valid_and_never_a_pass(tmp_path, where):
+    from tests.test_gate import Safety
+
+    class Truthy(Safety):
+        def __call__(self, policy_version, reply):
+            result = super().__call__(policy_version, reply)
+            if where == "result":
+                result.passed = "no"  # truthy
+            else:
+                result.cases[1].passed = "no"
+            return result
+
+    deps, current, candidate = setup(tmp_path, safety=Truthy())
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.decision == "reverted" and report.failed == ["safety_cases"]
+    assert "the safety check's result was not valid" in report.outcome.reason
+    assert report.outcome.safety_passed is False and report.safety is None and report.log_safety is None
+    assert not (deps.root / "scores" / "round-01-safety.json").exists()  # nothing invalid is written
+
+
+def test_a_safety_result_changed_after_it_was_returned_does_not_change_what_the_gate_checked(tmp_path):
+    from tests.test_gate import Judge, Safety
+
+    returned = []
+
+    class Keeping(Safety):
+        def __call__(self, policy_version, reply):
+            returned.append(super().__call__(policy_version, reply))
+            return returned[-1]
+
+    class Spoiling(Judge):
+        def score(self, record):
+            if returned:
+                returned[0].passed = False
+                returned[0].cases[0].passed = False
+            return super().score(record)
+
+    deps, current, candidate = setup(tmp_path, safety=Keeping(), judge=Spoiling())
+    report = gate.run_gate(gate_input(current, candidate), deps)
+    assert report.outcome.decision == "kept" and report.outcome.safety_passed is True
+    assert report.safety is not returned[0] and report.log_safety.failed_case_ids == []
+    saved = SafetyResult.model_validate_json((deps.root / "scores" / "round-01-safety.json").read_text())
+    assert saved == report.safety and saved.passed is True
+
+
+def test_a_gate_input_changed_while_the_gate_runs_does_not_change_what_it_compares(tmp_path):
+    from tests.test_gate import Judge
+
+    deps, current, candidate = setup(tmp_path)
+    inp = gate_input(current, candidate)
+
+    class Spoiling(Judge):
+        def score(self, record):
+            inp.current_scores.empathy = float("nan")
+            inp.noise = float("inf")
+            return super().score(record)
+
+    deps.judge = Spoiling()
+    report = gate.run_gate(inp, deps)
+    assert report.outcome.decision == "kept" and report.outcome.before.empathy == 3
+    assert report.log_scores.noise == 0.15 and gate._finite_numbers(report.outcome)

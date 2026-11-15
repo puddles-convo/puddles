@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from puddles import llm as llm_module
 from puddles.agents import critic, proposer, researcher
@@ -344,7 +344,7 @@ def test_an_expectation_that_cannot_fail_exits_2(expect, tmp_path, capsys):
 
 # Third check: the verifier's two defects, then the whole class at once.
 
-@pytest.mark.parametrize("field", ["url", "technique", "title"])
+@pytest.mark.parametrize("field", ["url", "technique"])  # title has a default: optional, not blank-tested
 @pytest.mark.parametrize("text", ["", "   "])
 def test_a_blank_source_field_exits_1_for_every_researcher_case(field, text, capsys):
     answers = [{**a, "sources": [{**a["sources"][0], field: text}]} for a in RESEARCHER_ANSWERS]
@@ -382,27 +382,51 @@ PASSING += [("proposer", next(c for c in load("proposer") if c["case_id"] == cid
 REMOVED = "removed"
 HOW = {None: "null", "": '""', "   ": '"   "', REMOVED: REMOVED}
 
-_FOUND_TRUE = ["critic-01", "critic-02", "critic-03", "critic-04", "critic-05"]
-_UNUSED_WHEN_NOT_FOUND = ("found is false: critic.check returns before reading it and to_record makes no record, "
-                          "so it is unused; the case needs only a reason")
-# The only leaf mutations of a passing answer that still pass, each with why it is still a good answer.
-# Keyed by (answer, path, replacement). Any other mutation that passes fails the test.
-ALLOWED = {
-    **{(cid, "reason", '"   "'): "found is true: reason is read only when found is false (critic.check, the spec)"
-       for cid in _FOUND_TRUE},
+# What a null, blank or removed leaf must do is stated by rule (case-files.md, section 1, "A field the output
+# model makes optional is not blank-tested unless a case names it"):
+#   - a leaf the output model requires at every step of its path (no default) must be rejected;
+#   - a leaf under a field the output model makes optional (it has a default) must still pass, unless the case
+#     names its top-level field in non_empty, fields, one_of or max_chars; then that expectation rejects it.
+# This covers, for instance: CriticOutput.evidence (version 4, optional, default "", named by no critic case:
+# blank or removed, it passes); reason when found is true and name, description and same_as_pattern_id when
+# found is false (optional, not named by those cases); Source.title and Source.quote (optional, default "").
+EXPECT_NAMES = ("non_empty", "fields", "one_of", "max_chars")
+# The only mutations of a field a case names that still pass, each with why it is still a good answer.
+NAMED_BUT_STILL_GOOD = {
     ("critic-01", "example_conversation_ids[3]", REMOVED):
         "conv-hand-004 gives a list, not one suggestion; the case asks for at least the other three, still listed",
     ("critic-05", "example_conversation_ids[1]", REMOVED):
         "examples are examples: conv-hand-004, the one the case names, is still there, and seen_in is unchanged",
     ("critic-05", "example_conversation_ids[2]", REMOVED):
         "examples are examples: conv-hand-004, the one the case names, is still there, and seen_in is unchanged",
-    **{("critic-06", field, how): _UNUSED_WHEN_NOT_FOUND
-       for field in ("name", "description", "same_as_pattern_id") for how in ('""', '"   "')},
     ("proposer-02 removal", "rule_text", '""'):
         'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
     ("proposer-04 removal", "rule_text", '""'):
         'proposer.check and apply_edit refuse a removal only when rule_text is truthy, and "" is not',
 }
+
+
+def _first_optional(schema, path):
+    """The index in `path` of the first field the output model gives a default, or None when every field on
+    it is required (list indexes are not fields)."""
+    model = schema
+    for i, step in enumerate(path):
+        if isinstance(step, int):
+            continue
+        info = model.model_fields[step]
+        if not info.is_required():
+            return i
+        inner = (getattr(info.annotation, "__args__", None) or (info.annotation,))[0]
+        model = inner if isinstance(inner, type) and issubclass(inner, BaseModel) else None
+    return None
+
+
+def _must_pass(schema, case, path):
+    """Optional by the output model, and not a top-level field the case names (naming `sources` does not name
+    the optional `title` or `quote` inside it: below a named field only required fields are tested)."""
+    first = _first_optional(schema, path)
+    named = any(path[0] in case["expect"].get(key, ()) for key in EXPECT_NAMES)
+    return first is not None and not (first == 0 and named)
 
 
 def _paths(value, path=()):
@@ -431,12 +455,13 @@ def _mutate(data, path, new):
 
 
 def test_no_null_blank_or_missing_leaf_passes_unless_allowed(capsys):
-    """For every passing answer and every leaf, null, "", "   " and removal must each give exit 1, unless the
-    mutation is on the allow-list as still a good answer, in which case it must give exit 0."""
-    used, unexpected = set(), []
+    """For every passing answer, live-shaped (every field present, defaults included), and every leaf: null,
+    "", "   " and removal must give exit 1 on a required leaf or one the case names, and exit 0 on a leaf the
+    output model makes optional that the case does not name; named exceptions are listed with their reason."""
+    used, wrong = set(), []
     for agent, case, good, name in PASSING:
         schema = ANSWERS[agent][0]
-        base = schema.model_validate(good).model_dump(mode="json")  # every field, defaults included
+        base = schema.model_validate(good).model_dump(mode="json")  # every field, as a live model sends it
         assert misses(agent, case, base) == [], name
         for path in _paths(base):
             for new in HOW:
@@ -450,13 +475,15 @@ def test_no_null_blank_or_missing_leaf_passes_unless_allowed(capsys):
                 search = FakeSearch({}) if agent == "researcher" else None
                 code = run(agent, "--case", case["case_id"], llm=scripted(agent, [mutated]), search=search)
                 capsys.readouterr()
-                if key in ALLOWED:
+                if key in NAMED_BUT_STILL_GOOD:
                     used.add(key)
-                    assert code == 0, f"allowed as a good answer but rejected: {key}"
-                elif code != 1:
-                    unexpected.append(key)
-    assert unexpected == [], f"null, blank or missing and still passing: {unexpected}"
-    assert set(ALLOWED) == used, f"allow-list entries never reached: {set(ALLOWED) - used}"
+                    expected = 0
+                else:
+                    expected = 0 if _must_pass(schema, case, path) else 1
+                if code != expected:
+                    wrong.append((key, f"exit {code}, expected {expected}"))
+    assert wrong == [], f"mutations judged against the rule: {wrong}"
+    assert set(NAMED_BUT_STILL_GOOD) == used, f"entries never reached: {set(NAMED_BUT_STILL_GOOD) - used}"
 
 
 # The three expectation kinds added after the first check.
@@ -647,3 +674,86 @@ def test_model_that_cannot_be_built_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(llm_module, "OpenAILLM", no_model)
     assert run("critic") == 2
     assert "PUDDLES_AGENT_MODEL" in capsys.readouterr().err
+
+
+# A field the output model makes optional is not blank-tested unless a case names it (case-files.md, section 1):
+# Source.title and version 4's Source.quote, both default "".
+
+LEFT_OUT = object()
+
+
+@pytest.mark.parametrize("field", ["quote", "title"])
+@pytest.mark.parametrize("value", [LEFT_OUT, "", "   ", "Reflect the feeling first, then ask."])
+@pytest.mark.parametrize("n", range(5))
+def test_a_researcher_source_passes_whatever_its_optional_quote_or_title_holds(n, field, value, capsys):
+    good = copy.deepcopy(RESEARCHER_ANSWERS[n])
+    good["sources"][0].pop(field, None)
+    if value is not LEFT_OUT:
+        good["sources"][0][field] = value
+    answer_ = ResearcherOutput.model_validate(good)
+    case_id = load("researcher")[n]["case_id"]
+    assert run("researcher", "--case", case_id, llm=scripted("researcher", [answer_]), search=FakeSearch({})) == 0
+    assert "ok non_empty sources" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field", ["url", "technique"])
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_researcher_source_with_a_blank_required_field_still_fails(field, value, capsys):
+    good = copy.deepcopy(RESEARCHER_ANSWERS[0])
+    good["sources"][0][field] = value
+    answer_ = ResearcherOutput.model_validate(good)
+    assert run("researcher", "--case", "researcher-01", llm=scripted("researcher", [answer_]),
+               search=FakeSearch({})) == 1
+    assert "EMPTY non_empty sources" in capsys.readouterr().out
+
+
+def live_shaped(agent, good):
+    """Every field present, as a model called with a strict schema sends it: optional ones as "" where they are
+    strings and left at their default otherwise."""
+    schema = ANSWERS[agent][0]
+    data = schema.model_validate(good).model_dump(mode="json")
+    for source in data.get("sources", []):
+        source.setdefault("title", "")
+        source["quote"] = source.get("quote") or ""
+    return schema.model_validate(data)
+
+
+def test_live_shaped_researcher_answers_with_empty_optional_fields_pass(capsys):
+    answers = [live_shaped("researcher", a) for a in RESEARCHER_ANSWERS]
+    assert all(s.quote == "" and "quote" in s.model_fields_set for a in answers for s in a.sources)
+    blanked = [a.model_copy(update={"sources": [s.model_copy(update={"title": ""}) for s in a.sources]})
+               for a in answers]
+    for batch in (answers, blanked):
+        assert run("researcher", search=FakeSearch({}), llm=scripted("researcher", batch)) == 0
+        assert "5 of 5 cases met their expectations" in capsys.readouterr().out
+
+
+def test_the_five_good_researcher_answers_pass_with_quote_left_out(capsys):
+    assert all("quote" not in s for a in RESEARCHER_ANSWERS for s in a["sources"])
+    assert run("researcher", search=FakeSearch({}), llm=scripted("researcher")) == 0
+    assert "5 of 5 cases met their expectations" in capsys.readouterr().out
+
+
+def test_an_optional_field_a_case_names_must_be_there_and_not_blank():
+    """A field named directly in non_empty is tested, optional or not; left to its default "", it is empty."""
+    for answer_ in ({"found": False}, {"found": False, "reason": "   "}):
+        lines = try_agent.judge(CriticOutput.model_validate(answer_), {"non_empty": ["reason"]})
+        assert lines == [(False, "EMPTY non_empty reason")]
+    lines = try_agent.judge(CriticOutput.model_validate({"found": False, "reason": "Nothing stands out."}),
+                            {"non_empty": ["reason"]})
+    assert lines == [(True, "ok non_empty reason")]
+
+
+@pytest.mark.parametrize("agent, required, optional", [
+    ("critic", {"found"}, {"evidence", "name", "description", "seen_in", "out_of", "seen_in_high",
+                           "example_conversation_ids", "same_as_pattern_id", "reason"}),
+    ("researcher", {"queries", "sources"}, set()),
+    ("proposer", {"action", "summary"}, {"rule_id", "rule_text"}),
+])
+def test_which_output_fields_are_required(agent, required, optional):
+    fields = ANSWERS[agent][0].model_fields
+    assert {n for n, f in fields.items() if f.is_required()} == required
+    assert {n for n, f in fields.items() if not f.is_required()} == optional
+    if agent == "researcher":
+        from schemas import Source
+        assert {n for n, f in Source.model_fields.items() if f.is_required()} == {"url", "technique"}

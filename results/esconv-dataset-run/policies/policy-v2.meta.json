@@ -1,0 +1,23 @@
+{
+  "policy_version": "policy-v2",
+  "parent": "policy-v1",
+  "policy_sha256": "9ca262758feb199fb695236dd2d866f6a4f136c9382b47a81e1b16fc5f70dc35",
+  "safety_sha256": "078cea0ba06dd8c66bbee51fcc6b25459a2d026cf7c5f62fa163278b287f910f",
+  "base_rules": [
+    "C1",
+    "C3",
+    "C4",
+    "C6",
+    "C7",
+    "C8"
+  ],
+  "learned_rules": {
+    "C9": {
+      "edit": "edit-r03",
+      "action": "add",
+      "pattern": "pattern-r03",
+      "round": 3,
+      "text_sha256": "594723ea5033941e5f7101ed4c8872d058cf546bacf462ed5b9dd3cde1495110"
+    }
+  }
+}
