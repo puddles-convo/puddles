@@ -393,10 +393,12 @@ def test_note_changes_uses_correct_snapshot_and_preserves_order(pilot):
         confirmed=[dict(note_id="new", fact="new fact"), dict(note_id="old", fact="old fact"),
                    dict(note_id="missing", fact="")],
         deleted=[dict(note_id="old", fact="old fact"), dict(note_id="both", fact="before fact"),
-                 dict(note_id="missing", fact="")], failed=True, reason="scripted reason")
+                 dict(note_id="missing", fact="")], failed=True, reason="scripted reason",
+        not_written=0, not_written_reasons={})
     assert (before, after, result) == originals
     assert asdict(pilot.note_changes([], [], NotesResult())) == dict(
-        added=[], replaced=[], confirmed=[], deleted=[], failed=False, reason="")
+        added=[], replaced=[], confirmed=[], deleted=[], failed=False, reason="",
+        not_written=0, not_written_reasons={})
 
 
 # 3. Honest numbers, supplied entirely by a hand-built dictionary.
@@ -689,7 +691,8 @@ def test_finish_exception_is_recorded_and_later_sessions_run(
     assert len(calls) == 6 and len(judge.calls) == 5
     assert on[1]["record"] is None and on[1]["failed"]
     assert on[1]["reason"] == "OSError: cannot finish"
-    assert on[1]["changes"] == dict(added=[], replaced=[], confirmed=[], deleted=[], failed=True, reason="")
+    assert on[1]["changes"] == dict(added=[], replaced=[], confirmed=[], deleted=[], failed=True, reason="",
+                                    not_written=0, not_written_reasons={})
     assert on[2]["score"]["status"] == "scored"
 
 
@@ -767,7 +770,9 @@ def assert_session_shape(value):
             if note["due_date"] is not None:
                 date.fromisoformat(note["due_date"])
     change = value["changes"]
-    assert set(change) == {"added", "replaced", "confirmed", "deleted", "failed", "reason"}
+    assert set(change) == {"added", "replaced", "confirmed", "deleted", "failed", "reason",
+                           "not_written", "not_written_reasons"}
+    assert change["not_written"] == 0 and change["not_written_reasons"] == {}
     assert type(change["failed"]) is bool and isinstance(change["reason"], str)
     for name in ("added", "replaced", "confirmed", "deleted"):
         assert isinstance(change[name], list)

@@ -1566,8 +1566,11 @@ def test_fake_main_passes_a_working_app_and_host_port_to_run(
             assert_error(client.post("/sessions", json={}), 401, "unauthorized")
             assert client.post("/sessions", headers=AUTH, json=dict(user_id="person-a", remember_me=True,
                 consent_for_training=False, session_id="cli-session")).status_code == 201
+            ordinary = client.post("/sessions/cli-session/turns", headers=AUTH,
+                                   json={"text": f"An ordinary day. [note:situation:{FACT}]"})
+            assert ordinary.status_code == 200
             response = client.post("/sessions/cli-session/turns", headers=AUTH,
-                                   json={"text": f"[checker:crisis-danger] [note:situation:{FACT}]"})
+                                   json={"text": "[checker:crisis-danger] [note:goals:crisis-only-marker]"})
             assert response.status_code == 200
             assert response.json()["text"] == path.fixed_responses["danger"]
             assert client.post("/sessions/cli-session/end", headers=AUTH).json()["notes"]["added"] == 1
@@ -1575,6 +1578,7 @@ def test_fake_main_passes_a_working_app_and_host_port_to_run(
     assert serve.main(cli_args(policy_path, tmp_path) + network_args, run=run) == 0
     assert calls == [dict(host=host, port=port)]
     assert (tmp_path / "people/notes/person-a/notes.json").exists()
+    assert not contains(tmp_path / "people", "crisis-only-marker")
     assert disk(tmp_path / "serve") == {}
     assert_private(capsys, caplog, TOKEN)
 
