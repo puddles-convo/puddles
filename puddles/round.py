@@ -174,7 +174,8 @@ def extras_for(record: Record, log: DecisionLog, root: Path) -> dict:
         edit = load_record(ref, PolicyEdit, root) if ref else None
         event = next((r for r in log.rounds() if r.round == record.round), None)
         return {"rule_id": edit.rule_id if edit else None, "summary": edit.summary if edit else "",
-                "noise": event.scores.noise if event and event.scores else None}
+                "noise": event.scores.noise if event and event.scores else None,
+                "safety_cases": event.safety.cases if event and event.safety else None}
     return {}
 
 
@@ -261,7 +262,8 @@ def read_policy_text(path: Path, expected_sha256: Optional[str] = None,
 
 
 def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: DecisionLog, memory: Memory,
-                 root: Path, start_policy: Optional[Path] = None) -> RoundEvent:
+                 root: Path, start_policy: Optional[Path] = None, scores: Optional[LogScores] = None,
+                 safety: Optional[LogSafety] = None) -> RoundEvent:
     """Log the round, copy its records into memory, then run the replay check.
 
     It works in two halves. First it reads every file it needs once (the base policy, the
@@ -277,7 +279,17 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
     crash comes between the two. Without `start_policy` (the stage-0 graph runner) no .meta.json
     is written and no replay check runs. With a gate outcome, the gate's `result.scores` and
     `result.safety` go into the event; without one both stay empty.
+
+    `scores` and `safety` are for a caller with a gate of its own (scripts/dataset_rounds.py). A
+    round that went through `make_gate` (any of `result.scores`, `result.safety`,
+    `result.base_sha256`, `result.candidate_sha256` set) refuses them with ValueError before
+    anything is read or written. Otherwise they go into the event exactly as given; finish_round
+    does not tie them to any file's contents, and the caller answers for them.
     """
+    gated = any(v is not None for v in (result.scores, result.safety, result.base_sha256, result.candidate_sha256))
+    if gated and (scores is not None or safety is not None):
+        raise ValueError(f"round {result.round} went through the gate; its measurements cannot be replaced by "
+                         "the caller's scores or safety; nothing was written")
     # ---- read each file once, as its bytes, and check what was measured against those bytes ----
     base_text = read_policy_text(
         result.base_policy_path, result.base_sha256 if gate is not None else None,
@@ -348,7 +360,9 @@ def finish_round(result: RoundResult, gate: Optional[GateOutcome], log: Decision
                            out_of=p.out_of, status_before=result.status_before) if p else None,
         edit=LogEdit(id=result.edit.id, action=result.edit.action or "add", rule_id=result.edit.rule_id or "",
                      rule_text=result.edit.rule_text) if result.edit and gate else None,
-        scores=result.scores if gate is not None else None, safety=result.safety if gate is not None else None)
+        # Gated: the gate's measurements, with a gate outcome only. Ungated: the caller's, as given.
+        scores=(result.scores if gate is not None else None) if gated else scores,
+        safety=(result.safety if gate is not None else None) if gated else safety)
     meta = None
     if start_policy is not None and start_text is not None:
         meta = _replay_before_writing(log, root, start_policy, start_text, event, promoted)

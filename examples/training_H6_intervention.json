@@ -1,0 +1,33 @@
+{
+  "id": "intervention-r03",
+  "schema_version": 3,
+  "written_by": "proposer",
+  "created_at": "2026-11-14T22:30:05Z",
+  "parent_ids": [
+    "pattern-r03",
+    "research-r03"
+  ],
+  "round": 3,
+  "pattern_id": "pattern-r03",
+  "research_id": "research-r03",
+  "base_harness_version": "harness-v3",
+  "new_harness_version": "harness-v4",
+  "action": "edit_rule",
+  "args": {
+    "op": "add",
+    "rule_id": null,
+    "rule_text": "In your first two replies, ask one open question about their situation and do not give suggestions yet, because advice that comes before understanding rarely fits."
+  },
+  "considered": [
+    {
+      "action": "set_examples",
+      "rejected_because": "No kept conversation yet shows exploring before advising, so there is no good example to use."
+    },
+    {
+      "action": "add_skill_card",
+      "rejected_because": "The fix is one behaviour at one point in the conversation; a rule states it more directly than a card."
+    }
+  ],
+  "hypothesis": "The helper offers suggestions before it knows the situation; a rule that delays suggestions for two replies addresses the exact point where it fails.",
+  "prediction": "relevance +0.3 on validation; the pattern falls below 1 in 10 of the lowest-scoring conversations"
+}

@@ -238,3 +238,19 @@ Besides what [graph.md](graph.md) lists, for the work that was done. A candidate
 The implementer writes `tests/test_gate.py` with tests 3 to 8 of the stage file, using a scripted judge and a scripted safety check. Test 3's last line ("a yes-or-no answer that is neither word, twice") belongs to the safety check and is tested when the real one is joined.
 
 The acceptance tests are written from this file alone, by someone who has not seen the code.
+
+## 8. Measurements passed to `finish_round` by its caller (added when main was merged in)
+
+Main changed `finish_round` while this piece was being built (#52): it takes two more keyword arguments, `scores: Optional[LogScores] = None` and `safety: Optional[LogSafety] = None`, and files them in the round event. Their one caller is `scripts/dataset_rounds.py`, which has a gate of its own (`dataset_gate`), does not use `puddles.gate`, and does not set `result.scores`, `result.safety`, `result.base_sha256` or `result.candidate_sha256`.
+
+Both ways of filing a measurement are kept, and they never mix:
+
+```python
+def finish_round(result, gate, log, memory, root, start_policy=None, scores=None, safety=None) -> RoundEvent
+```
+
+- **The gate's measurements cannot be replaced.** When any of `result.scores`, `result.safety`, `result.base_sha256` or `result.candidate_sha256` is set (the round went through `make_gate`), a `scores` or `safety` argument that is not `None` raises `ValueError` before any file is read for writing and before any write. What is filed is what the gate measured, under every check of section 3.
+- **Without them, the caller's are filed as on main.** When none of the four is set, `scores` and `safety` go into the event exactly as given, and the round is finished exactly as main's `finish_round` finished it: same event, same files, same memory copies, for the same arguments. `finish_round` does not tie these values to any file's contents; the caller answers for them, and the docstring says so in one sentence.
+- With both arguments `None` nothing changes from sections 3 and 6.
+- `puddles/round.py`'s other change on main (`extras_for` passing `safety_cases`) is kept as main has it.
+- Nothing in `scripts/dataset_rounds.py`, `tests/test_dataset_rounds.py`, `schemas.py` or `puddles/memory.py` is changed by this piece.

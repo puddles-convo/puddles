@@ -1489,3 +1489,69 @@ def test_a_current_json_that_is_not_the_bytes_the_gate_wrote_counts_as_absent(tm
     assert gate.current_scores(deps, current, IDS) == first
     assert len(deps.judge.calls) - calls == len(IDS)  # scored again, and the file rewritten as bytes
     assert b"\r" not in path.read_bytes() and not path.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+# ---------- section 8: scores and safety passed to finish_round by its caller ----------
+
+GATE_FIELDS = ["scores", "safety", "base_sha256", "candidate_sha256"]
+
+
+def gated_by(result, field):
+    """Set one of the four fields make_gate sets, to a value that would otherwise be filed."""
+    if field in ("scores", "safety"):
+        setattr(result, field, measurement(field)[field])
+    elif field == "base_sha256":
+        result.base_sha256 = sha256_text(result.base_policy_path.read_text())
+    else:
+        result.candidate_sha256 = sha256_text(result.candidate_path.read_text())
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("field", GATE_FIELDS)
+@pytest.mark.parametrize("passed", ["scores", "safety"])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_a_gated_round_refuses_the_callers_scores_or_safety_before_any_write(tmp_path, decision, field, passed,
+                                                                            replay_on):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    gated_by(result, field)
+    before, memory, log = tree(tmp_path), FakeMemory(), DecisionLog(root)
+    with pytest.raises(ValueError, match="went through the gate"):
+        finish_round(result, outcome, log, memory, root,
+                     start_policy=result.base_policy_path if replay_on else None, **measurement(passed))
+    assert tree(tmp_path) == before and log.events() == [] and memory.entries == {}
+    assert "outcome" not in result.refs
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+@pytest.mark.parametrize("replay_on", [False, True])
+def test_an_ungated_round_files_the_callers_scores_and_safety_unchanged(tmp_path, decision, replay_on):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    given = measurement("scores") | measurement("safety")
+    dumped = {k: v.model_dump(mode="json") for k, v in given.items()}
+    log = DecisionLog(root)
+    event = finish_round(result, outcome, log, FakeMemory(), root,
+                         start_policy=result.base_policy_path if replay_on else None, **given)
+    assert event.scores == given["scores"] and event.safety == given["safety"]
+    logged = log.rounds()[-1]
+    assert logged.scores.model_dump(mode="json") == dumped["scores"]
+    assert logged.safety.model_dump(mode="json") == dumped["safety"]
+    assert event.outcome == decision and "outcome" in result.refs
+    assert (root / "policies" / "policy-v2.md").exists() == (decision == "kept")
+    assert (root / "policies" / "policy-v2.meta.json").exists() == (decision == "kept" and replay_on)
+
+
+@pytest.mark.parametrize("decision", ["kept", "reverted"])
+def test_an_ungated_round_with_neither_files_no_measurements(tmp_path, decision):
+    from puddles.round import finish_round
+
+    root, candidate, result, outcome = kept_result(tmp_path, candidate_sha256=None, decision=decision)
+    log = DecisionLog(root)
+    event = finish_round(result, outcome, log, FakeMemory(), root, start_policy=result.base_policy_path)
+    assert event.scores is None and event.safety is None
+    assert log.rounds()[-1].scores is None and log.rounds()[-1].safety is None
+    assert event.outcome == decision
+    assert event.policy.in_force == ("policy-v2" if decision == "kept" else "policy-v1")
