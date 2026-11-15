@@ -101,3 +101,14 @@ Which conversations the critic was given is `puddles.judging.select_for_critic` 
 6. `build_report` leaves every file under the root byte-for-byte as it was and writes none; `show_round` adds only the report file.
 
 The acceptance tests are written from this file alone, by someone who has not seen the code.
+
+## What the view will show, by shape (added after the third check)
+
+The view reads files a round left and prints from them. A damaged or hand-edited file must never make it copy a conversation line, show something that was not measured as a measurement, or raise. Three checks of a field's value, one after another, came back with a neighbouring field unguarded, so the rule is by the shape of the value, and it is applied in ONE place that every printed, traced or summed value goes through.
+
+1. **Names and IDs.** Any value shown or put in a summary that is not one of the free texts in rule 4 (an ID, an agent name, a model name, a judge version, a policy version, a file name or path, a reader, a writer, a check name, an MLflow run ID or experiment name) is shown only when it is a `str` of 1 to 200 characters matching `^[A-Za-z0-9][A-Za-z0-9._:/@+=#~-]*$`. No space can pass, so no sentence can. Anything else is shown as `unreadable` and its content is never printed, traced or put in an error message.
+2. **Numbers.** A value shown, summed, averaged or compared as a number is used only when, as read from the file before any model coerces it, it is an `int` that is not a `bool`, or a `float` that is finite, and its size is within what the field can be: a score 1 to 5; a count 0 to 10**9; a token count 0 to 10**12; a cost 0 to 10**6; a noise 0 to 5. A string that looks like a number, a `bool`, `nan`, `inf` and anything outside the range are `unreadable`: left out of every total and mean, counted in the line that says how many values could not be read, never shown as a value. A total is worked out only from readable values and cannot overflow.
+3. **Enumerated values.** As already stated: one of the allowed values, or `unreadable`.
+4. **Free text the contract allows**, shown as held when it is a `str`: a reason, a pattern's name and description, a rule's text, an edit's summary, a source's URL, title and technique. Nothing else is free text.
+5. **Errors.** A message the view prints or traces about something it could not read names the file and the kind of error (the exception's type), never the exception's text, which can quote what it failed on.
+6. **MLflow writes are all best effort.** Every tag, metric, attribute and artifact the view or `run_round` writes for the view (the `root` tag included) is inside a guard: a failure is swallowed, the round's result and state are returned as they are, and nothing raises after the round event is on disk.
