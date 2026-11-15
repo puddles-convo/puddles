@@ -1,7 +1,7 @@
 """Acceptance tests from docs/specs/notes.md, without implementation knowledge.
 
 Safety cases come first. Temporary states during write/index commit are tested
-separately from the final-state invariant; see the contract's notes.json gap.
+separately from the final-state invariant, as allowed by the amended contract.
 """
 
 from collections import Counter, deque
@@ -263,6 +263,91 @@ def test_forget_everything_hides_notes_during_failed_remote_deletion(tmp_path):
 
 # Section 1: durable deletion and identity boundaries.
 
+def test_hyphen_distinct_people_never_share_note_ids_audiences_or_files(store, tmp_path):
+    hyphenated = seed(store, "user-01", [{"fact": "This person remembers quiet walks."}])[0]
+    plain = seed(store, "user01", [{"fact": "This person remembers music."}])[0]
+    assert hyphenated.id == "note-user-01-001"
+    assert plain.id == "note-user01-001"
+    assert hyphenated.id != plain.id
+    assert set(store.memory.entries) == {hyphenated.id, plain.id}
+    assert store.memory.audiences["person-user-01"] == ["user-01", NOTE_TAKER]
+    assert store.memory.audiences["person-user01"] == ["user01", NOTE_TAKER]
+    for user_id, own, other in (("user-01", hyphenated, plain), ("user01", plain, hyphenated)):
+        assert store.memory.entries[own.id].audience == audience_for(user_id)
+        assert store.helper_notes(user_id, TODAY) == [own.fact]
+        inp = build_input(store, user_id, [], remember_me=True, today=TODAY)
+        assert [(n.note_id, n.fact) for n in inp.existing_notes] == [(own.id, own.fact)]
+        assert other.fact not in render_user(inp)
+        assert_committed(store, tmp_path, user_id)
+    for filename in ("index.json", "notes.json", "counter.json"):
+        first = tmp_path / "notes/user-01" / filename
+        second = tmp_path / "notes/user01" / filename
+        assert first.is_file() and second.is_file() and not first.samefile(second)
+
+    plain_before = {p.name: p.read_bytes() for p in (tmp_path / "notes/user01").iterdir() if p.is_file()}
+    assert store.delete("user-01", [hyphenated.id]) == []
+    assert hyphenated.id not in store.memory.entries and plain.id in store.memory.entries
+    assert store.helper_notes("user-01", TODAY) == []
+    assert store.helper_notes("user01", TODAY) == [plain.fact]
+    assert {p.name: p.read_bytes() for p in (tmp_path / "notes/user01").iterdir() if p.is_file()} == plain_before
+    restarted = NoteStore(store.memory, tmp_path)
+    assert restarted.next_note_id("user-01") == "note-user-01-002"
+    assert restarted.next_note_id("user-01") == "note-user-01-003"
+    assert restarted.next_note_id("user01") == "note-user01-002"
+
+
+def test_save_index_queues_every_pruned_note_including_unindexed_writes_after_restart(store, tmp_path):
+    kept, removed, already_pending = seed(store, specs=[{}, {}, {}])
+    store.take_off("alice", [already_pending.id])
+    orphan = note(store.next_note_id("alice"), kind="goals", fact="Written before a crash.")
+    store.write(orphan)
+    assert orphan.id in store.stored("alice") and orphan.id not in ids(store)
+
+    restarted = NoteStore(store.memory, tmp_path)
+    assert orphan.id in restarted.stored("alice") and orphan.id not in ids(restarted)
+    restarted.save_index(LiveNoteIndex(user_id="alice", notes=[live(kept)]))
+    expected_pending = {already_pending.id, removed.id, orphan.id}
+    assert set(restarted.pending_deletes("alice")) == expected_pending
+    raw_pending = json.loads((tmp_path / "notes/alice/pending_deletes.json").read_text())
+    assert set(raw_pending) == expected_pending
+    assert expected_pending <= set(store.memory.entries)
+    assert_committed(restarted, tmp_path)
+    assert restarted.helper_notes("alice", TODAY) == [kept.fact]
+    assert NoteStore(store.memory, tmp_path).delete("alice", []) == []
+    assert set(store.memory.entries) == {kept.id}
+    assert restarted.pending_deletes("alice") == []
+
+
+@pytest.mark.parametrize("failure", ["confirmed", "false", "exception"])
+def test_delete_takes_live_notes_off_before_any_remote_attempt(store, tmp_path, failure):
+    removed, kept = seed(store, specs=[{}, {}])
+    if failure == "false":
+        store.memory.delete_answers.extend([False] * 3)
+    elif failure == "exception":
+        store.memory.delete_answers.extend(RuntimeError("delete unavailable") for _ in range(3))
+    observed = []
+
+    def observe(stage, entry_id):
+        if stage != "delete":
+            return
+        assert entry_id == removed.id
+        assert ids(store) == [kept.id]
+        assert removed.id not in store.stored("alice")
+        assert removed.id in store.pending_deletes("alice")
+        assert removed.id in store.memory.entries
+        observed.append(entry_id)
+
+    store.memory.observe = observe
+    undeleted = store.delete("alice", [removed.id])  # No prior take_off.
+    store.memory.observe = None
+    assert observed
+    expected = [] if failure == "confirmed" else [removed.id]
+    assert undeleted == expected and store.pending_deletes("alice") == expected
+    assert (removed.id in store.memory.entries) is (failure != "confirmed")
+    assert store.helper_notes("alice", TODAY) == [kept.fact]
+    assert_committed(store, tmp_path)
+
+
 def test_take_off_hides_only_known_ids_before_remote_delete(store, tmp_path):
     removed, kept = seed(store, specs=[{}, {}])
     store.take_off("alice", [removed.id, "note-alice-999"])
@@ -351,6 +436,36 @@ def test_recall_is_personal_index_ordered_and_uses_only_local_facts(store):
     assert store.memory.events[0] == ("ensure", "person-alice", ["alice", NOTE_TAKER])
 
 
+@pytest.mark.parametrize("operation", ["ensure_audience", "recall"])
+@pytest.mark.parametrize("error_type", [PastError, RuntimeError, NotImplementedError])
+def test_memory_read_failures_fall_back_to_local_live_notes(store, operation, error_type, monkeypatch):
+    first, second, removed = seed(store, specs=[
+        {"fact": "Authoritative first fact."},
+        {"kind": "follow_up", "fact": "Authoritative follow up.", "due_date": TODAY},
+        {"kind": "goals", "fact": "Forgotten fact still held remotely."},
+    ])
+    store.take_off("alice", [removed.id])
+    store.save_index(LiveNoteIndex(user_id="alice", notes=[
+        live(first).model_copy(update={"last_confirmed": TODAY}), live(second),
+    ]))
+
+    def unavailable(*args, **kwargs):
+        raise error_type("memory unavailable")
+
+    monkeypatch.setattr(store.memory, operation, unavailable)
+    expected = [
+        ExistingNote(note_id=first.id, kind=first.kind, fact=first.fact, last_confirmed=TODAY),
+        ExistingNote(note_id=second.id, kind=second.kind, fact=second.fact,
+                     last_confirmed=second.last_confirmed, due_date=second.due_date),
+    ]
+    assert removed.id in store.memory.entries
+    assert store.live_notes("alice", TODAY) == expected
+    assert store.helper_notes("alice", TODAY) == [first.fact, second.fact]
+    inp = build_input(store, "alice", [], remember_me=False, today=TODAY)
+    assert inp.existing_notes == expected
+    assert removed.fact not in render_user(inp)
+
+
 def seed_extra(store, **fields):
     record = note(store.next_note_id("alice"), **fields)
     index = store.index("alice")
@@ -361,7 +476,7 @@ def seed_extra(store, **fields):
 
 @pytest.mark.parametrize("bad", [
     "", ".", "..", "../outside", "/absolute", "alice/bob", "alice\\bob",
-    "UPPER", "alice_1", "-alice", " alice", "alice ", "alice\n", "é", "a" * 65,
+    "UPPER", "alice_1", "-alice", " alice", "alice ", "alice\n", "é", "a" * 34,
     "note-taker", "project", *TRAINING_IDENTITIES,
 ])
 def test_invalid_user_ids_are_refused_before_files_or_memory(store, tmp_path, bad):
@@ -380,12 +495,22 @@ def test_invalid_user_ids_are_refused_before_files_or_memory(store, tmp_path, ba
     assert disk_snapshot(tmp_path) == {} and store.memory.events == []
 
 
-@pytest.mark.parametrize("user_id", ["a", "0", "user-01", "a--b", "a-", "a" * 64])
+@pytest.mark.parametrize("user_id", ["a", "0", "user-01", "a--b", "a-", "a" * 33])
 def test_valid_ids_and_audiences_are_exact(user_id):
     assert check_user_id(user_id) == user_id
     assert audience_for(user_id) == f"person-{user_id}"
     assert NOTE_TAKER == "note-taker"
     assert RECALL_QUERY == "What should the robot remember about this person?"
+
+
+def test_maximum_length_user_id_can_store_notes_with_a_40_character_audience(store, tmp_path):
+    user_id = "a" * 33
+    record = seed(store, user_id)[0]
+    assert record.id == f"note-{user_id}-001"
+    assert len(audience_for(user_id)) == 40
+    assert store.memory.audiences[audience_for(user_id)] == [user_id, NOTE_TAKER]
+    assert store.helper_notes(user_id, TODAY) == [record.fact]
+    assert_committed(store, tmp_path, user_id)
 
 
 def test_ensure_person_uses_exact_private_audience_and_membership(store):
@@ -465,19 +590,32 @@ def test_failed_write_never_enters_either_file(store, tmp_path, failure):
         store.write(candidate)
     assert store.index("alice") == before_index
     assert store.stored("alice") == {kept.id: kept}
+    expected_pending = [] if failure == "ingest" else [candidate.id]
+    assert store.pending_deletes("alice") == expected_pending
+    restarted = NoteStore(store.memory, tmp_path)
+    assert restarted.pending_deletes("alice") == expected_pending
+    if failure != "ingest":
+        assert candidate.id in store.memory.entries  # Accepted remotely, never confirmed.
+        raw_pending = json.loads((tmp_path / "notes/alice/pending_deletes.json").read_text())
+        assert raw_pending == [candidate.id]
+        assert restarted.helper_notes("alice", TODAY) == [kept.fact]
+        assert restarted.delete("alice", []) == []
+        assert candidate.id not in store.memory.entries
+        assert restarted.pending_deletes("alice") == []
     assert_committed(store, tmp_path)
 
 
 def test_empty_index_save_pruning_and_counter_survive_restart(store, tmp_path):
     assert store.index("user-01") == LiveNoteIndex(user_id="user-01", notes=[])
-    assert store.next_note_id("user-01") == "note-user01-001"
+    assert store.next_note_id("user-01") == "note-user-01-001"
     restarted = NoteStore(store.memory, tmp_path)
-    assert restarted.next_note_id("user-01") == "note-user01-002"
+    assert restarted.next_note_id("user-01") == "note-user-01-002"
     assert json.loads((tmp_path / "notes/user-01/counter.json").read_text()) == {"next": 3}
     first, second = seed(store, specs=[{}, {}])
     store.save_index(LiveNoteIndex(user_id="alice", notes=[live(second)]))
     assert ids(store) == [second.id] and store.stored("alice") == {second.id: second}
     assert first.id in store.memory.entries  # save_index prunes locally, not remotely.
+    assert store.pending_deletes("alice") == [first.id]
     store.take_off("alice", [second.id])
     store.delete("alice", [second.id])
     assert NoteStore(store.memory, tmp_path).next_note_id("alice") == "note-alice-003"
@@ -547,6 +685,14 @@ def test_build_input_and_render_preserve_session_and_show_every_cap(store):
     assert "forget_everything" in SYSTEM and "actions" in SYSTEM
 
 
+def test_agent_output_documentation_opens_with_the_object_format(repo_root):
+    text = (repo_root / "docs/agents/i5-note-taker.md").read_text(encoding="utf-8")
+    section = text.split("## 4. Output", 1)[1]
+    opening = section.split("| Field", 1)[0]
+    assert "object" in opening.lower()
+    assert "forget_everything" in opening and "actions" in opening
+
+
 def input_with_notes():
     return NoteTakerInput(today=TODAY.isoformat(), may_add_notes=True, turns=[], existing_notes=[
         ExistingNote(note_id="note-alice-001", kind="goals", fact="A plan.", last_confirmed=EARLIER),
@@ -565,13 +711,15 @@ def test_check_refuses_missing_unknown_and_foreign_targets(action, target):
 
 
 @pytest.mark.parametrize("action", ["add", "replace"])
-@pytest.mark.parametrize("missing", ["kind", "fact", "empty_fact"])
+@pytest.mark.parametrize("missing", ["kind", "fact", "empty_fact", "spaces_only_fact"])
 def test_check_requires_kind_and_nonempty_fact(action, missing):
     fields = {"kind": "goals", "fact": "A plan."}
     if action == "replace":
         fields["note_id"] = "note-alice-001"
     if missing == "empty_fact":
         fields["fact"] = ""
+    elif missing == "spaces_only_fact":
+        fields["fact"] = "   "
     else:
         fields.pop(missing)
     assert check(NoteTakerOutput(actions=[NoteAction(**act(action, **fields))]), input_with_notes())
@@ -633,7 +781,7 @@ def test_run_second_invalid_answer_raises_agentfailed_without_third_call():
     assert len(llm.calls) == 2
 
 
-@pytest.mark.parametrize("failure", ["invalid_twice", "agent_failed"])
+@pytest.mark.parametrize("failure", ["invalid_twice", "agent_failed", "model_exception"])
 def test_failed_model_step_changes_no_notes_or_files(store, tmp_path, failure):
     records = seed(store, specs=[{}, {"kind": "goals"}])
     before_files = disk_snapshot(tmp_path)
@@ -643,7 +791,12 @@ def test_failed_model_step_changes_no_notes_or_files(store, tmp_path, failure):
         act("delete", note_id="note-bob-001"),
         act("add", kind="goals", fact="Must not be written."),
     ]}
-    llm = ScriptedLLM(bad, bad) if failure == "invalid_twice" else ScriptedLLM(AgentFailed("refused"))
+    if failure == "invalid_twice":
+        llm = ScriptedLLM(bad, bad)
+    elif failure == "agent_failed":
+        llm = ScriptedLLM(AgentFailed("refused"))
+    else:
+        llm = ScriptedLLM(RuntimeError("model unavailable"), RuntimeError("model unavailable"))
     result = session(store, llm)
     assert result.failed and result.reason
     assert result.added == result.replaced == result.confirmed == result.deleted == []
@@ -654,18 +807,53 @@ def test_failed_model_step_changes_no_notes_or_files(store, tmp_path, failure):
     assert ids(store) == [r.id for r in records]
 
 
+@pytest.mark.parametrize("failure", ["invalid_twice", "model_exception"])
+@pytest.mark.parametrize("delete_confirmed", [False, True])
+def test_expiry_stands_when_model_answer_fails(store, tmp_path, failure, delete_confirmed):
+    expired, kept = seed(store, specs=[
+        {"kind": "follow_up", "last_confirmed": TODAY - timedelta(days=FOLLOW_UP_EXPIRY_DAYS + 1)},
+        {"kind": "goals", "fact": "A live plan.", "last_confirmed": EARLIER},
+    ])
+    if not delete_confirmed:
+        store.memory.delete_answers.extend([False] * 3)
+    bad = {"forget_everything": True, "actions": [
+        act("delete", note_id="note-bob-001"),
+        act("add", kind="goals", fact="Must not be written."),
+    ]}
+    llm = (ScriptedLLM(bad, bad) if failure == "invalid_twice" else
+           ScriptedLLM(RuntimeError("model unavailable"), RuntimeError("model unavailable")))
+    store.memory.events.clear()
+    result = session(store, llm)
+    assert result.failed and result.reason
+    assert result.added == result.replaced == result.confirmed == []
+    assert not any(e[0] == "ingest" for e in store.memory.events)
+    assert ids(store) == [kept.id] and store.stored("alice") == {kept.id: kept}
+    assert (expired.id in store.memory.entries) is not delete_confirmed
+    expected_pending = [] if delete_confirmed else [expired.id]
+    assert store.pending_deletes("alice") == expected_pending
+    restarted = NoteStore(store.memory, tmp_path)
+    assert restarted.pending_deletes("alice") == expected_pending
+    assert restarted.helper_notes("alice", TODAY) == [kept.fact]
+    assert_committed(restarted, tmp_path)
+
+
 @pytest.mark.parametrize("operation", ["ensure_audience", "recall"])
 def test_take_notes_does_not_raise_for_past_failure_during_input(store, tmp_path, operation, monkeypatch):
-    seed(store)
+    old = seed(store)[0]
 
     def unavailable(*args, **kwargs):
         raise PastError("memory unavailable")
 
     monkeypatch.setattr(store.memory, operation, unavailable)
-    result = session(store, ScriptedLLM({"actions": []}))
-    # The contract fixes no result flags for these failures, only no exception
-    # and the final index invariant.
-    assert isinstance(result, NotesResult)
+    llm = ScriptedLLM({"actions": [act("delete", note_id=old.id)]})
+    result = session(store, llm, remember_me=False)
+    assert isinstance(result, NotesResult) and not result.failed
+    assert len(llm.calls) == 1 and old.fact in llm.calls[0][1]
+    assert result.deleted == [old.id]
+    assert store.helper_notes("alice", TODAY) == [] and store.stored("alice") == {}
+    assert set(result.undeleted) == set(store.pending_deletes("alice"))
+    if old.id in store.memory.entries:
+        assert old.id in store.pending_deletes("alice")
     assert_committed(store, tmp_path)
 
 
@@ -776,15 +964,23 @@ def test_failed_new_write_is_omitted_while_other_actions_commit(store, tmp_path,
     original_ingest = store.memory.ingest
     original_wait = store.memory.wait
     attempts = []
+    failed_ids = set()
+    failed_ingestions = set()
 
     def ingest(entry):
         attempts.append(entry.id)
-        if len(attempts) == 1 and failure == "ingest":
-            raise PastError("write unavailable")
-        return original_ingest(entry)
+        is_replacement = entry.content == "15 Nov 2026: Replacement."
+        if is_replacement:
+            failed_ids.add(entry.id)
+            if failure == "ingest":
+                raise PastError("write unavailable")
+        ingestion_id = original_ingest(entry)
+        if is_replacement:
+            failed_ingestions.add(ingestion_id)
+        return ingestion_id
 
     def wait(ingestion_id, timeout_s=60):
-        if len(attempts) == 1:
+        if ingestion_id in failed_ingestions:
             if failure == "wait_false":
                 return False
             if failure == "wait_exception":
@@ -800,8 +996,10 @@ def test_failed_new_write_is_omitted_while_other_actions_commit(store, tmp_path,
     ]}))
     assert not result.failed and result.not_written == 1
     assert len(attempts) == 2 and len(result.added) == 1
-    assert set(result.added) == set(ids(store)) == {attempts[1]}
-    assert attempts[0] not in store.stored("alice")
+    assert len(failed_ids) == 1
+    assert set(result.added) == set(ids(store)) == set(attempts) - failed_ids
+    assert not failed_ids & set(store.stored("alice"))
+    assert result.replaced == [replaced.id]
     assert replaced.id not in ids(store) and deleted.id not in ids(store)
     assert replaced.id not in store.memory.entries and deleted.id not in store.memory.entries
     assert_committed(store, tmp_path)
