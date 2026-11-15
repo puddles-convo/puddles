@@ -90,6 +90,8 @@ Do not merge the two packages tonight. The graph in stage 0 imports from both.
 | `OPENAI_API_KEY`, `PUDDLES_AGENT_MODEL`, `PUDDLES_AGENT_TEMPERATURE` (optional) | Critic, researcher, proposer |
 | `EXA_API_KEY` | Researcher |
 | `PAST_API_KEY`, `PAST_BASE_URL` (optional) | Memory |
+| `PUDDLES_CONFIG` (optional) | The run's config file: the prices table and each agent's output limit. Default `config/run.toml` |
+| `HELPER_EXTRA_BODY`, `SIMUSER_EXTRA_BODY` (optional) | A JSON object merged into every request to that endpoint |
 
 Stages 0 to 2 add `MLFLOW_TRACKING_URI` and a variable for the judge model.
 

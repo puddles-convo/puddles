@@ -161,6 +161,15 @@ In this order:
 
 Traces are written in the background. Call `mlflow.flush_trace_async_logging()` before reading them.
 
+### Added by stage 1
+
+- `RoundDeps` has one more field, `usage: puddles.usage.Meter | None = None`. With `None`, the graph makes a meter on `root` with the prices in the run's config file and keeps it on `deps.usage`.
+- `run_round` checks prices straight after the policy file: a chat client or model with no price, or `puddles.exa.search` with no price per search, raises `puddles.usage.MissingPrice` before memory, the log or any model is touched. `scripts/run_graph_round.py` prints it as one line and exits with code 2.
+- Every node runs inside `puddles.usage.metering(meter, <agent>)`. A model passed as `llm` that does not report its own usage is wrapped in `puddles.tracing.TracedLLM`.
+- The MLflow run also gets `tokens_in.<agent>`, `tokens_out.<agent>`, `calls.<agent>`, `estimated_calls.<agent>`, `first_answer_failed.<agent>`, `searches.<agent>` and `cost_usd`. The round's lines are in `<root>/log/usage.jsonl`.
+
+Details are in [stage-1-client-and-io.md](../plan/stage-1-client-and-io.md).
+
 ## 4. `scripts/run_graph_round.py`
 
 ```
