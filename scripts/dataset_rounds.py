@@ -14,11 +14,16 @@ ESConv instead:
   noise and neither empathy nor relevance falls by more than the noise. It runs no conversations
   and no safety cases; the Safety section is checked unchanged.
 
+After the last round, held-out.json reports the ESConv test split for each kept rule and maps the outside
+sets in the README (CounselBench-Adv, VERA-MH) to the policy rules meant to handle them. None of it feeds a round.
+
 Usage (no keys needed; past.dev is used only with --past and PAST_API_KEY):
 
     python -m scripts.dataset_rounds --root runs/esconv
 """
 import argparse
+import csv
+import io
 import json
 import os
 import random
@@ -55,7 +60,15 @@ from schemas import (
 
 ESCONV = "thu-coai/esconv"
 ESCONV_REVISION = "32c54c15e7651cd68dfab18eee39f63ff0cc1e82"
-SPLITS = {"train": ("train.txt", 910), "validation": ("valid.txt", 195)}
+SPLITS = {"train": ("train.txt", 910), "validation": ("valid.txt", 195), "test": ("test.txt", 195)}
+CBADV = "izi-ano/CounselBench-Adv"
+CBADV_REVISION = "57a2e2d5b709208197bbf8ff55124d4844067da3"
+VERA = "SpringCare/VERA-MH"
+VERA_REVISION = "2ea4823cade663da3143e15dd7f63641c175502d"
+# Policy rules meant to handle each held-out category. A rule being present is not a test of the helper.
+CBADV_RULES = {"apathetic": ["C1", "C9"], "assumptions": ["C1", "C3"], "symptoms": ["S2", "C8"],
+               "judgmental": ["C6", "C9"], "medication": ["S2"], "therapy": ["S3", "C8"]}
+VERA_RULES = {"None": ["C8"], "Low": ["S1", "C8"], "High": ["S1"], "Immediate": ["S1"]}
 ESCONV_URL = f"https://huggingface.co/datasets/{ESCONV}"
 ESCONV_PAPER = "https://arxiv.org/abs/2106.01144"
 
@@ -85,18 +98,20 @@ class Conversation:
         return any(s == strategy for _, s in self.helper)
 
 
-def _download(filename: str) -> str:
-    root = Path(os.getenv("PUDDLES_CACHE", Path.home() / ".cache" / "puddles"))
-    path = root / ESCONV / ESCONV_REVISION / filename
+def _fetch(url: str, cache: str) -> str:
+    path = Path(os.getenv("PUDDLES_CACHE", Path.home() / ".cache" / "puddles")) / cache
     if not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
-        url = f"{ESCONV_URL}/resolve/{ESCONV_REVISION}/{filename}"
         with urlopen(url, timeout=60) as response:
             data = response.read()
         with NamedTemporaryFile(dir=path.parent, delete=False) as temp:
             temp.write(data)
         Path(temp.name).replace(path)
     return path.read_text(encoding="utf-8-sig")
+
+
+def _download(filename: str) -> str:
+    return _fetch(f"{ESCONV_URL}/resolve/{ESCONV_REVISION}/{filename}", f"{ESCONV}/{ESCONV_REVISION}/{filename}")
 
 
 def parse_esconv(text: str, split: str) -> list[Conversation]:
@@ -114,7 +129,7 @@ def parse_esconv(text: str, split: str) -> list[Conversation]:
     return out
 
 
-def load_split(split: Literal["train", "validation"]) -> list[Conversation]:
+def load_split(split: Literal["train", "validation", "test"]) -> list[Conversation]:
     filename, expected = SPLITS[split]
     text = _download(filename)
     rows = sum(1 for row in text.split("\n") if row.strip())
@@ -390,6 +405,49 @@ def run(root: Path, start: Path, rounds: int, seed: int, memory: Memory,
     return lines
 
 
+def load_counselbench_adv() -> dict[str, int]:
+    """Prompts per category (6 x 20); the prompts themselves are CC BY-NC-ND and are not copied out."""
+    url = f"https://huggingface.co/datasets/{CBADV}/resolve/{CBADV_REVISION}/counselbench_adv.csv"
+    rows = list(csv.DictReader(io.StringIO(_fetch(url, f"{CBADV}/{CBADV_REVISION}/counselbench_adv.csv"))))
+    if len(rows) != 20 or set(rows[0]) != set(CBADV_RULES):
+        raise ValueError("CounselBench-Adv: expected 20 prompts in each of 6 categories")
+    return {cat: sum(bool((r[cat] or "").strip()) for r in rows) for cat in CBADV_RULES}
+
+
+def load_vera_personas() -> dict[str, int]:
+    """VERA-MH suicide-risk personas per short risk level (100 in all)."""
+    url = f"https://raw.githubusercontent.com/{VERA}/{VERA_REVISION}/data/SI/personas.tsv"
+    rows = list(csv.DictReader(io.StringIO(_fetch(url, f"{VERA}/{VERA_REVISION}/personas.tsv")), delimiter="\t"))
+    if len(rows) != 100:
+        raise ValueError(f"VERA-MH: expected 100 personas, got {len(rows)}")
+    return {level: sum(r["Short Current Suicide Risk Level"] == level for r in rows) for level in VERA_RULES}
+
+
+def held_out(log: DecisionLog, root: Path, start: Path, test: list[Conversation],
+             cbadv: dict[str, int], vera: dict[str, int]) -> dict:
+    """Run once, after every round: the loop's decisions never see these numbers."""
+    policy = replay.policy_in_force(log, root, start)
+    rule_ids = parse_policy(policy.read_text()).rule_ids()
+    kept = [r for r in log.rounds() if r.outcome == "kept" and r.pattern and r.edit]
+    esconv = {}
+    for r in kept:
+        fix = BY_NAME[r.pattern.name]  # type: ignore[union-attr]
+        breaks, follows = [c for c in test if fix.present(c)], [c for c in test if not fix.present(c)]
+        esconv[r.edit.rule_id] = {"pattern": fix.name,  # type: ignore[union-attr]
+                                  "breaks": [len(breaks), mean_scores(breaks).quality],
+                                  "follows": [len(follows), mean_scores(follows).quality]}
+    cover = lambda rules: [x for x in rules if x in rule_ids]  # noqa: E731
+    return {
+        "policy": policy.stem,
+        "esconv_test": {"conversations": len(test), "rules": esconv},
+        "counselbench_adv": {cat: [n, cover(CBADV_RULES[cat])] for cat, n in cbadv.items()},
+        "vera_mh_si": {level: [n, cover(VERA_RULES[level])] for level, n in vera.items()},
+        "note": "esconv_test: [n, quality] for test conversations that break / follow each kept rule. "
+                "counselbench_adv, vera_mh_si: [cases, policy rules meant to handle them]; "
+                "scoring them needs the live helper (puddles.eval.external).",
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", default="runs/esconv")
@@ -406,6 +464,10 @@ def main() -> None:
         print(line)
     final = replay.policy_in_force(DecisionLog(root), root, Path(args.policy))
     print(f"policy in force: {final}")
+    report = held_out(DecisionLog(root), root, Path(args.policy), load_split("test"),
+                      load_counselbench_adv(), load_vera_personas())
+    (root / "held-out.json").write_text(json.dumps(report, separators=(",", ":")) + "\n")
+    print(f"held-out check: {root / 'held-out.json'}")
     for row in memory_trace(DecisionLog(root), root):
         print(f"  {row['record']:<14} written by {row['written_by']:<11} read by {', '.join(row['read_by']) or '-'}")
 

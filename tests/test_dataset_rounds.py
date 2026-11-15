@@ -57,3 +57,15 @@ def test_kept_edit_is_replay_valid_and_reverted_one_leaves_policy(tmp_path):
 def test_noise_is_zero_when_every_rating_is_equal():
     assert measure_noise(dataset("validation", 30, False), 0) == 0.0
     assert {f.name for f in CATALOGUE} >= {"no-reassurance", "information-heavy"}
+
+
+def test_held_out_reports_kept_rules_and_rule_coverage(tmp_path):
+    from scripts.dataset_rounds import CBADV_RULES, VERA_RULES, held_out
+
+    run(tmp_path, START, 1, 0, FakeMemory(), dataset("train", 120, True), dataset("validation", 60, True))
+    report = held_out(DecisionLog(tmp_path), tmp_path, START, dataset("test", 30, True),
+                      {c: 20 for c in CBADV_RULES}, {lvl: 25 for lvl in VERA_RULES})
+    assert report["policy"] == "policy-v2"
+    assert report["esconv_test"]["rules"]["C9"]["breaks"] == [10, 2.5]
+    assert report["counselbench_adv"]["apathetic"] == [20, ["C1", "C9"]]
+    assert report["vera_mh_si"]["High"] == [25, ["S1"]]

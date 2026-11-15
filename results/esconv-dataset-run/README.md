@@ -1,34 +1,29 @@
-# ESConv dataset run (stand-in for a failed live training run)
+# Dataset run: stand-in for a failed live training run
 
-Made with `python -m scripts.dataset_rounds --root runs/esconv` (seed 0, starting from `policies/policy-v1.md`),
-then copied here. The files have the same formats as a live run and pass the replay check.
+`python -m scripts.dataset_rounds --root runs/esconv` · seed 0 · start `policy-v1` · same record, log, policy and `.meta.json` formats as a live round · replay check passes · no model calls.
 
-Every model step was replaced by a step that reads ESConv (revision `32c54c1`), so nothing here was tested by the
-live helper, judge or gatekeeper:
+| Dataset (pinned) | Role | Size |
+|---|---|---|
+| ESConv train `32c54c1` | Critic: 10 lowest-rated of 60 per round; pattern must also lower train quality | 800 rated |
+| ESConv validation | Gate: quality of sessions following vs breaking the rule; noise = range over 3 seeded thirds = 0.20 | 174 rated |
+| ESConv test | Held-out check, run once after all rounds | 176 rated |
+| CounselBench-Adv `57a2e2d` | Held-out: 6 categories × 20 adversarial prompts, mapped to the rules meant to handle them | 120 |
+| VERA-MH SI `2ea4823` | Held-out: suicide-risk personas by level, mapped to rules | 100 |
 
-- **Critic:** the 10 lowest-rated of 60 seeded ESConv training conversations; names the catalogue pattern seen
-  most often among them that also lowers seeker ratings across the training split.
-- **Researcher:** the pattern's counselling sources plus the training-split figures.
-- **Proposer:** the one rule edit written for that pattern.
-- **Gate:** seeker ratings on the validation split, for conversations that follow the new rule against those that
-  break it. Noise is the range of mean quality over 3 seeded thirds of the validation split (0.20). No
-  conversations or safety cases were run; only the Safety section was checked unchanged. The test split is unused.
+**Rounds** (quality = mean of seeker empathy and relevance, 1–5; breaks → follows rule, validation)
 
-| Round | Outcome | Pattern | Validation quality: break rule → follow rule |
-|---|---|---|---|
-| 1 | reverted | no-reflection-of-feelings | 4.58 (60) → 4.51 (114) |
-| 2 | no_pattern | | |
-| 3 | kept → `policy-v2` | no-reassurance | 4.35 (17) → 4.55 (157) |
-| 4 | no_pattern | | |
-| 5 | reverted | suggestion-heavy | 4.68 (11) → 4.53 (163); relevance fell 0.44 |
-| 6–8 | no_pattern | | |
+| R | Outcome | Pattern | Edit | Quality |
+|---|---|---|---|---|
+| 1 | reverted | no-reflection-of-feelings | reword C1 | 4.58 → 4.51 |
+| 3 | **kept → policy-v2** | no-reassurance | add C9: affirm effort or strengths at least once | 4.35 → 4.55 |
+| 5 | reverted | suggestion-heavy | add: one suggestion, check fit | 4.68 → 4.53; relevance −0.44 |
+| 2, 4, 6–8 | no_pattern | | | |
 
-Result: `policies/policy-v2.md` adds one rule, C9 (affirm the person's effort or strengths at least once).
-Its gain (0.20) is only just above the noise (0.199), and ESConv ratings are near the top of the scale
-(mean 4.5 of 5), so treat it as weak evidence. The comparison is between existing human sessions, not a test of
-the helper following the rule.
+**Held-out** (`held-out.json`)
+- **ESConv test, C9:** 4.44 (26 break) → 4.60 (150 follow). Same direction as validation, but +0.16 is below the noise.
+- **CounselBench-Adv:** apathetic C1 C9 · assumptions C1 C3 · symptoms S2 C8 · judgmental C6 C9 · medication S2 · therapy S3 C8.
+- **VERA-MH:** None 10 → C8 · Low 30 → S1 C8 · High 30 → S1 · Immediate 30 → S1.
 
-Files:
-- `policies/policy-v2.md` and `policy-v2.meta.json`: the policy in force and where each rule came from
-- `log/decisions.jsonl`: the decision log
-- `records/round-NN/`: the pattern, research, edit and gate records for each round with a pattern
+**Limits:** C9 cleared the noise by about 0.001; ESConv ratings average 4.5 of 5. Every comparison is between existing human sessions, so none tests the helper following a rule. CounselBench-Adv and VERA-MH are only mapped to rules: scoring them needs the live helper (`puddles.eval.external`). No safety cases ran. The test split and outside sets cannot affect any round. CounselBench-Adv prompts (CC BY-NC-ND) are not copied here.
+
+**Files:** `policies/policy-v2.md` + `.meta.json` (policy in force) · `log/decisions.jsonl` · `records/round-NN/` · `held-out.json`
