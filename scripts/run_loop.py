@@ -39,8 +39,7 @@ from loop.llm import ChatClient, FakeClient
 from loop.run_batch import _fake_helper, _fake_user
 from loop.runner import load_scenarios
 from puddles import gate as real_gate
-from puddles import parking
-from puddles import tracing
+from puddles import parking, tracing
 from puddles.baselines import load_id_file, resolve_ids
 from puddles.config import LoopConfig, load_config, load_loop_config
 from puddles.decision_log import DecisionLog
@@ -53,7 +52,7 @@ from puddles.loop import LoopError, check_id_files, judge_models, run_loop, scor
 from puddles.memory import FakeMemory, Memory, PastError
 from puddles.policy import TOKEN_CAP
 from puddles.round import prepare_round, stand_in_gate
-from puddles.usage import Meter, model_name, spend
+from puddles.usage import Meter, metering, model_name, spend
 from schemas import ConversationRecord, RoundEvent, Scenario, ScoreRecord
 
 
@@ -109,6 +108,13 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
         choices=["kept", "reverted", "real"],
         default="reverted",
         help="kept or reverted: what the stand-in gate decides (kept only with --fake). real: the gatekeeper",
+    )
+    p.add_argument(
+        "--weights",
+        choices=["off", "dpo", "grpo", "auto"],
+        default="off",
+        help="post-train the helper between rounds (needs --gate real): dpo, grpo, or auto (DPO first, "
+        "GRPO after a reverted DPO adapter). docs/specs/weight-training.md",
     )
     p.add_argument("--fake", action="store_true", help="scripted clients, model, search, memory and judge")
     p.add_argument("--check", action="store_true", help="verify the root, log, policies and prices, then exit")
@@ -171,6 +177,60 @@ def _check_park_reverted() -> None:
                           f"it must be a whole number of 1 or more, or unset")
 
 
+def _weight_step(args, cfg: LoopConfig, deps: RoundDeps, gate_deps, meter: Meter, helper_client: ChatClient,
+                 log: DecisionLog, root: Path, start_policy: Path, validation_ids: list[str]):
+    """The between-rounds training step, with the adapter in force (after a restart) put back in front."""
+    from puddles.config import DEFAULT_PATH
+    from puddles.weights.backend import Backend, FakeBackend, TinkerBackend
+    from puddles.weights.serving import AdapterLoader, FakeAdapterLoader, TinkerAdapterLoader, VLLMAdapterLoader
+    from puddles.weights.step import WeightStep, load_weight_settings
+
+    settings = load_weight_settings(Path(os.environ.get("PUDDLES_CONFIG") or DEFAULT_PATH))
+    if args.weights != "auto":
+        settings.method = args.weights
+    factory: Callable[[], Backend]
+    loader: AdapterLoader
+    if args.fake:
+        factory, loader = FakeBackend, FakeAdapterLoader(needs_export=settings.serve == "vllm")
+    else:
+        if not settings.base_model:
+            raise ConfigError("weights.base_model is not set in the config file")
+        if not os.environ.get("TINKER_API_KEY"):
+            raise ConfigError("environment variable TINKER_API_KEY is not set")
+        def factory() -> Backend:
+            return TinkerBackend(settings.base_model, settings.rank)
+
+        if settings.serve == "tinker":
+            loader = TinkerAdapterLoader.from_env()
+        else:
+            loader = VLLMAdapterLoader.from_env(helper_client)  # type: ignore[arg-type]
+    base_price = meter.prices.models.get(model_name(helper_client))
+
+    def use_helper(client: ChatClient, name: str) -> None:
+        deps.helper_client = client
+        gate_deps.helper_client = tracing.TracedClient(client, "helper")
+        if base_price is not None:  # priced as the model it was trained from, under the name it is called by
+            meter.prices.models[model_name(client)] = base_price
+
+    step = WeightStep(settings=settings, backend_factory=factory, loader=loader, gate_deps=gate_deps, log=log,
+                      root=root, start_policy=start_policy, validation_ids=validation_ids,
+                      noise=cfg.noise if cfg.noise is not None else 0.0, seed=cfg.seed, use_helper=use_helper)
+    restored = step.restore()
+    if restored:
+        print(f"weights: {restored} is in force (from log/adapters.jsonl)")
+    return step
+
+
+def _metered(step: Callable[[int], object], meter: Meter) -> Callable[[int], object]:
+    """The weight step with its judge calls in the usage log (under `weights`), so the spend limit sees them."""
+
+    def run(round_: int) -> object:
+        with metering(meter, "weights"):
+            return step(round_)
+
+    return run
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
     if args.gate == "kept" and not args.fake:
@@ -179,6 +239,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.gate == "reverted" and not args.fake:
         print("pilot: --gate reverted without --fake is the stand-in gate: it reverts every candidate, "
               "nothing can be kept")
+    if args.weights != "off" and args.gate != "real":
+        _print_error("--weights needs --gate real: an adapter is kept only by the gatekeeper")
+        return 2
     root = Path(args.root)
     try:
         remeasure_kept = _remeasure_kept()  # before any model call
@@ -300,6 +363,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             gate_deps, validation_scenario_ids=[s.scenario_id for s in validation],
             noise=cfg.noise if cfg.noise is not None else 0.0, token_cap=TOKEN_CAP)
 
+    weight_step = None
+    if args.weights == "off" and not args.check:
+        from puddles.weights import ledger as adapter_ledger
+
+        try:
+            kept = adapter_ledger.in_force(root)
+        except (OSError, ValueError) as exc:
+            _print_error(f"{type(exc).__name__}: log/adapters.jsonl cannot be read: {exc}")
+            return 2
+        if kept is not None:
+            _print_error(f"{kept.adapter_id} is the adapter in force (log/adapters.jsonl): run with --weights "
+                         "to keep using it; without it the rounds would run on other weights")
+            return 2
+    if args.weights != "off":
+        try:
+            weight_step = _weight_step(args, cfg, deps, gate_deps, meter, helper_client, log, root, start_policy,
+                                       [s.scenario_id for s in validation])
+        except (ConfigError, OSError, ValueError, RuntimeError) as exc:
+            _print_error(f"{type(exc).__name__}: {exc}")
+            return 2
+
     try:
         if args.check:
             check_policy_file(start_policy)
@@ -317,7 +401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             ]
 
         summary = run_loop(
-            cfg, log=log, memory=memory, root=root, start_policy=start_policy, scenarios=scenarios, run_one=run_one
+            cfg, log=log, memory=memory, root=root, start_policy=start_policy, scenarios=scenarios, run_one=run_one,
+            after_round=_metered(weight_step.after_round, meter) if weight_step is not None else None,
         )
     except ConfigError as exc:
         _print_error(f"{type(exc).__name__}: {exc}")

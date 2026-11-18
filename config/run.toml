@@ -62,3 +62,28 @@ conversations_per_round = 5
 # conversations_for_critic =   # the n lowest-scoring conversations the critic reads; unset = all
 # spend_limit_usd =            # stage 3: what the team can afford to lose
 # round_cost_estimate_usd =    # stage 3: one round's measured cost at these settings
+
+# ---------------------------------------------------------------------------------------------
+# Weight training between rounds (scripts/run_loop.py --weights; docs/specs/weight-training.md).
+# Read only when --weights is not off. Starting values from the Tinker DPO guide and the team's
+# research doc; nobody has measured them on this helper yet.
+# ---------------------------------------------------------------------------------------------
+
+[weights]
+method = "auto"            # auto: DPO first, GRPO after a DPO adapter is reverted
+serve = "tinker"           # tinker: Tinker serves each adapter (no server of ours); vllm: export, load on HELPER_URL
+# base_model =             # Tinker's name for the helper's model, e.g. "Qwen/Qwen3.5-9B"
+rank = 16
+max_training_runs = 3      # the weekend budget in the README
+rounds_without_keep = 3    # train after this many rounds in a row keep no rule edit
+source_rounds = 3
+prompts = 32
+samples = 4
+min_margin = 0.5
+dpo_beta = 0.1
+dpo_learning_rate = 1e-5
+epochs = 1
+grpo_learning_rate = 4e-5
+grpo_iterations = 2
+max_tokens = 80
+temperature = 0.9

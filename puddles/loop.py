@@ -212,6 +212,7 @@ def run_loop(
     scenarios: Sequence[Scenario],
     run_one: RoundRunner,
     out: Callable[[str], None] = print,
+    after_round: Optional[Callable[[int], object]] = None,
 ) -> LoopSummary:
     """Run rounds until a cap stops the loop. `run_one(policy_path, scenarios, round)` runs
     one round and returns its RoundEvent — the script passes `graph.run_round` wrapped.
@@ -221,6 +222,8 @@ def run_loop(
     `round_error` line goes to `log/loop.jsonl` and the next turn starts as a restart does.
     The round-error and nothing-scored streaks are read from disk at each turn, so they survive a restart.
     Every stop writes a `stopped` line there (`write_stopped`).
+    `after_round(round)`, when given, runs after each round event (the weight-training step); an
+    `Exception` from it is a `weight_error` line and the loop goes on.
     """
     usage_file = Path(root) / USAGE_PATH
     summary = LoopSummary()
@@ -272,6 +275,14 @@ def run_loop(
             if event.scores is not None:
                 line += f" quality {event.scores.before.quality:.2f} -> {event.scores.after.quality:.2f}"
             out(f"{line} — spent ${spent:.4f}")
+            if after_round is not None:
+                try:
+                    after_round(event.round)
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {str(exc)[:ERROR_CHARS]}"
+                    append_loop_line(root, {"event": "weight_error", "round": event.round, "error": error,
+                                            "at": _now()})
+                    out(f"round {event.round}: weight step error. {error}")
     except BaseException as exc:  # escaped outside a round, or KeyboardInterrupt: still written down
         summary.stop_reason = f"{type(exc).__name__}: {str(exc)[:ERROR_CHARS]}"
         summary.failed = True

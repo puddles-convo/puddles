@@ -57,6 +57,7 @@ class JSONChatClient(ChatClient, Protocol):
 # One request. `complete_json_with` is given one of these, so a wrapper can trace each attempt.
 Request = Callable[..., str]
 
+USER_AGENT = "puddles/0.1"  # for servers that refuse urllib's default, such as Tinker's
 REFUSED_STATUSES = (400, 422)  # how a server says it does not take `response_format`
 JSON_ONLY = ("Reply with one JSON object that matches this JSON schema, and nothing else. "
              "No code fence, no explanation.\n{schema}")
@@ -156,8 +157,10 @@ class OpenAICompatClient:
 
     def __init__(self, base_url: str, model: str, api_key: str | None = None,
                  timeout: float = 60.0, extra_body: dict[str, Any] | None = None,
-                 max_tokens_param: str = "max_tokens") -> None:
+                 max_tokens_param: str = "max_tokens", user_agent: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        # Sent only when set: Tinker's endpoint is behind Cloudflare, which refuses urllib's default (error 1010).
+        self.user_agent = user_agent
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
@@ -214,6 +217,8 @@ class OpenAICompatClient:
             body["response_format"] = response_format
         body.update(self.extra_body)
         headers = {"Content-Type": "application/json"}
+        if self.user_agent:
+            headers["User-Agent"] = self.user_agent
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(f"{self.base_url}/chat/completions",
@@ -288,7 +293,8 @@ def client_from_env(prefix: str) -> OpenAICompatClient:
     {prefix}_EXTRA_BODY, also optional, is a JSON object merged into every request body. It is
     where a server-specific switch goes, such as the one that turns a model's thinking mode off.
     {prefix}_MAX_TOKENS_PARAM, also optional, names the body field for the output limit:
-    `max_tokens` (the default) or `max_completion_tokens`.
+    `max_tokens` (the default) or `max_completion_tokens`. {prefix}_USER_AGENT, also optional, is sent as
+    the User-Agent header; Tinker's endpoint needs one (any name other than urllib's default).
     """
     values = {}
     for name in (f"{prefix}_URL", f"{prefix}_MODEL"):
@@ -311,4 +317,4 @@ def client_from_env(prefix: str) -> OpenAICompatClient:
         raise ConfigError(f"environment variable {param_name} must be max_tokens or max_completion_tokens")
     return OpenAICompatClient(values[f"{prefix}_URL"], values[f"{prefix}_MODEL"],
                               api_key=os.environ.get(f"{prefix}_API_KEY") or None, extra_body=extra,
-                              max_tokens_param=param)
+                              max_tokens_param=param, user_agent=os.environ.get(f"{prefix}_USER_AGENT") or None)
