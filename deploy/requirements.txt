@@ -1,0 +1,3 @@
+# Only for deploying to Modal (deploy/modal_helper.py). The loop and the tests do not need it.
+# vLLM is installed inside the Modal image (deploy/helper_config.py: VLLM_VERSION), not here.
+modal==1.6.3
