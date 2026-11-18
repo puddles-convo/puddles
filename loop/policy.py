@@ -9,7 +9,7 @@ from pathlib import Path
 
 from loop.errors import PolicyError
 
-RULE_RE = re.compile(r"^([SC]\d+)\. (.+)$")
+RULE_RE = re.compile(r"^([SCKE]\d+)\. (.+)$")  # K skill cards, E examples: puddles/policy.py
 
 
 def sha256_text(text: str) -> str:

@@ -395,9 +395,10 @@ def _num(x: float) -> str:
 
 
 def _changed_rules(current: Policy, candidate: Policy) -> list[str]:
-    """Conversation rules added, removed or reworded, by ID, text compared exactly."""
+    """Conversation rules, skill cards (K) and examples (E) added, removed or reworded, by ID, text
+    compared exactly. Safety rules are checked separately, byte for byte."""
     def conversation(p: Policy) -> dict[str, str]:
-        return {rid: text for rid, text in p.rules.items() if rid.startswith("C")}
+        return {rid: text for rid, text in p.rules.items() if rid[:1] in ("C", "K", "E")}
     a, b = conversation(current), conversation(candidate)
     return [rid for rid in dict.fromkeys([*a, *b]) if a.get(rid) != b.get(rid)]
 

@@ -133,8 +133,14 @@ def run_proposer(result: RoundResult, log: DecisionLog, memory: Memory, llm: LLM
     policy_text = result.base_policy_path.read_text()
     p_in = proposer.build_input(policy_text, pattern, research, log, memory, root)
     policy = parse_policy(policy_text)
-    p_out = proposer.run(p_in, policy.version, policy, log, llm)
-    edit, candidate = proposer.apply(p_out, policy_text, log, pattern, research, round_, root)
+    if os.environ.get("PUDDLES_PROPOSER", "v1").strip() == "toolbox":  # skill cards and examples too
+        from puddles.agents import proposer_toolbox
+
+        t_out = proposer_toolbox.run(p_in, policy.version, policy, log, llm, round_)
+        edit, candidate = proposer_toolbox.apply(t_out, policy_text, log, pattern, research, round_, root)
+    else:
+        p_out = proposer.run(p_in, policy.version, policy, log, llm)
+        edit, candidate = proposer.apply(p_out, policy_text, log, pattern, research, round_, root)
     result.edit, result.candidate_path, result.outcome = edit, candidate, "candidate"
     result.refs["edit"] = save_record(edit, round_, root)
     return result
@@ -524,8 +530,9 @@ def _check_logged_edit(base_text: str, candidate_text: str, edit: PolicyEdit, lo
     action = edit.action or "add"
     try:
         base, candidate = parse_policy(base_text), parse_policy(candidate_text)
+        kind = (edit.rule_id or "C")[:1]  # an addition's kind is in its logged ID: C rule, K card, E examples
         expected, rule_id = apply_edit(base, action, None if action == "add" else edit.rule_id, edit.rule_text,
-                                       candidate.version, used_ids=log.used_rule_ids())
+                                       candidate.version, used_ids=log.used_rule_ids(), kind=kind)
     except PolicyEditError as exc:
         raise PolicyChanged(f"{candidate_path} is not the base policy with {edit.id} applied ({exc}); "
                             "nothing was written") from exc
