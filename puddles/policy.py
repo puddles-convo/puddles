@@ -6,10 +6,18 @@ import os
 import re
 from dataclasses import dataclass, field
 
-RULE_RE = re.compile(r"^([SC])(\d+)\.\s+(.*)$")
+# S: safety, C: conversation rule. K (skill card) and E (examples) are the proposer's toolbox
+# (PUDDLES_PROPOSER=toolbox); they live in their own sections but are edited, gated and replayed
+# exactly like conversation rules. A policy with no K or E items renders byte for byte as before.
+RULE_RE = re.compile(r"^([SCKE])(\d+)\.\s+(.*)$")
 SAFETY_HEADER_RE = re.compile(r"^## Safety\b")
 CONVERSATION_HEADER_RE = re.compile(r"^## Conversation\b")
-TOKEN_CAP = 800
+SKILLS_HEADER = "## Skills (use a card only when its situation fits)"
+EXAMPLES_HEADER = "## Examples (how good human supporters replied; follow the spirit, never copy the words)"
+SKILLS_HEADER_RE = re.compile(r"^## Skills\b")
+EXAMPLES_HEADER_RE = re.compile(r"^## Examples\b")
+ITEM_KINDS = ("C", "K", "E")
+TOKEN_CAP = int(os.environ.get("PUDDLES_TOKEN_CAP", "800"))
 TYPICAL_RULE_TOKENS = 60
 # Conversation rules the setting PROTECT_SETTING protects like the Safety section: C8 recommends a
 # counsellor or doctor. Off by default; it was on during the run of 2026-11-15 (spec 3.3).
@@ -47,12 +55,16 @@ def parse_policy(text: str) -> Policy:
     section: dict[str, str] | None = None
     last_id = None
     for line in lines[1:]:
-        if section is policy.safety and not CONVERSATION_HEADER_RE.match(line):
+        later_header = (CONVERSATION_HEADER_RE.match(line) or SKILLS_HEADER_RE.match(line)
+                        or EXAMPLES_HEADER_RE.match(line))
+        if section is policy.safety and not later_header:
             policy.safety_lines.append(line)
         if SAFETY_HEADER_RE.match(line):
             policy.safety_header, section = line, policy.safety
         elif CONVERSATION_HEADER_RE.match(line):
             policy.conversation_header, section = line, policy.conversation
+        elif SKILLS_HEADER_RE.match(line) or EXAMPLES_HEADER_RE.match(line):
+            section = policy.conversation  # K and E items: edited like conversation rules
         elif (m := RULE_RE.match(line)) and section is not None:
             last_id = m.group(1) + m.group(2)
             section[last_id] = m.group(3).strip()
@@ -74,7 +86,11 @@ def _safety_block(policy: Policy) -> list[str]:
 def render_policy(policy: Policy) -> str:
     out = [f"# {policy.version}", ""] + _safety_block(policy)
     out += ["", policy.conversation_header]
-    out += [f"{rid}. {text}" for rid, text in policy.conversation.items()]
+    out += [f"{rid}. {text}" for rid, text in policy.conversation.items() if rid.startswith("C")]
+    for kind, header in (("K", SKILLS_HEADER), ("E", EXAMPLES_HEADER)):
+        items = [f"{rid}. {text}" for rid, text in policy.conversation.items() if rid.startswith(kind)]
+        if items:
+            out += ["", header] + items
     return "\n".join(out) + "\n"
 
 
@@ -90,17 +106,21 @@ def at_length_limit(policy_text: str, cap: int = TOKEN_CAP) -> bool:
     return estimate_tokens(policy_text) + TYPICAL_RULE_TOKENS > cap
 
 
-def next_rule_id(used_ids: set[str]) -> str:
-    numbers = [int(r[1:]) for r in used_ids if r.startswith("C") and r[1:].isdigit()]
-    return f"C{max(numbers, default=0) + 1}"
+def next_rule_id(used_ids: set[str], kind: str = "C") -> str:
+    numbers = [int(r[1:]) for r in used_ids if r and r.startswith(kind) and r[1:].isdigit()]
+    return f"{kind}{max(numbers, default=0) + 1}"
 
 
 def apply_edit(policy: Policy, action: str, rule_id: str | None, rule_text: str | None,
-               new_version: str, used_ids: frozenset[str] | set[str] = frozenset()) -> tuple[Policy, str]:
+               new_version: str, used_ids: frozenset[str] | set[str] = frozenset(),
+               kind: str = "C") -> tuple[Policy, str]:
     """Return the candidate policy and the rule ID the edit touched.
 
     `used_ids` holds every rule ID ever used, so a removed rule's ID is never reused.
+    `kind` names what an addition adds: C a conversation rule, K a skill card, E examples.
     """
+    if kind not in ITEM_KINDS:
+        raise PolicyEditError(f"unknown item kind {kind!r}")
     if rule_id and rule_id.startswith("S"):
         raise PolicyEditError(f"rule {rule_id} is a protected safety rule")
     if rule_id in protected_rule_ids():
@@ -111,7 +131,7 @@ def apply_edit(policy: Policy, action: str, rule_id: str | None, rule_text: str 
             raise PolicyEditError("an addition must not name a rule_id")
         if not rule_text:
             raise PolicyEditError("an addition needs rule_text")
-        rule_id = next_rule_id(set(used_ids) | policy.rule_ids())
+        rule_id = next_rule_id(set(used_ids) | policy.rule_ids(), kind)
         conversation[rule_id] = rule_text.strip()
     elif action in ("reword", "remove"):
         if rule_id not in conversation:

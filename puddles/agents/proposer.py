@@ -144,12 +144,14 @@ def run(inp: ProposerInput, base_version: str, policy: Policy, log: DecisionLog,
 
 
 def apply(out: ProposerOutput, policy_text: str, log: DecisionLog, pattern: FailurePattern,
-          research: ResearchNote, round_: int, root: Path) -> tuple[PolicyEdit, Path]:
-    """Code applies the one edit and writes the candidate file; the model never writes the policy."""
+          research: ResearchNote, round_: int, root: Path, kind: str = "C") -> tuple[PolicyEdit, Path]:
+    """Code applies the one edit and writes the candidate file; the model never writes the policy.
+
+    `kind` is what an addition adds (C rule; K skill card and E examples from the toolbox proposer)."""
     policy = parse_policy(policy_text)
     new_version = candidate_version(policy.version)
     candidate, rule_id = apply_edit(policy, out.action, out.rule_id, out.rule_text, new_version,
-                                    used_ids=log.used_rule_ids())
+                                    used_ids=log.used_rule_ids(), kind=kind)
     rel = f"policies/{new_version}-r{round_:02d}.md"  # one file per round, so logged hashes stay valid
     (root / "policies").mkdir(parents=True, exist_ok=True)
     (root / rel).write_text(render_policy(candidate))

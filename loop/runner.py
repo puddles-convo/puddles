@@ -1,9 +1,12 @@
 """Running simulated conversations, one at a time or as a batch."""
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from os import PathLike
@@ -114,6 +117,16 @@ def failures_path(out_path: str | PathLike[str]) -> Path:
     return Path(out_path).with_suffix(".failures.jsonl")
 
 
+def conversation_workers() -> int:
+    """PUDDLES_CONVERSATION_WORKERS: conversations run at once in a batch (default 1, one after another)."""
+    raw = os.environ.get("PUDDLES_CONVERSATION_WORKERS", "").strip()
+    if not raw:
+        return 1
+    if not raw.isdigit() or not 1 <= int(raw) <= 32:
+        raise ValueError(f"PUDDLES_CONVERSATION_WORKERS={raw!r}: must be a whole number from 1 to 32")
+    return int(raw)
+
+
 def run_batch(helper_client: ChatClient, user_client: ChatClient, policy: Policy,
               scenarios: Sequence[Scenario], *, round: int, max_turns: int = 10,
               seed: int | None = None, out_path: str | PathLike[str] | None = None,
@@ -125,13 +138,26 @@ def run_batch(helper_client: ChatClient, user_client: ChatClient, policy: Policy
     """
     conversation_id(round, "", tag)  # a bad tag is the caller's mistake, not a failed conversation
     result = BatchResult(records=[], failures=[], round=round)
-    for scenario in scenarios:
+
+    def one(scenario: Scenario):
         try:
-            result.records.append(run_conversation(
-                helper_client, user_client, policy, scenario,
-                round=round, max_turns=max_turns, seed=seed, now=now, tag=tag))
+            return run_conversation(helper_client, user_client, policy, scenario,
+                                    round=round, max_turns=max_turns, seed=seed, now=now, tag=tag)
         except ConversationFailed as exc:
-            result.failures.append(Failure(exc.scenario_id, exc.reason))
+            return Failure(exc.scenario_id, exc.reason)
+
+    workers = conversation_workers()
+    if workers > 1 and len(scenarios) > 1:
+        # Each conversation runs in a copy of this context, so the usage meter and the trace
+        # still see it; results are kept in scenario order, so files are as a sequential run's.
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            # the copies are made here, in the calling thread: a copy made inside a worker is empty
+            contexts = [contextvars.copy_context() for _ in scenarios]
+            outcomes = list(pool.map(lambda pair: pair[0].run(one, pair[1]), zip(contexts, scenarios)))
+    else:
+        outcomes = [one(sc) for sc in scenarios]
+    for outcome in outcomes:
+        (result.failures if isinstance(outcome, Failure) else result.records).append(outcome)
     if out_path is not None:
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)

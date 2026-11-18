@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import uuid
 from contextlib import contextmanager
+import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -208,6 +209,23 @@ class Meter:
             if u.searches:
                 out[f"searches.{agent}"] = u.searches
         return out
+
+
+def _locked(method):
+    """Meter methods change shared tallies and append to one file: one thread at a time
+    (conversations may run in parallel, PUDDLES_CONVERSATION_WORKERS in loop/runner.py)."""
+    def wrapper(self, *args, **kwargs):
+        with _METER_LOCK:
+            return method(self, *args, **kwargs)
+    wrapper.__name__, wrapper.__doc__ = method.__name__, method.__doc__
+    return wrapper
+
+
+_METER_LOCK = threading.RLock()
+for _name in ("start_round", "sent", "done", "note_done", "search_sent", "search_done",
+              "first_answer_failed", "failed", "cost_usd", "metrics"):
+    if hasattr(Meter, _name):
+        setattr(Meter, _name, _locked(getattr(Meter, _name)))
 
 
 def read_usage(path: Path | str) -> list[dict]:

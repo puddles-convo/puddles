@@ -1,0 +1,20 @@
+{
+  "policy_version": "policy-v4",
+  "run": 4,
+  "n": 20,
+  "seconds": 296.70277350000106,
+  "input_tokens": 281638,
+  "output_tokens": 19183,
+  "cost_usd": 0.3318297,
+  "conversations_failed": [],
+  "unscored": [],
+  "complete": true,
+  "empathy": 3.75,
+  "relevance": 3.95,
+  "quality": 3.85,
+  "emotion_change": 0.4,
+  "seed": 7,
+  "max_turns": 6,
+  "judge_version": "judge-fallback-v1-d30d3e41",
+  "scenario_ids_sha256": "d66da9321e8fbd3cefd3f08abc43ac4bfa3f666682bc4bf81b8fae911455fa3d"
+}
