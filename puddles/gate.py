@@ -296,6 +296,8 @@ def _score(deps: GateDeps, policy: Policy, scenario_ids: list[str], round_: int,
             except Exception:  # noqa: BLE001
                 invalid.append(cid)
                 raise
+            if checked.conversation_id != cid:  # the copy is what is saved: it must be this conversation's too
+                raise GateError(f"the judge gave no score for {cid}")
             scores.append(checked)
         except Exception:  # noqa: BLE001  that conversation is unscored; the rest are still scored
             unscored.append(cid)
