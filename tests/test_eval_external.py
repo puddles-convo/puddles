@@ -265,11 +265,12 @@ def test_overall_score_variants():
 
 def test_cli_rejects_non_empty_output(tmp_path, monkeypatch):
     import subprocess
+    import sys
     out = tmp_path / "out"
     out.mkdir()
     (out / "x").write_text("y")
     proc = subprocess.run(
-        [".venv/bin/python", "-m", "puddles.eval.external",
+        [sys.executable, "-m", "puddles.eval.external",
          "--policy", "x.md", "--system", "s", "--output", str(out)],
         capture_output=True, text=True)
     assert proc.returncode != 0
