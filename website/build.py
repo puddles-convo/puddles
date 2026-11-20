@@ -161,7 +161,9 @@ def contents_box(contents: list[tuple[str, str]]) -> str:
 
 
 def build(out: Path = OUT) -> Site:
-    if out.exists():
+    if out.exists() and any(out.iterdir()):
+        if not (out / ".nojekyll").is_file() or (out / ".git").exists():  # only an earlier build is ever deleted
+            raise ValueError(f"{out} is not empty and is not an earlier build of the site; choose another --out")
         shutil.rmtree(out)
     site = Site(out)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
