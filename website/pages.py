@@ -105,6 +105,7 @@ EXPLORE = (("site:demo.html", "Replay the records", "Recorded conversations, the
            ("site:results.html", "Results", "What was measured, what broke, and what is still wrong."),
            ("site:runs.html", "The runs", "Every recorded run with its numbers, its cost and its report."),
            ("site:design.html", "The design in depth", "Agents, models, memory, the gate and how a change reaches the policy."),
+           ("site:run-it.html", "Run it yourself", "Install it, run the tests and one text conversation, all offline with no key."),
            ("site:vision.html", "Vision", "What Puddles is for, what it is not, and what stands between it and real use."))
 DOC_GROUPS = (("The agents", ("docs/agents.md", "docs/agent-prompts.md", "docs/agents/")), ("Memory", ("docs/memory.md", "docs/memory-summary.md", "docs/research/memory/")),
               ("Specifications", ("docs/specs/",)), ("The robot", ("docs/robot-handover.md",)), ("The build plan", ("docs/plan/",)),
