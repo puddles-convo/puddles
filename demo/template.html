@@ -342,9 +342,9 @@ function sessionMemos(sn, done) {
     ? memo("Puddles starts with " + plural(sn.notes_given.length, "note") + " from earlier sessions", sn.notes_given.map(n => [null, n.fact]))
     : h("div", {class: "memo"}, "First session: Puddles has no notes about this person yet.");
   if (done && sn.changes) {
-    const c = sn.changes, items = [...c.added.map(n => ["Saved", n.fact]), ...c.replaced.map(n => ["Updated", n.fact]),
+    const c = sn.changes, items = [...c.added.map(n => ["Saved", n.fact]), ...c.replaced.map(n => ["Replaced, no longer kept", n.fact, true]),
       ...c.confirmed.map(n => ["Still true", n.fact]), ...c.deleted.map(n => ["Forgotten", n.fact, true])];
-    const counts = [[c.added, "saved"], [c.replaced, "updated"], [c.confirmed, "confirmed"], [c.deleted, "forgotten"]]
+    const counts = [[c.added, "saved"], [c.replaced, "replaced"], [c.confirmed, "confirmed"], [c.deleted, "forgotten"]]
       .filter(([list]) => list.length).map(([list, word]) => list.length + " " + word).join(", ");
     out.after = memo("After this session, the note-taker's notes: " + (counts || "no change"), items, true);
   }
