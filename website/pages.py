@@ -120,11 +120,6 @@ def home(data: dict) -> str:
 <section class="three"><div><h2>It learns one change at a time</h2><p>Seven steps turn the weakest conversations into at most one change to the policy. A gate written in code, with no model, tests the change on validation conversations and safety cases, and restores the previous policy if it is not better.</p><p><a href="site:how-it-works.html">The training loop</a></p></div>
 <div><h2>Nothing is spoken until the crisis check has answered</h2><p>Each message goes to a keyword check, a crisis checker and the helper at once. On a crisis the helper's draft is discarded and a fixed response with 988 is spoken instead.</p><p><a href="site:how-it-works.html#the-live-conversation">The live conversation</a></p></div>
 <div><h2>It remembers only with consent</h2><p>The policy is the same for everyone. What is personal is a short set of notes, kept only if the person agreed, loaded at the start of the next session and removed from active memory on request.</p><p><a href="site:results.html#memory-across-sessions">Memory across sessions</a></p></div></section>
-<section><h2>What this does not show</h2><ul class="plain">
-<li>{claim("Every message and persona is synthetic, written by models, and the simulated users are models too.", "README.md")}</li>
-<li>{claim("No clinician reviewed the messages, the labels, the fixed responses or the replies.", "README.md")}</li>
-<li>{claim("Nothing here shows that anyone's mental health improves. That needs a study with real users.", "README.md")}</li>
-<li>{claim("Nothing here is a safety validation or an estimate of real-world safety.", "README.md")}</li></ul><p><a href="site:limits.html">All limits and known problems</a></p></section>
 <section><h2>Explore</h2><div class="cards">{cards}</div></section>
 <section><h2>Built with</h2><div class="tools">{"".join(f'<a href="{h}"><small>{html.escape(html.unescape(role))}</small><b>{html.escape(html.unescape(tool))}</b></a>' for h, role, tool in tools)}</div></section>"""
 
