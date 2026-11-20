@@ -8,6 +8,32 @@ Many people have no one to talk to at the moment they need it. Puddles is a smal
 
 The harder question is how such a helper gets better without getting less safe. A model that is tuned by hand improves only as fast as someone reads its transcripts, and a model that tunes itself can drift. Vibe Therapist is an attempt at the middle: a helper that improves its own behaviour, one small written change at a time, with every change tested before it is kept and every decision kept on record.
 
+## Why safety comes first
+
+People already bring their worst moments to chatbots, and it has gone wrong in public. In October 2024 a Florida mother sued a companion-chatbot company, alleging that its product presented itself to her 14-year-old son as a real person and a licensed psychotherapist, and that he had told it about his thoughts of suicide before he died ([Reuters](https://www.reuters.com/legal/mother-sues-ai-chatbot-company-characterai-google-sued-over-sons-suicide-2024-10-23/)). More families filed similar suits, and in January 2026 the companies agreed to settle several of them ([AP](https://apnews.com/article/ai-chatbot-lawsuits-character-google-fbca4e105b0adc5f3e5ea096851437de)). These are allegations in lawsuits, not findings of a court, but they name the failures a support helper must not have: claiming to be a person or a therapist, and carrying on when someone says they want to die.
+
+That is why the safety parts of this project are code and fixed text, not a model's judgement: the helper must say it is a robot, a crisis statement gets a fixed response with the 988 number instead of the model's draft, and the loop that improves the helper is not allowed to edit the safety rules.
+
+## Why an open-weight model tuned for this, not a frontier model
+
+This section is the team's reasoning. It has not been measured.
+
+- **The behaviour can be owned.** A hosted frontier model changes when its provider updates it, and its training cannot be inspected. With open weights the model that was tested is the model that runs, and each change to it can go through the gate.
+- **One narrow job.** A support helper does not need to write code or pass exams. It needs to listen well and to stop when it should. A small model can be trained on exactly that and tested on exactly that.
+- **Privacy and cost.** What people say to Puddles is sensitive. A model we serve ourselves keeps those words off a third party's general-purpose API, and a 9-billion-parameter model is cheap enough to run for a desk robot.
+
+The honest state today: the recorded training run used a hosted model, `gpt-6-luna`, as the helper. The loop also runs end to end with our own Qwen3.5-9B served on Modal, but that helper started far lower (quality 2.67 against 3.50) and failed one medication safety case in its only complete round. Closing that gap is the work. [The findings](results/FINDINGS-2026-11-15.md).
+
+## The fine-tuning
+
+Rules can only do so much for a small model, so the loop can also train the helper's weights between rounds.
+
+- **When.** After three rounds in which no rule change was kept, the loop trains an adapter instead of proposing another rule.
+- **How.** The helper writes several replies to the same moment in a conversation and the judge scores them. DPO trains the model to prefer the best reply over the worst; GRPO, the fallback, weights every reply by how far it is above or below the group. Training is a LoRA adapter on Tinker.
+- **The same gate.** A new adapter is kept only if quality rises by more than the noise and safety does not get worse, exactly as for a rule change.
+
+This is built and tested offline only. No adapter has been trained on a live run yet. [The specification](docs/specs/weight-training.md).
+
 ## What we are building
 
 **A helper whose behaviour is a readable file.** What Puddles does is set by a policy: a short list of numbered rules that anyone can read, question and diff. Improvement means a change to that file, not an opaque change to a model. [See the policy the run ended with](policies/training-2026-11-15/policy-v4.md).
