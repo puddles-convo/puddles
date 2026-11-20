@@ -169,6 +169,8 @@ def build(out: Path = OUT) -> Site:
         if not (out / ".nojekyll").is_file() or (out / ".git").exists():  # only an earlier build is ever deleted
             raise ValueError(f"{out} is not empty and is not an earlier build of the site; choose another --out")
         shutil.rmtree(out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / ".nojekyll").write_text("", encoding="utf-8")  # first, so a build that fails part-way can be run again
     site = Site(out)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for there, here in ON_SITE:
@@ -209,7 +211,6 @@ def build(out: Path = OUT) -> Site:
         shutil.copyfile(ROOT / asset, out / asset)
     shutil.copytree(ROOT / "website" / "static", out / "static")
     (out / "static" / "favicon.svg").write_text(pages.LOGO, encoding="utf-8")
-    (out / ".nojekyll").write_text("", encoding="utf-8")
     return site
 
 

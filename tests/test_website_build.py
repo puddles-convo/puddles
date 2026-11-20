@@ -75,3 +75,15 @@ def test_a_bare_url_is_a_link_and_a_file_name_is_not():
     body = build.render("See https://arxiv.org/abs/2304.03442 and memory.md and docs/agents.md.")[0]
     assert '<a href="https://arxiv.org/abs/2304.03442">' in body
     assert body.count("<a ") == 1
+
+
+def test_a_build_that_failed_part_way_can_be_run_again(tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise ValueError("a content check failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(build.pages, "written", fail)
+        with pytest.raises(ValueError, match="a content check failed"):
+            build.build(tmp_path)
+    assert any(tmp_path.iterdir())
+    assert "index.html" in build.build(tmp_path).written
