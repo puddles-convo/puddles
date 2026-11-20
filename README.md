@@ -91,6 +91,8 @@ Inference is the live conversation with a person. The policy is fixed for the wh
 
 <p><i>One unattended training run, and the inference text path on real models</i></p>
 
+[Replay page](demo/index.html) (download and open locally): the recorded conversations with what happened behind each reply, the 13 rounds step by step, and `policy-v1` against `policy-v4` on the same scenarios. It is built from the records below by `python -m demo.build` and calls no model.
+
 **The training run of 15 November.** The loop started at 03:02 and stopped itself at 06:40 after 13 rounds: 3 changes kept, 7 reverted, 3 rounds with no candidate. It made 4,832 model calls for $6.67 by the run's usage log. The final policy, [`policy-v4`](policies/training-2026-11-15/policy-v4.md), differs from the starting policy in two rules, keeps its safety rules unchanged and passed all 19 safety cases.
 
 Quality is the average of empathy and relevance, each scored 1 to 5, on two fresh sets of the same 20 validation scenarios (40 conversations per policy). The final judge took no part in the loop.
