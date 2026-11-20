@@ -46,6 +46,8 @@ README_PAGES = (("how-it-works.html", "How it works", ("How it learns", "The liv
 
 CURRENT = ' aria-current="page"'
 MD = MarkdownIt("commonmark", {"html": True, "linkify": True}).enable(["table", "strikethrough", "linkify"])
+# Only a URL written with its scheme becomes a link: `memory.md` is a file name, not the address http://memory.md.
+MD.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
 
 
 class Site:

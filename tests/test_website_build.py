@@ -69,3 +69,9 @@ def test_the_build_deletes_only_an_earlier_build(tmp_path):
 def test_a_second_build_replaces_the_first(site):
     again = build.build(site.out)
     assert again.written == site.written and not (site.out / "notes.txt").exists()
+
+
+def test_a_bare_url_is_a_link_and_a_file_name_is_not():
+    body = build.render("See https://arxiv.org/abs/2304.03442 and memory.md and docs/agents.md.")[0]
+    assert '<a href="https://arxiv.org/abs/2304.03442">' in body
+    assert body.count("<a ") == 1
