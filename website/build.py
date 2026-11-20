@@ -3,7 +3,7 @@
     python -m website.build              # write website/_site
     python -m website.build --out DIR    # write somewhere else
 
-Needs markdown-it-py (website/requirements.txt). Text pages are the repository's Markdown files, rendered; the
+Needs markdown-it-py and linkify-it-py (website/requirements.txt). Text pages are the repository's Markdown files, rendered; the
 hand-written pages are in website/pages.py, and every number they quote is checked against the file it comes from.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ README_PAGES = (("how-it-works.html", "How it works", ("How it learns", "The liv
                 ("run-it.html", "Run it yourself", ("Quick start",)))
 
 CURRENT = ' aria-current="page"'
-MD = MarkdownIt("commonmark", {"html": True}).enable("table").enable("strikethrough")
+MD = MarkdownIt("commonmark", {"html": True, "linkify": True}).enable(["table", "strikethrough", "linkify"])
 
 
 class Site:
