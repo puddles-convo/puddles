@@ -3,8 +3,9 @@
     python -m website.build              # write website/_site
     python -m website.build --out DIR    # write somewhere else
 
-Needs markdown-it-py and linkify-it-py (website/requirements.txt). Text pages are the repository's Markdown files, rendered; the
-hand-written pages are in website/pages.py, and every number they quote is checked against the file it comes from.
+Needs markdown-it-py and linkify-it-py (website/requirements.txt). Text pages are the repository's Markdown files,
+rendered; the hand-written pages are in website/pages.py, and every number they quote is checked against the file it
+comes from.
 """
 from __future__ import annotations
 

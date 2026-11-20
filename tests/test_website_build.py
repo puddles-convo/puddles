@@ -53,3 +53,19 @@ def test_the_home_page_draws_the_run_from_its_records(site):
     home = (site.out / "index.html").read_text(encoding="utf-8")
     assert home.count("<title>Round ") == 10  # the ten rounds that reached the gate
     assert home.count('r="6.5"') == 10 and "gpt-6-luna" in home and "Qwen3.5-9B" in home
+
+
+def test_the_build_deletes_only_an_earlier_build(tmp_path):
+    (tmp_path / "notes.txt").write_text("mine", encoding="utf-8")
+    with pytest.raises(ValueError, match="not an earlier build"):
+        build.build(tmp_path)
+    assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "mine"
+    (tmp_path / ".nojekyll").write_text("", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    with pytest.raises(ValueError, match="not an earlier build"):
+        build.build(tmp_path)
+
+
+def test_a_second_build_replaces_the_first(site):
+    again = build.build(site.out)
+    assert again.written == site.written and not (site.out / "notes.txt").exists()
