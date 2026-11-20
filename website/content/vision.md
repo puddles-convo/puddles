@@ -12,7 +12,7 @@ The harder question is how such a helper gets better without getting less safe. 
 
 People already bring their worst moments to chatbots, and it has gone wrong in public. In October 2024 a Florida mother sued a companion-chatbot company, alleging that its product presented itself to her 14-year-old son as a real person and a licensed psychotherapist, and that he had told it about his thoughts of suicide before he died ([Reuters](https://www.reuters.com/legal/mother-sues-ai-chatbot-company-characterai-google-sued-over-sons-suicide-2024-10-23/)). More families filed similar suits, and in January 2026 the companies agreed to settle several of them ([AP](https://apnews.com/article/ai-chatbot-lawsuits-character-google-fbca4e105b0adc5f3e5ea096851437de)). These are allegations in lawsuits, not findings of a court, but they name the failures a support helper must not have: claiming to be a person or a therapist, and carrying on when someone says they want to die.
 
-That is why the safety parts of this project are code and fixed text, not a model's judgement: the helper must say it is a robot, a crisis statement gets a fixed response with the 988 number instead of the model's draft, and the loop that improves the helper is not allowed to edit the safety rules.
+That is why safety is built into the structure here and not left to the helper's reply. The policy's protected Safety section tells the helper not to claim to be a therapist or a person, and no edit by the loop may change that section. Every message goes to a keyword list in code and to a separate crisis checker, nothing is spoken until the checker has answered, and on a crisis the helper's draft is discarded for a fixed response with the 988 number. None of this has been validated as safe: the checker is itself a model, it has made recorded mistakes, and no clinician has reviewed it. [Limits](site:limits.html).
 
 ## Why an open-weight model tuned for this, not a frontier model
 
@@ -20,19 +20,19 @@ This section is the team's reasoning. It has not been measured.
 
 - **The behaviour can be owned.** A hosted frontier model changes when its provider updates it, and its training cannot be inspected. With open weights the model that was tested is the model that runs, and each change to it can go through the gate.
 - **One narrow job.** A support helper does not need to write code or pass exams. It needs to listen well and to stop when it should. A small model can be trained on exactly that and tested on exactly that.
-- **Privacy and cost.** What people say to Puddles is sensitive. A model we serve ourselves keeps those words off a third party's general-purpose API, and a 9-billion-parameter model is cheap enough to run for a desk robot.
+- **Privacy and cost.** What people say to Puddles is sensitive. Open weights can be run on hardware the team controls, and a small model is cheaper to serve. This is not true yet: today the Qwen helper is served on Modal, and a trained adapter is served by Tinker by default.
 
-The honest state today: the recorded training run used a hosted model, `gpt-6-luna`, as the helper. The loop also runs end to end with our own Qwen3.5-9B served on Modal, but that helper started far lower (quality 2.67 against 3.50) and failed one medication safety case in its only complete round. Closing that gap is the work. [The findings](results/FINDINGS-2026-11-15.md).
+The honest state today: the recorded training run used a hosted model, `gpt-6-luna`, as the helper. The loop also runs end to end with Qwen3.5-9B served on Modal, in two smoke rounds. In the one that completed, Qwen started lower (quality 2.67 against 3.50 for `gpt-6-luna` on the same gate), and the proposed change was reverted: its gain was below the noise and its reply to a medication safety case gave dose advice. Whether Qwen fails that case under the starting policy too has not been checked. Closing that gap is the work. [The findings](results/FINDINGS-2026-11-15.md).
 
 ## The fine-tuning
 
 Rules can only do so much for a small model, so the loop can also train the helper's weights between rounds.
 
-- **When.** After three rounds in which no rule change was kept, the loop trains an adapter instead of proposing another rule.
+- **When.** After three rounds in which no rule change was kept, the loop starts a training run, up to three runs in all.
 - **How.** The helper writes several replies to the same moment in a conversation and the judge scores them. DPO trains the model to prefer the best reply over the worst; GRPO, the fallback, weights every reply by how far it is above or below the group. Training is a LoRA adapter on Tinker.
-- **The same gate.** A new adapter is kept only if quality rises by more than the noise and safety does not get worse, exactly as for a rule change.
+- **The same kind of gate.** The policy stays fixed and only the weights change. A new adapter is kept only if quality rises by more than the noise, every safety case passes, and no fewer pass than before.
 
-This is built and tested offline only. No adapter has been trained on a live run yet. [The specification](docs/specs/weight-training.md).
+What exists today: the code, with offline tests, and one smoke run on Tinker (Qwen3.5-9B, 15 November) that took a single DPO step and a single GRPO step and got a reply from the saved weights. That run ranked replies by length, not with the judge. No full loop with the gate has trained an adapter, no safety data is mixed into training, and the loop's own judge is the reward, so the model could learn to please the judge. [The specification](docs/specs/weight-training.md).
 
 ## What we are building
 
