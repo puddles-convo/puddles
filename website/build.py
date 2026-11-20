@@ -24,6 +24,13 @@ from website import pages
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "website" / "_site"
 REPO = "https://github.com/puddles-convo/vibe-therapist"
+PUBLIC = "https://puddles-convo.github.io/vibe-therapist"  # where GitHub Pages serves the site; link previews need it
+PRIVATE = "https://github.com/puddles-convo/puddles-stack"  # a private repository: visitors get a 404, so no link
+# Wording in README.md that is only right on GitHub, and what the site says in its place.
+ON_SITE = ((" (download and open locally)", ""),
+           ("this branch also implements", "the current code also implements"),
+           ("which this branch now implements", "which the current code now implements"),
+           ("is now implemented on this branch", "is now implemented"))
 MARKDOWN = ("docs/**/*.md", "results/**/*.md", "figures/*.md", "policies/**/*.md")
 COPIED = ("demo/index.html", "figures/fig1-player.html", "figures/fig2-player.html", "docs/media/puddles-robot.png")
 ASSET = {".html", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -67,8 +74,8 @@ class Site:
             return url
         target = posixpath.normpath(posixpath.join(posixpath.dirname(source), path))
         if target.startswith("..") or not (ROOT / target).exists():
-            self.missing.append(f"{source}: {url}")  # broken in the repository too; on the site it leads to GitHub
-            return url if target.startswith("..") else f"{REPO}/blob/main/{target}"
+            self.missing.append(f"{source}: {url}")  # broken in the repository too; on the site it is plain text
+            return "missing:"
         if target == "README.md":
             return self.url(self.anchors.get(fragment, "index.html"), page, fragment)
         if target in self.page_of:
@@ -84,13 +91,16 @@ class Site:
             url = self.resolve(m.group(1), html.unescape(m.group(2)), source, page)
             return f'{m.group(1)}="{html.escape(url)}"'
 
-        return re.sub(r'\b(href|src)="([^"]*)"', rewrite, body)
+        body = re.sub(rf'<a\b[^>]*\bhref="{re.escape(PRIVATE)}[^"]*"[^>]*>(.*?)</a>',
+                      r'<span title="In a private repository">\1</span>', body, flags=re.S)
+        body = re.sub(r'\b(href|src)="([^"]*)"', rewrite, body)
+        return re.sub(r'<a\b[^>]*\bhref="missing:"[^>]*>(.*?)</a>', r"\1", body, flags=re.S)
 
     def write(self, page: str, title: str, body: str, *, active: str, wide: bool = False) -> None:
         root = posixpath.relpath(".", posixpath.dirname(page) or ".")
         nav = "".join(f'<a href="{root}/{href}"{CURRENT if href == active else ""}>{label}</a>' for href, label in NAV)
         text = pages.SHELL.format(title=html.escape(title), root=root, nav=nav, body=body, repo=REPO,
-                                  logo=pages.LOGO, main="wide" if wide else "doc")
+                                  logo=pages.LOGO, main="wide" if wide else "doc", public=PUBLIC, page=page)
         path = self.out / page
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -120,7 +130,15 @@ def render(text: str) -> tuple[str, str | None, list[tuple[str, str]]]:
             contents.append((ident, words))
     body = MD.renderer.render(tokens, MD.options, {})
     body = body.replace("<table>", '<div class="tablewrap"><table>').replace("</table>", "</table></div>")
+    # A figure gets a box of its own, which scrolls sideways on a phone.
+    body = re.sub(r"<p>(<img [^>]*>)</p>", r'<div class="figure">\1</div>', body)
     return body, title, contents
+
+
+def title_of(source: str, heading: str | None, text: str) -> str:
+    """The page title of a document: its level-1 heading, or else its first line if that is short."""
+    first = re.sub(r"[*_`#]", "", next((line for line in text.splitlines() if line.strip()), "")).strip()
+    return heading or (first if 0 < len(first) <= 80 else source)
 
 
 def section(text: str, heading: str, level: int = 2) -> str:
@@ -147,6 +165,10 @@ def build(out: Path = OUT) -> Site:
         shutil.rmtree(out)
     site = Site(out)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for there, here in ON_SITE:
+        if there not in readme:
+            raise ValueError(f"README.md no longer says {there!r}; update ON_SITE in website/build.py")
+        readme = readme.replace(there, here)
     sources = sorted({p.relative_to(ROOT).as_posix() for pattern in MARKDOWN for p in ROOT.glob(pattern)})
     site.page_of = {s: s[:-3] + ".html" for s in sources}
 
@@ -162,14 +184,16 @@ def build(out: Path = OUT) -> Site:
                    + site.links(body, "README.md", page),
                    active=page if page in dict(NAV) else "how-it-works.html")
 
+    titles: dict[str, str] = {}
     for source in sources:
         page = site.page_of[source]
-        body, heading, contents = render((ROOT / source).read_text(encoding="utf-8"))
+        text = (ROOT / source).read_text(encoding="utf-8")
+        body, heading, contents = render(text)
+        titles[source] = title_of(source, heading, text)
         active = "runs.html" if source.startswith("results/") else "docs.html"
-        site.write(page, heading or source, pages.source_line(source, REPO) + contents_box(contents)
+        site.write(page, titles[source], pages.source_line(source, REPO) + contents_box(contents)
                    + site.links(body, source, page), active=active)
 
-    titles = {s: render((ROOT / s).read_text(encoding="utf-8"))[1] or s for s in sources}
     data = {"training": demo.training(), "readme": readme, "titles": titles, "repo": REPO}
     for page, title, source, body, wide in pages.written(data, section, render):
         site.write(page, title, site.links(body, source, page), active=page, wide=wide)
@@ -178,6 +202,7 @@ def build(out: Path = OUT) -> Site:
         (out / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / asset, out / asset)
     shutil.copytree(ROOT / "website" / "static", out / "static")
+    (out / "static" / "favicon.svg").write_text(pages.LOGO, encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
     return site
 

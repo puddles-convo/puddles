@@ -14,15 +14,19 @@ People already bring their worst moments to chatbots, and it has gone wrong in p
 
 That is why safety is built into the structure here and not left to the helper's reply. The policy's protected Safety section tells the helper not to claim to be a therapist or a person, and no edit by the loop may change that section. Every message goes to a keyword list in code and to a separate crisis checker, nothing is spoken until the checker has answered, and on a crisis the helper's draft is discarded for a fixed response with the 988 number. None of this has been validated as safe: the checker is itself a model, it has made recorded mistakes, and no clinician has reviewed it. [Limits](site:limits.html).
 
-## Why an open-weight model tuned for this, not a frontier model
+## Which model: any, and why an open-weight one
 
-This section is the team's reasoning. It has not been measured.
+The loop and the live path do not depend on one model. The helper is whatever model answers at an OpenAI-compatible chat endpoint, chosen by two settings (`HELPER_URL` and `HELPER_MODEL`). Two have been run:
+
+- **`gpt-6-luna`, a hosted model.** The 13-round run and every measured result on this site used it, and it worked well: under the judge that took no part in the loop, quality rose from 3.19 with the starting policy to 3.80 with the final one. [Results](site:results.html).
+- **Qwen3.5-9B, an open-weight model that can be fine-tuned.** Served on Modal, it ran in the loop end to end in two smoke rounds. In the one that completed it started lower (quality 2.67 against 3.50 for `gpt-6-luna` on the same gate), and the proposed change was reverted: its gain was below the noise and its reply to a medication safety case gave dose advice. Whether Qwen fails that case under the starting policy too has not been checked. [The findings](results/FINDINGS-2026-11-15.md).
+
+So a hosted model is the quickest way to a good helper today. Why also work on an open-weight one, tuned for this job? This part is the team's reasoning and has not been measured.
 
 - **The behaviour can be owned.** A hosted frontier model changes when its provider updates it, and its training cannot be inspected. With open weights the model that was tested is the model that runs, and each change to it can go through the gate.
 - **One narrow job.** A support helper does not need to write code or pass exams. It needs to listen well and to stop when it should. A small model can be trained on exactly that and tested on exactly that.
+- **It can be trained, not only instructed.** Rules are all the loop can change in a hosted model. In an open one it can also change the weights, which is the next section.
 - **Privacy and cost.** What people say to Puddles is sensitive. Open weights can be run on hardware the team controls, and a small model is cheaper to serve. This is not true yet: today the Qwen helper is served on Modal, and a trained adapter is served by Tinker by default.
-
-The honest state today: the recorded training run used a hosted model, `gpt-6-luna`, as the helper. The loop also runs end to end with Qwen3.5-9B served on Modal, in two smoke rounds. In the one that completed, Qwen started lower (quality 2.67 against 3.50 for `gpt-6-luna` on the same gate), and the proposed change was reverted: its gain was below the noise and its reply to a medication safety case gave dose advice. Whether Qwen fails that case under the starting policy too has not been checked. Closing that gap is the work. [The findings](results/FINDINGS-2026-11-15.md).
 
 ## The fine-tuning
 

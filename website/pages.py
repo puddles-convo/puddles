@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import html
+import math
 import re
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
+PRIVATE = "https://github.com/puddles-convo/puddles-stack"
 
-LOGO = ('<svg viewBox="0 0 120 120" width="38" height="38" role="img" aria-label="Puddles">'
+LOGO = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="38" height="38" role="img" aria-label="Puddles">'
         '<ellipse cx="60" cy="109" rx="42" ry="7" fill="#cfeaf8"/>'
         '<path d="M60 2C60 2 49 14 49 21a11 11 0 0 0 22 0C71 14 60 2 60 2z" fill="#7ccdf0"/>'
         '<rect x="15" y="21" width="90" height="82" rx="19" fill="#fffdf8" stroke="#e2d6c3" stroke-width="2.5"/>'
@@ -26,6 +28,14 @@ SHELL = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · Vibe Therapist</title>
 <meta name="description" content="A support-conversation helper that improves its own behaviour. A research prototype: not therapy and not a crisis service.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vibe Therapist">
+<meta property="og:title" content="{title} · Vibe Therapist">
+<meta property="og:description" content="A support-conversation helper that improves its own behaviour. A research prototype: not therapy and not a crisis service.">
+<meta property="og:url" content="{public}/{page}">
+<meta property="og:image" content="{public}/docs/media/puddles-robot.png">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/svg+xml" href="{root}/static/favicon.svg">
 <link rel="stylesheet" href="{root}/static/site.css">
 </head>
 <body>
@@ -89,6 +99,7 @@ RUNS = (
     ("Policy-v2 on a small local model", "results/inference-run/README.md",
      "Two scripted conversations through the live turn code with a CPU stand-in model, because the robot's own endpoint was not available.", (), ()),
 )
+VISION_NUMBERS = (("3.19", "README.md"), ("3.80", "README.md"), ("2.67", FIND), ("3.50", FIND), ("Qwen3.5-9B", FIND), ("gpt-6-luna", RUN))
 EXPLORE = (("site:demo.html", "Replay the records", "Recorded conversations, the 13 rounds step by step, and policy-v1 against policy-v4."),
            ("site:how-it-works.html", "How it works", "The training loop and the live conversation path, with the animated figures."),
            ("site:results.html", "Results", "What was measured, what broke, and what is still wrong."),
@@ -100,11 +111,61 @@ DOC_GROUPS = (("The agents", ("docs/agents.md", "docs/agent-prompts.md", "docs/a
               ("Research notes", ("docs/research/reusable", "docs/research/self-")), ("Figures", ("figures/",)), ("Policies", ("policies/",)))
 
 
+def charts(training: dict) -> str:
+    """The 13 rounds at the gate, and the three policies as measured after the run. Drawn from the run's records."""
+    rounds = training["rounds"]
+    gated = [r for r in rounds if r["gate"]]
+    values = [r["gate"][k]["quality"] for r in gated for k in ("before", "after")]
+    lo, hi = math.floor(min(values) * 4) / 4, math.ceil(max(values) * 4) / 4
+    W, H, L, R, T, B = 720, 250, 40, 12, 12, 30
+
+    def x(n: int) -> float:
+        return L + (W - L - R) * (n - .5) / len(rounds)
+
+    def y(q: float) -> float:
+        return T + (H - T - B) * (hi - q) / (hi - lo)
+
+    out = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Quality of each round\'s candidate against the policy in force">']
+    for i in range(round((hi - lo) * 4) + 1):
+        q = lo + i / 4
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y(q):.1f}" y2="{y(q):.1f}" stroke="#eadfd0"/><text x="{L - 6}" y="{y(q) + 4:.1f}" text-anchor="end">{q:.2f}</text>')
+    for r in rounds:
+        n, gate = r["round"], r["gate"]
+        out.append(f'<text x="{x(n):.1f}" y="{H - 10}" text-anchor="middle">{n}</text>')
+        if not gate:
+            out.append(f'<text x="{x(n):.1f}" y="{y(lo) - 8:.1f}" text-anchor="middle" fill="#b8a99d">none</text>')
+            continue
+        before, after, kept = gate["before"]["quality"], gate["after"]["quality"], gate["decision"] == "kept"
+        colour = "#3f8f5f" if kept else "#b8a99d"
+        out.append(f'<g><title>Round {n}: {html.escape(gate["reason"])}</title>'
+                   f'<line x1="{x(n) - 13:.1f}" x2="{x(n) + 13:.1f}" y1="{y(before):.1f}" y2="{y(before):.1f}" stroke="#3b2f2a" stroke-width="3" stroke-linecap="round"/>'
+                   f'<line x1="{x(n):.1f}" x2="{x(n):.1f}" y1="{y(before):.1f}" y2="{y(after):.1f}" stroke="{colour}" stroke-width="2"/>'
+                   f'<circle cx="{x(n):.1f}" cy="{y(after):.1f}" r="6.5" fill="{colour if kept else "#fffdf9"}" stroke="{colour}" stroke-width="2.5"/></g>')
+    out.append("</svg>")
+    final = next(m for m in training["measurements"] if m["scenarios"] == "validation" and m["judge"] == "final")
+    names = {"start": "policy-v1, the starting policy", "control": "Safety rules only, no conversation rules", "final": "policy-v4, the final policy"}
+    bars = "".join(f'<div class="bar{" on" if p["name"] == "final" else ""}"><span>{names[p["name"]]}</span><i style="width:{(p["quality"] - 1) / 4:.1%}"></i><b>{p["quality"]:.2f}</b></div>'
+                   for p in final["policies"])
+    return f"""<section class="charts"><div><h2>The 13 rounds at the gate</h2>
+<p>Each round tests one proposed change against the policy in force (the dark bar), on the same validation scenarios. A change is kept only if it scores higher by more than the noise and every safety case still passes.</p>
+<div class="figure">{"".join(out)}</div>
+<p class="key"><span class="kept"></span> kept ({training["stats"]["kept"]}) <span class="rev"></span> reverted ({training["stats"]["reverted"]}) <span class="none">none</span> no change proposed ({training["stats"]["no_candidate"]}). Quality, 1 to 5, under the loop's judge. <a href="site:demo.html">Replay each round</a></p></div>
+<div><h2>Measured after the run</h2>
+<p>Quality under a judge that took no part in the loop, on {final["n"]} validation scenarios, {final["sets"]} sets each.</p>
+<div class="bars">{bars}</div>
+<p class="key">The people are simulated and the judge is a model, not calibrated against human ratings. <a href="site:results.html">All results</a></p></div></section>"""
+
+
 def home(data: dict) -> str:
     t = data["training"]["stats"]
     assert (t["rounds"], t["kept"], t["reverted"]) == (13, 3, 7), "the training record changed; update the home page"
     tools = re.findall(r'<a href="([^"]+)"><img alt="([^":]+): ([^"]+)"', data["readme"].split("How it learns")[0])
-    tools = [x for x in tools if x[1] not in ("python", "tests")]
+    tools = [x for x in tools if x[1] not in ("python", "tests", "helper")]
+    assert len(tools) == 11, "the README's badges changed; check the home page's Built with"
+    tools = [("docs/specs/provider-settings.md", "helper, the measured runs", "gpt-6-luna"),
+             ("docs/agents/t2-i3-helper.md", "helper, open weights", "Qwen3.5-9B")] + tools
+    built = "".join(f'<{"span" if h.startswith(PRIVATE) else "a"} href="{h}"><small>{html.escape(html.unescape(role))}</small><b>{html.escape(html.unescape(tool))}</b></{"span" if h.startswith(PRIVATE) else "a"}>'
+                    for h, role, tool in tools).replace(f'<span href="{PRIVATE}">', '<span title="In a private repository">')
     cards = "".join(f'<a class="card" href="{h}"><b>{t_}</b><span>{d}</span></a>' for h, t_, d in EXPLORE)
     return f"""<section class="hero"><div><h1>A support-conversation helper that <em>improves its own behaviour</em>.</h1>
 <p>{claim("An offline loop reads the helper's weakest conversations, researches how counsellors handle the failure, proposes one change, and keeps it only if a gate fixed before the run says it is better and still safe.", "README.md")}</p>
@@ -117,14 +178,15 @@ def home(data: dict) -> str:
 {stat("19 safety cases", "all passed by the final policy, whose safety rules the loop may not edit", "README.md")}
 {stat("1202 ms", "median live text turn over HTTP, before speech", "README.md")}
 {stat("44 of the 46", "crisis turns got the fixed response with 988", "README.md")}</section>
+{charts(data["training"])}
 <section class="three"><div><h2>It learns one change at a time</h2><p>Seven steps turn the weakest conversations into at most one change to the policy. A gate written in code, with no model, tests the change on validation conversations and safety cases, and restores the previous policy if it is not better.</p><p><a href="site:how-it-works.html">The training loop</a></p></div>
 <div><h2>Nothing is spoken until the crisis check has answered</h2><p>Each message goes to a keyword check, a crisis checker and the helper at once. On a crisis the helper's draft is discarded and a fixed response with 988 is spoken instead.</p><p><a href="site:how-it-works.html#the-live-conversation">The live conversation</a></p></div>
 <div><h2>It remembers only with consent</h2><p>The policy is the same for everyone. What is personal is a short set of notes, kept only if the person agreed, loaded at the start of the next session and removed from active memory on request.</p><p><a href="site:results.html#memory-across-sessions">Memory across sessions</a></p></div></section>
 <section class="three"><div><h2>Why safety comes first</h2><p>People already bring their worst moments to chatbots, and lawsuits allege it has ended in harm. So here the safety rules are closed to the loop, and a crisis gets a fixed response, not the model's draft. None of it is validated yet. <a href="site:vision.html#why-safety-comes-first">Read the context</a>.</p></div>
-<div><h2>Why an open-weight model</h2><p>The reasoning, not yet measured: a small open model tuned for one job can be tested, owned and changed only through the gate. Today the measured run used a hosted model; our Qwen helper runs in the loop but starts lower. <a href="site:vision.html#why-an-open-weight-model-tuned-for-this-not-a-frontier-model">Read the reasoning</a>.</p></div>
+<div><h2>Any model, and an open-weight one to tune</h2><p>The helper can be any model behind an OpenAI-compatible endpoint. <code>gpt-6-luna</code> gave the measured results and worked well. Qwen3.5-9B, open-weight and tunable, runs in the loop but starts lower. <a href="site:vision.html#which-model-any-and-why-an-open-weight-one">Read the reasoning</a>.</p></div>
 <div><h2>Fine-tuning, behind the same kind of gate</h2><p>When rule changes stop helping, the loop can train the helper's weights with DPO or GRPO and keep the adapter only if it is better and still safe. Built and tested offline; no full run yet. <a href="docs/specs/weight-training.md">Read the specification</a>.</p></div></section>
 <section><h2>Explore</h2><div class="cards">{cards}</div></section>
-<section><h2>Built with</h2><div class="tools">{"".join(f'<a href="{h}"><small>{html.escape(html.unescape(role))}</small><b>{html.escape(html.unescape(tool))}</b></a>' for h, role, tool in tools)}</div></section>"""
+<section><h2>Built with</h2><p class="lead small">The helper can be any model behind an OpenAI-compatible chat endpoint, chosen by two settings. Two were run: {claim("gpt-6-luna", "docs/specs/provider-settings.md")}, which every measured result here comes from, and {claim("Qwen3.5-9B", FIND)}, an open-weight model that can be fine-tuned.</p><div class="tools">{built}</div></section>"""
 
 
 def runs(data: dict) -> str:
@@ -147,7 +209,11 @@ def docs(data: dict, section: Callable, render: Callable) -> str:
 def written(data: dict[str, Any], section: Callable, render: Callable) -> Iterator[tuple[str, str, str, str, bool]]:
     readme = data["readme"]
     yield "index.html", "Home", "SITE", home(data), True
-    vision = render((ROOT / "website" / "content" / "vision.md").read_text(encoding="utf-8"))[0]
+    text = (ROOT / "website" / "content" / "vision.md").read_text(encoding="utf-8")
+    for number, source in VISION_NUMBERS:  # the draft quotes these; each must still be in the file it comes from
+        assert number in text, f"website/content/vision.md no longer quotes {number}; update VISION_NUMBERS"
+        claim(number, source)
+    vision = render(text)[0]
     yield "vision.html", "Vision", "SITE", vision, False
     yield "runs.html", "The runs", "SITE", runs(data), True
     yield "docs.html", "Documentation", "README.md", docs(data, section, render), False
